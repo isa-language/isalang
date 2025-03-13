@@ -1,0 +1,14 @@
+@import "std.buffer"
+fn foo(cond: bool) {
+  let b = Buffer::new(2);
+  if cond {
+    b.release();
+    return;
+  }
+  b.release();
+}
+fn main() -> i32 {
+  foo(true);
+  foo(false);
+  return 0;
+}

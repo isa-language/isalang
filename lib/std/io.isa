@@ -1,0 +1,7 @@
+@import "core.runtime"
+pub fn print_i32(value: i32) {
+  isac_rt_print_i32(value);
+}
+pub fn print_usize(value: usize) {
+  isac_rt_print_usize(value);
+}

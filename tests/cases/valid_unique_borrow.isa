@@ -1,0 +1,12 @@
+struct Data {
+  value: i32,
+}
+
+fn main() -> i32 {
+  let data = Data::new();
+  borrow unique data as edit {
+    edit.value = 20;
+  }
+  print(data.value);
+  return 0;
+}

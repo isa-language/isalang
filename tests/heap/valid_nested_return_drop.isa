@@ -1,0 +1,15 @@
+@import "std.box"
+fn foo() {
+  let x = BoxI32::new(10);
+  borrow shared x as a {
+    let y = BoxI32::new(20);
+    if true {
+      print(y.get());
+      return;
+    }
+  }
+}
+fn main() -> i32 {
+  foo();
+  return 0;
+}

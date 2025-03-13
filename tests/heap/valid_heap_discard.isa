@@ -1,0 +1,6 @@
+@import "std.box"
+
+fn main() -> i32 {
+  BoxI32::new(42);
+  return 0;
+}

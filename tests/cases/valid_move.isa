@@ -1,0 +1,11 @@
+struct Data {
+  value: i32,
+}
+
+fn main() -> i32 {
+  let data = Data::new();
+  let other = data.move();
+  other.value = 4;
+  print(other.value);
+  return 0;
+}

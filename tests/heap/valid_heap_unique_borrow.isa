@@ -1,0 +1,10 @@
+@import "std.box"
+
+fn main() -> i32 {
+  let a = BoxI32::new(10);
+  borrow unique a as v {
+    v.set(20);
+  }
+  print(a.get());
+  return 0;
+}

@@ -1,0 +1,37 @@
+protocol FileState {
+  initial Closed;
+  final Closed;
+  state Closed {
+    open(self) -> Open;
+  }
+  state Open {
+    read(shared self);
+    write(unique self);
+    close(self) -> Closed;
+  }
+}
+struct File: FileState {
+  fd: i32,
+}
+impl File {
+  fn open(self) {
+    self.fd = 7;
+  }
+  fn read(shared self) {
+    print(self.fd);
+  }
+  fn write(unique self) {
+    self.fd = 8;
+  }
+  fn close(self) {
+    self.fd = 0;
+  }
+}
+
+fn main() -> i32 {
+  let file = File::new();
+  file.open();
+  file.read();
+  file.close();
+  return 0;
+}

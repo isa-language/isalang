@@ -1,0 +1,10 @@
+@import "std.box"
+fn consume(a: BoxI32) {
+  print(a.get());
+}
+fn main() -> i32 {
+  let a = BoxI32::new(30);
+  consume(a.move());
+  consume(BoxI32::new(40));
+  return 0;
+}

@@ -1,0 +1,33 @@
+@import "std.mem"
+pub protocol BufferState {
+  initial Ready;
+  final Released;
+  state Ready {
+    read(shared self);
+    write(unique self);
+    len(shared self);
+    release(self) -> Released;
+  }
+  state Released {}
+}
+@representation "buffer_i32"
+pub struct Buffer: BufferState {
+  ptr: RawPtr,
+}
+impl Buffer {
+  @intrinsic "buffer.new"
+  pub fn new(length: usize) -> Buffer;
+  pub fn len(shared self) -> usize {
+    return isac_rt_buffer_len(self.ptr);
+  }
+  pub fn read(shared self, index: usize) -> i32 {
+    return isac_rt_buffer_read(self.ptr, index);
+  }
+  pub fn write(unique self, index: usize, value: i32) {
+    isac_rt_buffer_write(self.ptr, index, value);
+  }
+  @releases
+  pub fn release(self) {
+    isac_rt_free(self.ptr);
+  }
+}

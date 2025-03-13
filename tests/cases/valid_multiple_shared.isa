@@ -1,0 +1,14 @@
+struct Data {
+  value: i32,
+}
+
+fn main() -> i32 {
+  let data = Data::new();
+  borrow shared data as a {
+    borrow shared data as b {
+      print(a.value);
+      print(b.value);
+    }
+  }
+  return 0;
+}

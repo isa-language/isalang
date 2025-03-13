@@ -1,0 +1,207 @@
+{
+  "valid_heap_alloc": {
+    "code": null,
+    "stdout": "42\n",
+    "allocations": 1
+  },
+  "valid_heap_move": {
+    "code": null,
+    "stdout": "10\n",
+    "allocations": 1
+  },
+  "invalid_heap_use_after_move": {
+    "code": "E0301",
+    "stdout": "",
+    "allocations": 0
+  },
+  "valid_heap_drop": {
+    "code": null,
+    "stdout": "",
+    "allocations": 1
+  },
+  "invalid_heap_double_drop": {
+    "code": "E0301",
+    "stdout": "",
+    "allocations": 0
+  },
+  "valid_heap_shared_borrow": {
+    "code": null,
+    "stdout": "10\n",
+    "allocations": 1
+  },
+  "valid_heap_multiple_shared": {
+    "code": null,
+    "stdout": "10\n10\n",
+    "allocations": 1
+  },
+  "valid_heap_unique_borrow": {
+    "code": null,
+    "stdout": "20\n",
+    "allocations": 1
+  },
+  "invalid_heap_shared_write": {
+    "code": "E0311",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_heap_two_unique": {
+    "code": "E0312",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_heap_unique_and_shared": {
+    "code": "E0312",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_heap_shared_and_unique": {
+    "code": "E0312",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_move_during_borrow": {
+    "code": "E0312",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_drop_during_borrow": {
+    "code": "E0312",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_heap_implicit_copy": {
+    "code": "E0302",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_heap_raw_field": {
+    "code": "E0500",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_public_rawptr": {
+    "code": "E0500",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_public_ffi": {
+    "code": "E0500",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_direct_runtime": {
+    "code": "E0500",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_custom_heap_impl": {
+    "code": "E0500",
+    "stdout": "",
+    "allocations": 0
+  },
+  "valid_buffer": {
+    "code": null,
+    "stdout": "10\n20\n",
+    "allocations": 1
+  },
+  "valid_buffer_release": {
+    "code": null,
+    "stdout": "",
+    "allocations": 1
+  },
+  "invalid_buffer_after_release": {
+    "code": "E0401",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_buffer_drop_before_final": {
+    "code": "E0410",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_buffer_explicit_drop_ready": {
+    "code": "E0410",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_buffer_double_release": {
+    "code": "E0401",
+    "stdout": "",
+    "allocations": 0
+  },
+  "invalid_buffer_branch": {
+    "code": "E0420",
+    "stdout": "",
+    "allocations": 0
+  },
+  "valid_buffer_branch_release": {
+    "code": null,
+    "stdout": "",
+    "allocations": 1
+  },
+  "valid_buffer_move_released": {
+    "code": null,
+    "stdout": "",
+    "allocations": 1
+  },
+  "valid_buffer_move_ready": {
+    "code": null,
+    "stdout": "42\n",
+    "allocations": 1
+  },
+  "valid_buffer_borrow": {
+    "code": null,
+    "stdout": "65\n",
+    "allocations": 1
+  },
+  "valid_buffer_zero": {
+    "code": null,
+    "stdout": "0\n",
+    "allocations": 1
+  },
+  "valid_heap_discard": {
+    "code": null,
+    "stdout": "",
+    "allocations": 1
+  },
+  "valid_heap_branch_move": {
+    "code": null,
+    "stdout": "10\n",
+    "allocations": 1
+  },
+  "valid_heap_branch_drop": {
+    "code": null,
+    "stdout": "",
+    "allocations": 1
+  },
+  "valid_heap_parameter": {
+    "code": null,
+    "stdout": "30\n40\n",
+    "allocations": 2
+  },
+  "valid_early_return_drop": {
+    "code": null,
+    "stdout": "10\n",
+    "allocations": 2
+  },
+  "valid_nested_return_drop": {
+    "code": null,
+    "stdout": "20\n",
+    "allocations": 2
+  },
+  "valid_buffer_early_return": {
+    "code": null,
+    "stdout": "",
+    "allocations": 2
+  },
+  "invalid_buffer_early_return": {
+    "code": "E0410",
+    "stdout": "",
+    "allocations": 0
+  },
+  "valid_usize": {
+    "code": null,
+    "stdout": "33\n1\n0\n",
+    "allocations": 0
+  }
+}

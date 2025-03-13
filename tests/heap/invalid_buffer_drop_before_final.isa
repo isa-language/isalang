@@ -1,0 +1,6 @@
+@import "std.buffer"
+
+fn main() -> i32 {
+  let b = Buffer::new(32);
+  return 0;
+}

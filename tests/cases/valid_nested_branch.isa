@@ -1,0 +1,31 @@
+struct Data {
+  x: i32,
+  a: i32[2],
+}
+impl Data {
+  fn get(shared self) -> i32 {
+    return self.x + self.a[1];
+  }
+  fn set(unique self, n: i32) {
+    self.x = n;
+    self.a[1] = 5;
+  }
+}
+fn choose(b: bool) -> i32 {
+  let d = Data::new();
+  if b {
+    if false {
+      return 1;
+    } else {
+      d.set(10);
+    }
+  } else {
+    d.set(20);
+  }
+  return d.get();
+}
+fn main() -> i32 {
+  print(choose(true));
+  print(choose(false));
+  return 0;
+}

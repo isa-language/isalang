@@ -1,0 +1,8 @@
+@import "core.runtime"
+
+fn mem_alloc(size: usize) -> RawPtr {
+  return isac_rt_alloc(size);
+}
+fn mem_free(ptr: RawPtr) {
+  isac_rt_free(ptr);
+}

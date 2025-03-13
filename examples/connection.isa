@@ -1,0 +1,54 @@
+pub protocol ConnectionState {
+  initial Disconnected;
+  final Disconnected;
+  state Disconnected {
+    connect(self) -> Connected;
+  }
+  state Connected {
+    send(shared self);
+    receive(unique self);
+    authenticate(self) -> Authenticated;
+    disconnect(self) -> Disconnected;
+  }
+  state Authenticated {
+    send(shared self);
+    receive(unique self);
+    logout(self) -> Connected;
+    disconnect(self) -> Disconnected;
+  }
+}
+pub struct Connection: ConnectionState {
+  socket: i32,
+}
+impl Connection {
+  pub fn connect(self) {
+    self.socket = 10;
+  }
+  pub fn send(shared self, data: i32) {
+    print(self.socket + data);
+  }
+  pub fn receive(unique self) {
+    self.socket = self.socket + 1;
+  }
+  pub fn authenticate(self, token: i32) {
+    self.socket = token;
+  }
+  pub fn logout(self) {
+    self.socket = 10;
+  }
+  pub fn disconnect(self) {
+    self.socket = 0;
+  }
+}
+fn main() -> i32 {
+  let conn = Connection::new();
+  conn.connect();
+  conn.send(1);
+  conn.authenticate(20);
+  conn.send(2);
+  conn.receive();
+  conn.send(3);
+  conn.logout();
+  conn.disconnect();
+  return 0;
+}

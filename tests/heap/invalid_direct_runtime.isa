@@ -1,0 +1,5 @@
+@import "core.runtime"
+fn main() -> i32 {
+  let p = isac_rt_alloc(4);
+  return 0;
+}

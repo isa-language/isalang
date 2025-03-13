@@ -1,0 +1,11 @@
+@import "std.buffer"
+
+fn main() -> i32 {
+  let b = Buffer::new(32);
+  b.write(0, 10);
+  b.write(1, 20);
+  print(b.read(0));
+  print(b.read(1));
+  b.release();
+  return 0;
+}

@@ -1,0 +1,12 @@
+@import "std.io"
+fn half(n: usize) -> usize {
+  return n / 2;
+}
+fn main() -> i32 {
+  let n: usize = 64;
+  n = n + 2;
+  print_usize(half(n));
+  print(18446744073709551615usize > n);
+  print(18446744073709551615usize + 1);
+  return 0;
+}

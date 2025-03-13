@@ -1,0 +1,12 @@
+struct Data {
+  value: i32,
+}
+impl Data {
+  fn bad(shared self) {
+    self.value = 2;
+  }
+}
+fn main() -> i32 {
+
+  return 0;
+}

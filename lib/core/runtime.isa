@@ -1,0 +1,14 @@
+extern "C" fn isac_rt_alloc(size: usize) -> RawPtr;
+extern "C" fn isac_rt_alloc_zeroed(size: usize) -> RawPtr;
+extern "C" fn isac_rt_free(ptr: RawPtr);
+extern "C" fn isac_rt_memcpy(dst: RawPtr, src: RawPtr, size: usize) -> RawPtr;
+extern "C" fn isac_rt_memmove(dst: RawPtr, src: RawPtr, size: usize) -> RawPtr;
+extern "C" fn isac_rt_load_i32(ptr: RawPtr) -> i32;
+extern "C" fn isac_rt_store_i32(ptr: RawPtr, value: i32);
+extern "C" fn isac_rt_buffer_size(length: usize) -> usize;
+extern "C" fn isac_rt_buffer_init(ptr: RawPtr, length: usize);
+extern "C" fn isac_rt_buffer_len(ptr: RawPtr) -> usize;
+extern "C" fn isac_rt_buffer_read(ptr: RawPtr, index: usize) -> i32;
+extern "C" fn isac_rt_buffer_write(ptr: RawPtr, index: usize, value: i32);
+extern "C" fn isac_rt_print_i32(value: i32);
+extern "C" fn isac_rt_print_usize(value: usize);

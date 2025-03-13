@@ -1,0 +1,13 @@
+@import "std.box"
+fn foo(cond: bool) {
+  let x = BoxI32::new(10);
+  if cond {
+    return;
+  }
+  print(x.get());
+}
+fn main() -> i32 {
+  foo(true);
+  foo(false);
+  return 0;
+}

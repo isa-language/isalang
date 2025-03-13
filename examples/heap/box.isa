@@ -1,0 +1,7 @@
+@import "std.box"
+fn main() -> i32 {
+  let a = BoxI32::new(42);
+  let b = a.move();
+  print(b.get());
+  return 0;
+}

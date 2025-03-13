@@ -1,0 +1,4 @@
+fn main() -> i32 {
+  let a: bool = 10;
+  return 0;
+}

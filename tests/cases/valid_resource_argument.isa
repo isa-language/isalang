@@ -1,0 +1,11 @@
+struct Data {
+  value: i32,
+}
+fn consume(d: Data) {
+  print(d.value);
+}
+fn main() -> i32 {
+  let d = Data::new();
+  consume(d.move());
+  return 0;
+}

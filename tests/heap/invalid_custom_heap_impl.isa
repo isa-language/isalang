@@ -1,0 +1,8 @@
+@import "std.box"
+impl BoxI32 {
+  fn bad(shared self) {}
+}
+fn main() -> i32 {
+
+  return 0;
+}

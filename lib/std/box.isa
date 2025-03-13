@@ -1,0 +1,16 @@
+@import "std.mem"
+@representation "box_i32"
+pub struct BoxI32 {
+  ptr: RawPtr,
+}
+impl BoxI32 {
+
+  @intrinsic "box.new"
+  pub fn new(value: i32) -> BoxI32;
+  pub fn get(shared self) -> i32 {
+    return isac_rt_load_i32(self.ptr);
+  }
+  pub fn set(unique self, value: i32) {
+    isac_rt_store_i32(self.ptr, value);
+  }
+}

@@ -1,0 +1,9 @@
+@import "std.box"
+
+fn main() -> i32 {
+  let a = BoxI32::new(10);
+  borrow shared a as v {
+    a.drop();
+  }
+  return 0;
+}

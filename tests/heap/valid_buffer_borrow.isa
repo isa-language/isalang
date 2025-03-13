@@ -1,0 +1,13 @@
+@import "std.buffer"
+
+fn main() -> i32 {
+  let b = Buffer::new(2);
+  borrow unique b as w {
+    w.write(1, 65);
+  }
+  borrow shared b as r {
+    print(r.read(1));
+  }
+  b.release();
+  return 0;
+}

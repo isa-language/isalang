@@ -1,0 +1,12 @@
+@import "std.box"
+fn main() -> i32 {
+  let data = BoxI32::new(10);
+  borrow shared data as view {
+    print(view.get());
+  }
+  borrow unique data as edit {
+    edit.set(20);
+  }
+  print(data.get());
+  return 0;
+}

@@ -1,0 +1,38 @@
+pub protocol FileState {
+  initial Closed;
+  final Closed;
+  state Closed {
+    open(self) -> Open;
+  }
+  state Open {
+    read(shared self);
+    write(unique self);
+    close(self) -> Closed;
+  }
+}
+pub struct File: FileState {
+  fd: i32,
+}
+impl File {
+  pub fn open(self) {
+    self.fd = 7;
+  }
+  pub fn read(shared self) {
+    print(self.fd);
+  }
+  pub fn write(unique self) {
+    self.fd = self.fd + 1;
+  }
+  pub fn close(self) {
+    self.fd = 0;
+  }
+}
+fn main() -> i32 {
+  let file = File::new();
+  file.open();
+  file.read();
+  file.write();
+  file.read();
+  file.close();
+  return 0;
+}

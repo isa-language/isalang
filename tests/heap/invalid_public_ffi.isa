@@ -1,0 +1,5 @@
+extern "C" fn isac_rt_free(ptr: RawPtr);
+fn main() -> i32 {
+
+  return 0;
+}

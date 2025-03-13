@@ -1,0 +1,10 @@
+@import "std.buffer"
+
+fn main() -> i32 {
+  let b = Buffer::new(32);
+  let c = b.move();
+  c.write(0, 42);
+  print(c.read(0));
+  c.release();
+  return 0;
+}

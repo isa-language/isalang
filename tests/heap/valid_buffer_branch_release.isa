@@ -1,0 +1,11 @@
+@import "std.buffer"
+
+fn main() -> i32 {
+  let b = Buffer::new(32);
+  if true {
+    b.release();
+  } else {
+    b.release();
+  }
+  return 0;
+}
