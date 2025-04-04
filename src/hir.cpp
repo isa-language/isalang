@@ -460,6 +460,33 @@ public:
           fail(f.loc, "E0500", "invalid heap constructor intrinsic");
       }
       if (f.external) {
+
+        static const std::unordered_map<std::string, std::vector<TypeId>> abi = {
+            {"isac_rt_alloc", {RawPtr, USize}},
+            {"isac_rt_alloc_zeroed", {RawPtr, USize}},
+            {"isac_rt_free", {Unit, RawPtr}},
+            {"isac_rt_memcpy", {RawPtr, RawPtr, RawPtr, USize}},
+            {"isac_rt_memmove", {RawPtr, RawPtr, RawPtr, USize}},
+            {"isac_rt_load_i32", {I32, RawPtr}},
+            {"isac_rt_store_i32", {Unit, RawPtr, I32}},
+            {"isac_rt_buffer_size", {USize, USize}},
+            {"isac_rt_buffer_init", {Unit, RawPtr, USize}},
+            {"isac_rt_buffer_len", {USize, RawPtr}},
+            {"isac_rt_buffer_read", {I32, RawPtr, USize}},
+            {"isac_rt_buffer_write", {Unit, RawPtr, USize, I32}},
+            {"isac_rt_print_i32", {Unit, I32}},
+            {"isac_rt_print_usize", {Unit, USize}},
+            {"isac_rt_println", {Unit, RawPtr}},
+            {"isac_rt_panic", {Unit, RawPtr}},
+            {"isac_rt_div_i32", {I32, I32, I32}},
+            {"isac_rt_div_usize", {USize, USize, USize}}};
+        std::vector<TypeId> signature{f.result};
+        for (auto param : f.params)
+          signature.push_back(p.symbols[param].type);
+        if (!abi.contains(f.name) || abi.at(f.name) != signature)
+          fail(f.loc, "E0500", "runtime C ABI signature mismatch for `" + f.name + "`");
+      }
+      if (f.external) {
         if (!f.trusted || f.owner != None || p.linear(f.result))
           fail(f.loc, "E0500", "unsupported C ABI signature");
         for (auto id : f.params)

@@ -318,8 +318,14 @@ class Checker {
       if (requested == Access::Unique && r.access == Access::Shared)
         fail(l, "E0311", "cannot write through shared borrow `" + symbol(id).name + "`");
     } else {
-      if (r.unique || (requested != Access::Shared && r.shared))
-        fail(l, "E0312", "incompatible access to borrowed resource `" + symbol(id).name + "`");
+      if (r.unique || (requested != Access::Shared && r.shared)) {
+        std::string reason = r.unique ? "resource already has an active unique borrow"
+                                      : "incompatible access while shared borrows are active";
+        fail(l, "E0312",
+             reason + "\nresource:\n    " + symbol(id).name + "\nactive borrow:\n    " +
+                 (r.unique ? "unique" : "shared") + "\nrequested access:\n    " +
+                 accessName(requested));
+      }
     }
     if (r.access == Access::Shared && requested != Access::Shared)
       fail(l, "E0311", "shared self/resource is read-only: `" + symbol(id).name + "`");
@@ -351,6 +357,11 @@ class Checker {
     auto it = c.vars.find(id);
     if (implicit && (it == c.vars.end() || !it->second.live))
       return;
+    if (!implicit && it != c.vars.end() && !it->second.live)
+      fail(l, "E0301",
+           "resource `" + symbol(id).name +
+               "` has already been consumed\nprevious operation:\n    " + it->second.consumedBy +
+               "\ncurrent operation:\n    drop");
     auto &r = access(c, id, Access::Own, l);
     if (symbol(id).receiver) {
       if (implicit)
@@ -526,7 +537,8 @@ class Checker {
           if (temp.movedFrom != None)
             c.vars[temp.movedFrom].movedTo = i.slot;
         }
-        c.vars[i.slot] = {true, state, Access::Own, None, 0, false, i.args[0], allocation};
+        c.vars[i.slot] = {true,  state,     Access::Own, None, 0,
+                          false, i.args[0], allocation,  "",   None};
         if (i.type == RawPtr && c.pointers.contains(i.args[0]))
           c.pointerSlots[i.slot] = c.pointers.at(i.args[0]);
         break;
@@ -554,8 +566,10 @@ class Checker {
           ++root.shared;
         else
           root.unique = true;
-        c.vars[i.offset] = {true,  root.state,  shared ? Access::Shared : Access::Unique, rid, 0,
-                            false, root.version};
+        c.vars[i.offset] = {true,         root.state, shared ? Access::Shared : Access::Unique,
+                            rid,          0,          false,
+                            root.version, false,      "",
+                            None};
         break;
       }
       case Inst::EndBorrow:
@@ -641,7 +655,9 @@ public:
                         0,
                         false,
                         cf.parameters[n],
-                        p.semantics.heap(s.type)};
+                        p.semantics.heap(s.type),
+                        "",
+                        None};
         }
         block(cf.body, c);
         if (!c.returned) {
@@ -670,6 +686,11 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                                 "heap.store",    "memcpy",
                                 "memmove"};
   for (auto &i : ops) {
+    for (auto id : i.cleanup)
+      o << std::string(d, ' ') << "drop #v" << id << " DropGlue(#T" << p.symbols[id].type
+        << ") => heap.free\n";
+    if (i.freeTemporary)
+      o << std::string(d, ' ') << "drop temporary => heap.free\n";
     o << std::string(d, ' ');
     if (i.result != None)
       o << "%" << i.result << " = ";
@@ -692,6 +713,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
         << " witness:0";
       if (i.from != None)
         o << " " << q.states[i.from] << " -> " << q.states[i.to];
+      if (p.functions[i.function].releases)
+        o << " allocation=absent";
       if (i.access == Access::Own)
         o << " [consume %" << i.resourceInput << "; produce %" << i.result << "; rebind #v"
           << i.slot << "]";
@@ -711,11 +734,6 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
     if (i.kind == Inst::HeapAlloc && p.heap(i.type))
       o << " allocation=present memory=Own";
     o << "\n";
-    for (auto id : i.cleanup)
-      o << std::string(d + 2, ' ') << "cleanup drop #v" << id << " DropGlue(#T"
-        << p.symbols[id].type << ") => heap.free\n";
-    if (i.freeTemporary)
-      o << std::string(d + 2, ' ') << "drop temporary => heap.free\n";
     dump(i.body, p, o, d + 2);
     if (!i.otherwise.empty()) {
       o << std::string(d, ' ') << "else\n";

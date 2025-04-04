@@ -1,4 +1,5 @@
 #include "isac/backend.hpp"
+#include "isac/target.hpp"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
@@ -32,7 +33,7 @@ using namespace mlir;
 static bool buffer(Type t) {
   auto m = dyn_cast<MemRefType>(t);
   return m && m.getRank() == 1 && m.hasStaticShape() &&
-         (m.getElementType().isInteger(32) || m.getElementType().isInteger(64));
+         (m.getElementType().isInteger(32) || m.getElementType().isInteger(TargetPointerBits));
 }
 #define ISAC_OP(CLASS, NAME, ...)                                                                  \
   class CLASS : public Op<CLASS, __VA_ARGS__> {                                                    \
@@ -67,7 +68,7 @@ static LogicalResult offset(Operation *op, Type t) {
 LogicalResult AllocOp::verify() {
   auto t = (*this)->getResult(0).getType();
   if (isa<LLVM::LLVMPointerType>(t))
-    return getNumOperands() == 1 && getOperand(0).getType().isInteger(64)
+    return getNumOperands() == 1 && getOperand(0).getType().isInteger(TargetPointerBits)
                ? success()
                : emitOpError("heap allocation needs a usize byte count");
   return buffer(t) && getNumOperands() == 0 ? success() : emitOpError("invalid stack allocation");
@@ -98,7 +99,7 @@ LogicalResult FreeOp::verify() {
 static LogicalResult verifyCopy(Operation *op) {
   if (!isa<LLVM::LLVMPointerType>(op->getOperand(0).getType()) ||
       op->getOperand(1).getType() != op->getOperand(0).getType() ||
-      !op->getOperand(2).getType().isInteger(64) ||
+      !op->getOperand(2).getType().isInteger(TargetPointerBits) ||
       op->getResult(0).getType() != op->getOperand(0).getType())
     return op->emitOpError("expected (ptr,ptr,usize) -> ptr");
   return success();
@@ -235,7 +236,7 @@ class Emitter {
     return builder.create<arith::CmpIOp>(builder.getUnknownLoc(), arith::CmpIPredicate::ne, v,
                                          constant(0));
   }
-  Value binary(const std::string &name, Value a, Value b) {
+  Value binary(const std::string &name, Value a, Value b, bool unsignedOperands) {
     auto loc = builder.getUnknownLoc();
     if (name == "+")
       return builder.create<arith::AddIOp>(loc, a, b);
@@ -246,7 +247,7 @@ class Emitter {
     if (name == "/")
       return op("isac.call", TypeRange{a.getType()}, ValueRange{a, b},
                 {builder.getNamedAttr("callee",
-                                      FlatSymbolRefAttr::get(&context, a.getType().isInteger(64)
+                                      FlatSymbolRefAttr::get(&context, unsignedOperands
                                                                            ? "isac_rt_div_usize"
                                                                            : "isac_rt_div_i32"))})
           ->getResult(0);
@@ -265,7 +266,7 @@ class Emitter {
       pred = arith::CmpIPredicate::sle;
     else if (name == ">=")
       pred = arith::CmpIPredicate::sge;
-    if (a.getType().isInteger(64)) {
+    if (unsignedOperands) {
       if (pred == arith::CmpIPredicate::slt)
         pred = arith::CmpIPredicate::ult;
       if (pred == arith::CmpIPredicate::sgt)
@@ -334,7 +335,7 @@ class Emitter {
       break;
     }
     case I::Binary:
-      result = binary(i.callee, args[0], args[1]);
+      result = binary(i.callee, args[0], args[1], i.unsignedOperands);
       break;
     case I::Unary:
       if (i.callee == "-")
@@ -365,7 +366,7 @@ public:
     auto loc = builder.getUnknownLoc();
     builder.setInsertionPointToEnd(module->getBody());
     auto ptr = LLVM::LLVMPointerType::get(&context);
-    auto size = builder.getI64Type();
+    auto size = builder.getIntegerType(TargetPointerBits);
     auto i32 = builder.getI32Type();
     auto declare = [&](StringRef name, TypeRange args, TypeRange results) {
       if (auto existing = module->lookupSymbol<func::FuncOp>(name)) {

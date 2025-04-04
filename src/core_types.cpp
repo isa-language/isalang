@@ -31,7 +31,7 @@ void checkTypes(const Program &p) {
           bad();
         switch (i.kind) {
         case Inst::Constant:
-          if (i.type != I32 && i.type != Bool && i.type != USize && i.type != RawPtr)
+          if (i.type != I32 && i.type != Bool && i.type != USize)
             bad();
           break;
         case Inst::Copy:

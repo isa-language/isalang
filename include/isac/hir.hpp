@@ -1,5 +1,6 @@
 #pragma once
 #include "isac/frontend.hpp"
+#include "isac/target.hpp"
 #include <limits>
 namespace isac {
 using SymbolId = uint32_t;
@@ -11,7 +12,6 @@ using FunctionId = uint32_t;
 using ValueId = uint32_t;
 inline constexpr uint32_t None = std::numeric_limits<uint32_t>::max();
 inline constexpr TypeId Unit = 0, I32 = 1, Bool = 2, USize = 3, RawPtr = 4;
-inline constexpr unsigned TargetPointerBits = 64;
 namespace hir {
 struct Field {
   std::string name;

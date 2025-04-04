@@ -190,6 +190,7 @@ class Eraser {
       case C::Unary:
         i.kind = c.kind == C::Binary ? I::Binary : I::Unary;
         i.callee = c.text;
+        i.unsignedOperands = runtimeTypes.at(i.args[0]).kind == T::Size;
         values[c.result] = emit(out, i);
         break;
       case C::Print:

@@ -35,6 +35,7 @@ struct Instruction {
   Type type;
   std::vector<Value> args;
   uint64_t literal = 0;
+  bool unsignedOperands = false;
   uint32_t offset = 0;
   std::string callee;
   std::vector<Instruction> body, otherwise;

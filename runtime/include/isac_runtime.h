@@ -10,7 +10,12 @@ void *isac_rt_alloc_zeroed(size_t size);
 void isac_rt_free(void *ptr);
 void *isac_rt_memcpy(void *dst, const void *src, size_t size);
 void *isac_rt_memmove(void *dst, const void *src, size_t size);
-_Noreturn void isac_rt_panic(const char *message);
+#ifdef __cplusplus
+[[noreturn]]
+#else
+_Noreturn
+#endif
+void isac_rt_panic(const char *message);
 void isac_rt_print_i32(int32_t value);
 void isac_rt_print_usize(size_t value);
 void isac_rt_println(const char *text);

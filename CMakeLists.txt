@@ -35,9 +35,12 @@ target_include_directories(isac_backend PUBLIC include)
 target_include_directories(isac_backend SYSTEM PRIVATE ${MLIR_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(
   isac_backend
-  PRIVATE ${LLVM_DEFINITIONS} ISAC_CLANG="${ISAC_CLANG}"
+  PRIVATE ${LLVM_DEFINITIONS}
+          ISAC_CLANG="${ISAC_CLANG}"
           ISAC_RUNTIME_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/isac_runtime.c"
-          ISAC_RUNTIME_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/runtime/include")
+          ISAC_RUNTIME_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/runtime/include"
+          ISAC_RUNTIME_LIBRARY="$<TARGET_FILE:isac_runtime>")
+add_dependencies(isac_backend isac_runtime)
 target_link_libraries(
   isac_backend
   PRIVATE MLIRIR
@@ -123,4 +126,16 @@ if(BUILD_TESTING)
       endif()
     endif()
   endforeach()
+endif()
+if(BUILD_TESTING)
+  add_executable(isac_runtime_test tests/runtime_test.c runtime/src/isac_runtime.c)
+  target_include_directories(isac_runtime_test PRIVATE runtime/include)
+  target_compile_definitions(isac_runtime_test PRIVATE ISAC_RT_TESTING)
+  add_test(NAME runtime_abi COMMAND isac_runtime_test)
+  add_executable(isac_library_test tests/library_contracts.cpp)
+  target_link_libraries(isac_library_test PRIVATE isac_frontend)
+  add_test(NAME library_contracts COMMAND isac_library_test)
+  add_test(NAME runtime_panics
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_failures.py
+                   $<TARGET_FILE:isac>)
 endif()

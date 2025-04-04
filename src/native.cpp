@@ -33,9 +33,12 @@ void compileNative(const std::string &ir, const std::string &output, NativeOptio
       throw std::runtime_error("cannot write temporary LLVM IR");
   }
   std::string target = std::filesystem::absolute(output).string();
-  std::vector<std::string> arguments = {
-      ISAC_CLANG, "-Wno-override-module", "-x", "ir",  ll, "-x", "c", ISAC_RUNTIME_SOURCE,
-      "-I",       ISAC_RUNTIME_INCLUDE,   "-o", target};
+  std::vector<std::string> arguments = {ISAC_CLANG, "-Wno-override-module", "-x", "ir", ll};
+  if (options.sanitize || options.counters)
+    arguments.insert(arguments.end(), {"-x", "c", ISAC_RUNTIME_SOURCE, "-I", ISAC_RUNTIME_INCLUDE});
+  else
+    arguments.insert(arguments.end(), {"-x", "none", ISAC_RUNTIME_LIBRARY});
+  arguments.insert(arguments.end(), {"-o", target});
   if (options.sanitize) {
     arguments.push_back("-fsanitize=address,undefined");
     arguments.push_back("-fno-omit-frame-pointer");
