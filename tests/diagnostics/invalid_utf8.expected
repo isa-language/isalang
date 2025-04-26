@@ -1,0 +1,5 @@
+error[E6001]: string literal contains invalid UTF-8
+  --> tests/diagnostics/invalid_utf8.isa:1:24
+   |
+  1 | fn main()->i32 { print("\xff");return 0;}
+    |                        ^^^^^

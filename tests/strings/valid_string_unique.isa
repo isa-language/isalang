@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let s = String::new();
+  borrow unique s as e {
+    e.push_str("hello");
+  }
+  print(s);
+  return 0;
+}

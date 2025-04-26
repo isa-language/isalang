@@ -1,0 +1,26 @@
+pub protocol P {
+  initial Open;
+  final Closed;
+  state Open {
+    close(self) -> Closed;
+  }
+  state Closed {}
+}
+struct F: P {
+  n: i32,
+}
+impl F {
+  fn close(self) {}
+}
+fn main() -> i32 {
+  let f = F::new();
+  loop {
+    if true {
+      f.close();
+      break;
+    } else {
+      break;
+    }
+  }
+  return 0;
+}

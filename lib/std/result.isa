@@ -1,0 +1,80 @@
+@representation "input_result" pub struct ResultI32 {
+  ptr: RawPtr,
+  len: usize,
+  capacity: usize,
+}
+impl ResultI32 {
+  @intrinsic "io.result_ok" pub fn is_ok(shared self) -> bool;
+  @intrinsic "io.result_error" pub fn error(shared self) -> i32;
+  @intrinsic "io.result_i32" pub fn value(shared self) -> i32;
+}
+@representation "input_result" pub struct ResultI64 {
+  ptr: RawPtr,
+  len: usize,
+  capacity: usize,
+}
+impl ResultI64 {
+  @intrinsic "io.result_ok" pub fn is_ok(shared self) -> bool;
+  @intrinsic "io.result_error" pub fn error(shared self) -> i32;
+  @intrinsic "io.result_i64" pub fn value(shared self) -> i64;
+}
+@representation "input_result" pub struct ResultU32 {
+  ptr: RawPtr,
+  len: usize,
+  capacity: usize,
+}
+impl ResultU32 {
+  @intrinsic "io.result_ok" pub fn is_ok(shared self) -> bool;
+  @intrinsic "io.result_error" pub fn error(shared self) -> i32;
+  @intrinsic "io.result_u32" pub fn value(shared self) -> u32;
+}
+@representation "input_result" pub struct ResultU64 {
+  ptr: RawPtr,
+  len: usize,
+  capacity: usize,
+}
+impl ResultU64 {
+  @intrinsic "io.result_ok" pub fn is_ok(shared self) -> bool;
+  @intrinsic "io.result_error" pub fn error(shared self) -> i32;
+  @intrinsic "io.result_u64" pub fn value(shared self) -> u64;
+}
+@representation "input_result" pub struct ResultF32 {
+  ptr: RawPtr,
+  len: usize,
+  capacity: usize,
+}
+impl ResultF32 {
+  @intrinsic "io.result_ok" pub fn is_ok(shared self) -> bool;
+  @intrinsic "io.result_error" pub fn error(shared self) -> i32;
+  @intrinsic "io.result_f32" pub fn value(shared self) -> f32;
+}
+@representation "input_result" pub struct ResultF64 {
+  ptr: RawPtr,
+  len: usize,
+  capacity: usize,
+}
+impl ResultF64 {
+  @intrinsic "io.result_ok" pub fn is_ok(shared self) -> bool;
+  @intrinsic "io.result_error" pub fn error(shared self) -> i32;
+  @intrinsic "io.result_f64" pub fn value(shared self) -> f64;
+}
+@representation "input_result" pub struct ResultBool {
+  ptr: RawPtr,
+  len: usize,
+  capacity: usize,
+}
+impl ResultBool {
+  @intrinsic "io.result_ok" pub fn is_ok(shared self) -> bool;
+  @intrinsic "io.result_error" pub fn error(shared self) -> i32;
+  @intrinsic "io.result_bool" pub fn value(shared self) -> bool;
+}
+@representation "input_result" pub struct ResultString {
+  ptr: RawPtr,
+  len: usize,
+  capacity: usize,
+}
+impl ResultString {
+  @intrinsic "io.result_ok" pub fn is_ok(shared self) -> bool;
+  @intrinsic "io.result_error" pub fn error(shared self) -> i32;
+  @intrinsic "io.result_str" pub fn value(shared self) -> str;
+}

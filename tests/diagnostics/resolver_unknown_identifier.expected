@@ -1,0 +1,5 @@
+error[E0102]: unknown name `mesage`
+  --> tests/diagnostics/resolver_unknown_identifier.isa:3:11
+   |
+  3 |     print(mesage);
+    |           ^^^^^^

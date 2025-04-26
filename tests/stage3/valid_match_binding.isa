@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  match 42 {
+    0 => {},
+    n => print(n),
+  }
+  return 0;
+}

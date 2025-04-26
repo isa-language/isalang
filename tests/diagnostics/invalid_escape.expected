@@ -1,0 +1,6 @@
+error[E0003]: invalid escape sequence
+  --> tests/diagnostics/invalid_escape.isa:1:25
+   |
+  1 | fn main()->i32 { print("\q");return 0;}
+    |                         ^
+    = help: use \n, \r, \t, \0, \\ or \" 

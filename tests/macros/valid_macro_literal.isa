@@ -1,0 +1,9 @@
+@macro literal {
+  ($v: literal) => {
+    $v
+  }
+}
+fn main() -> i32 {
+  print(@literal("hello"));
+  return 0;
+}

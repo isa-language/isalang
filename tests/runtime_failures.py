@@ -34,3 +34,12 @@ with tempfile.TemporaryDirectory() as directory:
             r.returncode,
             r.stderr,
         )
+
+if len(sys.argv) > 2:
+    r = subprocess.run(
+        [sys.argv[2], "oom"], preexec_fn=disable_core, capture_output=True, text=True
+    )
+    assert r.returncode != 0 and "isac runtime panic: allocation failed" in r.stderr, (
+        r.returncode,
+        r.stderr,
+    )

@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let o = OptionI32::Some(7);
+  match o {
+    OptionI32::Some(n) => print(n),
+    OptionI32::None => print(0),
+  }
+  return 0;
+}

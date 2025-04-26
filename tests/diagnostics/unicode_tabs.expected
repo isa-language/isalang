@@ -1,0 +1,5 @@
+error[E0102]: unknown name `missing`
+  --> tests/diagnostics/unicode_tabs.isa:2:25
+   |
+  2 |     print("Olá"); print(missing);
+    |                         ^^^^^^^

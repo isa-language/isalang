@@ -1,0 +1,10 @@
+fn main() -> i32 {
+  print(7i16&3i16);
+  print(4u32 | 2u32);
+  print(7i64 ^ 2i64);
+  print(-8i8 >> 1i8);
+  print(!false && true || false);
+  print(1.5f64<2.0f64);
+  print(255u8 as i8);
+  return 0;
+}

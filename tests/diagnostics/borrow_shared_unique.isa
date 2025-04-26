@@ -1,0 +1,7 @@
+fn main() -> i32 {
+    let text = String::from("hello");
+    borrow shared text as view {
+        text.push_str("!");
+    }
+    return 0;
+}

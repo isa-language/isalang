@@ -1,0 +1,4 @@
+fn main() -> i32 {
+  await operation();
+  return 0;
+}

@@ -33,7 +33,7 @@ using namespace mlir;
 static bool buffer(Type t) {
   auto m = dyn_cast<MemRefType>(t);
   return m && m.getRank() == 1 && m.hasStaticShape() &&
-         (m.getElementType().isInteger(32) || m.getElementType().isInteger(TargetPointerBits));
+         (m.getElementType().isInteger(32) || m.getElementType().isInteger(64));
 }
 #define ISAC_OP(CLASS, NAME, ...)                                                                  \
   class CLASS : public Op<CLASS, __VA_ARGS__> {                                                    \
@@ -68,7 +68,8 @@ static LogicalResult offset(Operation *op, Type t) {
 LogicalResult AllocOp::verify() {
   auto t = (*this)->getResult(0).getType();
   if (isa<LLVM::LLVMPointerType>(t))
-    return getNumOperands() == 1 && getOperand(0).getType().isInteger(TargetPointerBits)
+    return getNumOperands() == 1 &&
+                   (getOperand(0).getType().isInteger(32) || getOperand(0).getType().isInteger(64))
                ? success()
                : emitOpError("heap allocation needs a usize byte count");
   return buffer(t) && getNumOperands() == 0 ? success() : emitOpError("invalid stack allocation");
@@ -99,7 +100,7 @@ LogicalResult FreeOp::verify() {
 static LogicalResult verifyCopy(Operation *op) {
   if (!isa<LLVM::LLVMPointerType>(op->getOperand(0).getType()) ||
       op->getOperand(1).getType() != op->getOperand(0).getType() ||
-      !op->getOperand(2).getType().isInteger(TargetPointerBits) ||
+      !(op->getOperand(2).getType().isInteger(32) || op->getOperand(2).getType().isInteger(64)) ||
       op->getResult(0).getType() != op->getOperand(0).getType())
     return op->emitOpError("expected (ptr,ptr,usize) -> ptr");
   return success();
@@ -208,15 +209,19 @@ class Emitter {
   MLIRContext context;
   OpBuilder builder{&context};
   OwningOpRef<ModuleOp> module;
+  unsigned pointerBits = 64;
+  unsigned literals = 0;
   std::unordered_map<runtime::Value, Value> values;
   Type type(runtime::Type t) {
     if (t.kind == runtime::Type::Pointer)
       return LLVM::LLVMPointerType::get(&context);
+    if (t.kind == runtime::Type::Float)
+      return t.elementBits == 32 ? Type(builder.getF32Type()) : Type(builder.getF64Type());
     if (t.kind == runtime::Type::Size)
       return builder.getIntegerType(t.elementBits);
     return t.kind == runtime::Type::Buffer
                ? Type(MemRefType::get({t.width}, builder.getIntegerType(t.elementBits)))
-               : Type(builder.getI32Type());
+               : Type(builder.getIntegerType(t.elementBits));
   }
   Operation *op(StringRef name, TypeRange types, ValueRange operands,
                 ArrayRef<NamedAttribute> attrs = {}) {
@@ -229,31 +234,109 @@ class Emitter {
   Value constant(uint64_t n, unsigned bits = 32) {
     return builder.create<arith::ConstantOp>(
         builder.getUnknownLoc(),
-        builder.getIntegerAttr(builder.getIntegerType(bits),
-                               llvm::APInt(bits, bits == 32 ? static_cast<uint32_t>(n) : n)));
+        builder.getIntegerAttr(
+            builder.getIntegerType(bits),
+            llvm::APInt(bits, bits == 64 ? n : n & ((uint64_t(1) << bits) - 1))));
   }
   Value truth(Value v) {
     return builder.create<arith::CmpIOp>(builder.getUnknownLoc(), arith::CmpIPredicate::ne, v,
                                          constant(0));
   }
+  Value cast(Value v, Type to, bool unsign = false) {
+    auto loc = builder.getUnknownLoc();
+    auto from = v.getType();
+    if (from == to)
+      return v;
+    if (isa<FloatType>(from) && isa<FloatType>(to)) {
+      if (from.getIntOrFloatBitWidth() < to.getIntOrFloatBitWidth())
+        return builder.create<arith::ExtFOp>(loc, to, v);
+      return builder.create<arith::TruncFOp>(loc, to, v);
+    }
+    if (isa<FloatType>(to)) {
+      if (unsign)
+        return builder.create<arith::UIToFPOp>(loc, to, v);
+      return builder.create<arith::SIToFPOp>(loc, to, v);
+    }
+    auto a = from.getIntOrFloatBitWidth(), b = to.getIntOrFloatBitWidth();
+    if (a > b)
+      return builder.create<arith::TruncIOp>(loc, to, v);
+    if (unsign)
+      return builder.create<arith::ExtUIOp>(loc, to, v);
+    return builder.create<arith::ExtSIOp>(loc, to, v);
+  }
+  Value encode(Value v, Type cell) {
+    if (isa<FloatType>(v.getType()))
+      v = builder.create<arith::BitcastOp>(
+          builder.getUnknownLoc(), builder.getIntegerType(v.getType().getIntOrFloatBitWidth()), v);
+    return cast(v, cell, true);
+  }
+  Value decode(Value v, Type to) {
+    if (isa<FloatType>(to)) {
+      v = cast(v, builder.getIntegerType(to.getIntOrFloatBitWidth()), true);
+      return builder.create<arith::BitcastOp>(builder.getUnknownLoc(), to, v);
+    }
+    return cast(v, to, true);
+  }
   Value binary(const std::string &name, Value a, Value b, bool unsignedOperands) {
     auto loc = builder.getUnknownLoc();
+    if (isa<FloatType>(a.getType())) {
+      if (name == "+")
+        return builder.create<arith::AddFOp>(loc, a, b);
+      if (name == "-")
+        return builder.create<arith::SubFOp>(loc, a, b);
+      if (name == "*")
+        return builder.create<arith::MulFOp>(loc, a, b);
+      if (name == "/")
+        return builder.create<arith::DivFOp>(loc, a, b);
+      if (name == "%")
+        return builder.create<arith::RemFOp>(loc, a, b);
+      auto pred = arith::CmpFPredicate::OEQ;
+      if (name == "!=")
+        pred = arith::CmpFPredicate::UNE;
+      if (name == "<")
+        pred = arith::CmpFPredicate::OLT;
+      if (name == "<=")
+        pred = arith::CmpFPredicate::OLE;
+      if (name == ">")
+        pred = arith::CmpFPredicate::OGT;
+      if (name == ">=")
+        pred = arith::CmpFPredicate::OGE;
+      return builder.create<arith::ExtUIOp>(loc, builder.getI32Type(),
+                                            builder.create<arith::CmpFOp>(loc, pred, a, b));
+    }
+    if (name == "^")
+      return builder.create<arith::XOrIOp>(loc, a, b);
+    if (name == "<<" || name == ">>") {
+      auto bits = a.getType().getIntOrFloatBitWidth();
+      b = builder.create<arith::AndIOp>(loc, b, constant(bits - 1, bits));
+      if (name == "<<")
+        return builder.create<arith::ShLIOp>(loc, a, b);
+      if (unsignedOperands)
+        return builder.create<arith::ShRUIOp>(loc, a, b);
+      return builder.create<arith::ShRSIOp>(loc, a, b);
+    }
     if (name == "+")
       return builder.create<arith::AddIOp>(loc, a, b);
     if (name == "-")
       return builder.create<arith::SubIOp>(loc, a, b);
     if (name == "*")
       return builder.create<arith::MulIOp>(loc, a, b);
-    if (name == "/")
-      return op("isac.call", TypeRange{a.getType()}, ValueRange{a, b},
-                {builder.getNamedAttr("callee",
-                                      FlatSymbolRefAttr::get(&context, unsignedOperands
-                                                                           ? "isac_rt_div_usize"
-                                                                           : "isac_rt_div_i32"))})
-          ->getResult(0);
-    if (name == "&&")
+    if (name == "/" || name == "%") {
+      auto bits = a.getType().getIntOrFloatBitWidth();
+      auto wide = builder.getI64Type();
+      Value result = op("isac.call", TypeRange{wide},
+                        ValueRange{cast(a, wide, unsignedOperands), cast(b, wide, unsignedOperands),
+                                   constant(bits), constant(name == "%")},
+                        {builder.getNamedAttr(
+                            "callee", FlatSymbolRefAttr::get(&context, unsignedOperands
+                                                                           ? "isac_rt_arith_u64"
+                                                                           : "isac_rt_arith_i64"))})
+                         ->getResult(0);
+      return cast(result, a.getType(), unsignedOperands);
+    }
+    if (name == "&&" || name == "&")
       return builder.create<arith::AndIOp>(loc, a, b);
-    if (name == "||")
+    if (name == "||" || name == "|")
       return builder.create<arith::OrIOp>(loc, a, b);
     arith::CmpIPredicate pred = arith::CmpIPredicate::eq;
     if (name == "!=")
@@ -287,8 +370,45 @@ class Emitter {
     Value result;
     auto loc = builder.getUnknownLoc();
     switch (i.kind) {
+    case I::RecordAlloc: {
+
+      auto word = builder.getIntegerType(pointerBits);
+      result = builder.create<LLVM::AllocaOp>(loc, LLVM::LLVMPointerType::get(&context), word,
+                                              constant(i.literal, pointerBits), pointerBits / 8);
+      break;
+    }
+    case I::StaticStr: {
+      std::string name = "isac_str_" + std::to_string(literals++);
+      auto ptr = LLVM::LLVMPointerType::get(&context);
+      auto word = builder.getIntegerType(pointerBits);
+      {
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPointToStart(module->getBody());
+        auto bytes = LLVM::LLVMArrayType::get(builder.getI8Type(), i.callee.size());
+        builder.create<LLVM::GlobalOp>(loc, bytes, true, LLVM::Linkage::Private, name,
+                                       builder.getStringAttr(i.callee));
+        auto record = LLVM::LLVMStructType::getLiteral(&context, {ptr, word});
+        auto global = builder.create<LLVM::GlobalOp>(loc, record, true, LLVM::Linkage::Private,
+                                                     name + "_view", Attribute{});
+        auto *block = new Block();
+        global.getInitializerRegion().push_back(block);
+        builder.setInsertionPointToStart(block);
+        Value v = builder.create<LLVM::UndefOp>(loc, record);
+        auto address = builder.create<LLVM::AddressOfOp>(loc, ptr, name);
+        v = builder.create<LLVM::InsertValueOp>(loc, v, address, ArrayRef<int64_t>{0});
+        auto length = builder.create<LLVM::ConstantOp>(
+            loc, word, builder.getIntegerAttr(word, i.callee.size()));
+        v = builder.create<LLVM::InsertValueOp>(loc, v, length, ArrayRef<int64_t>{1});
+        builder.create<LLVM::ReturnOp>(loc, v);
+      }
+      result = builder.create<LLVM::AddressOfOp>(loc, ptr, name + "_view");
+      break;
+    }
     case I::Constant:
-      result = constant(i.literal, i.type.kind == runtime::Type::Size ? i.type.elementBits : 32);
+      if (i.type.kind == runtime::Type::Float)
+        result = builder.create<arith::ConstantOp>(loc, builder.getFloatAttr(type(i.type), i.real));
+      else
+        result = constant(i.literal, i.type.elementBits);
       break;
     case I::HeapAlloc: {
       SmallVector<NamedAttribute> attrs;
@@ -316,11 +436,14 @@ class Emitter {
       result = op("isac.alloc", TypeRange{type(i.type)}, {})->getResult(0);
       break;
     case I::Load:
-      result = op("isac.load", TypeRange{type(i.type)}, args,
-                  {builder.getNamedAttr("offset", builder.getI64IntegerAttr(i.offset))})
-                   ->getResult(0);
+      result =
+          op("isac.load", TypeRange{mlir::cast<MemRefType>(args[0].getType()).getElementType()},
+             args, {builder.getNamedAttr("offset", builder.getI64IntegerAttr(i.offset))})
+              ->getResult(0);
+      result = decode(result, type(i.type));
       break;
     case I::Store:
+      args[1] = encode(args[1], mlir::cast<MemRefType>(args[0].getType()).getElementType());
       op("isac.store", {}, args,
          {builder.getNamedAttr("offset", builder.getI64IntegerAttr(i.offset))});
       break;
@@ -337,9 +460,15 @@ class Emitter {
     case I::Binary:
       result = binary(i.callee, args[0], args[1], i.unsignedOperands);
       break;
+    case I::Cast:
+      result = cast(args[0], type(i.type), i.unsignedOperands);
+      break;
     case I::Unary:
       if (i.callee == "-")
-        result = builder.create<arith::SubIOp>(loc, constant(0), args[0]);
+        if (isa<FloatType>(args[0].getType()))
+          result = builder.create<arith::NegFOp>(loc, args[0]);
+        else
+          result = builder.create<arith::SubIOp>(loc, constant(0, i.type.elementBits), args[0]);
       else
         result = builder.create<arith::XOrIOp>(loc, args[0], constant(1));
       break;
@@ -364,9 +493,12 @@ public:
   }
   std::string run(const runtime::LIR &input, BackendStage stage, bool sanitize) {
     auto loc = builder.getUnknownLoc();
+    (*module)->setAttr("llvm.target_triple", builder.getStringAttr(input.target.triple));
+    (*module)->setAttr("llvm.data_layout", builder.getStringAttr(input.target.dataLayout));
     builder.setInsertionPointToEnd(module->getBody());
     auto ptr = LLVM::LLVMPointerType::get(&context);
-    auto size = builder.getIntegerType(TargetPointerBits);
+    pointerBits = input.target.pointerWidth;
+    auto size = builder.getIntegerType(input.target.pointerWidth);
     auto i32 = builder.getI32Type();
     auto declare = [&](StringRef name, TypeRange args, TypeRange results) {
       if (auto existing = module->lookupSymbol<func::FuncOp>(name)) {
@@ -378,6 +510,61 @@ public:
       f.setPrivate();
       return f;
     };
+    for (auto [name, bits] :
+         std::vector<std::pair<std::string, unsigned>>{{"i8", 8},
+                                                       {"i16", 16},
+                                                       {"i32", 32},
+                                                       {"i64", 64},
+                                                       {"u8", 8},
+                                                       {"u16", 16},
+                                                       {"u32", 32},
+                                                       {"u64", 64},
+                                                       {"isize", input.target.pointerWidth},
+                                                       {"usize", input.target.pointerWidth},
+                                                       {"bool", 32},
+                                                       {"char", 32}})
+      declare("isac_rt_string_fmt_" + name, {ptr, builder.getIntegerType(bits)}, {});
+    declare("isac_rt_string_fmt_debug_str", {ptr, ptr}, {});
+    declare("isac_rt_string_fmt_debug_char", {ptr, i32}, {});
+    declare("isac_rt_string_fmt_str", {ptr, ptr}, {});
+    declare("isac_rt_string_fmt_f32", {ptr, builder.getF32Type()}, {});
+    declare("isac_rt_string_fmt_f64", {ptr, builder.getF64Type()}, {});
+    declare("isac_rt_input_read_String", {ptr}, {});
+    declare("isac_rt_input_drop", {ptr}, {});
+    declare("isac_rt_input_result_ok", {ptr}, {i32});
+    declare("isac_rt_input_result_error", {ptr}, {i32});
+    declare("isac_rt_input_result_str", {ptr, ptr}, {});
+    declare("isac_rt_input_read_i32", {ptr}, {});
+    declare("isac_rt_input_result_i32", {ptr}, {i32});
+    declare("isac_rt_input_read_i64", {ptr}, {});
+    declare("isac_rt_input_result_i64", {ptr}, {builder.getI64Type()});
+    declare("isac_rt_input_read_u32", {ptr}, {});
+    declare("isac_rt_input_result_u32", {ptr}, {i32});
+    declare("isac_rt_input_read_u64", {ptr}, {});
+    declare("isac_rt_input_result_u64", {ptr}, {builder.getI64Type()});
+    declare("isac_rt_input_read_f32", {ptr}, {});
+    declare("isac_rt_input_result_f32", {ptr}, {builder.getF32Type()});
+    declare("isac_rt_input_read_f64", {ptr}, {});
+    declare("isac_rt_input_result_f64", {ptr}, {builder.getF64Type()});
+    declare("isac_rt_input_read_bool", {ptr}, {});
+    declare("isac_rt_input_result_bool", {ptr}, {i32});
+    declare("isac_rt_string_new", {ptr}, {});
+    declare("isac_rt_string_from", {ptr, ptr}, {});
+    declare("isac_rt_string_len", {ptr}, {size});
+    declare("isac_rt_string_capacity", {ptr}, {size});
+    declare("isac_rt_string_is_empty", {ptr}, {i32});
+    declare("isac_rt_string_as_str", {ptr, ptr}, {});
+    declare("isac_rt_string_push_str", {ptr, ptr}, {});
+    declare("isac_rt_string_clear", {ptr}, {});
+    declare("isac_rt_string_drop", {ptr}, {});
+    declare("isac_rt_string_print", {ptr}, {});
+    declare("isac_rt_print_view", {ptr}, {});
+    auto i64 = builder.getI64Type();
+    declare("isac_rt_print_i64", {i64}, {});
+    declare("isac_rt_print_u64", {i64}, {});
+    declare("isac_rt_print_f64", {builder.getF64Type()}, {});
+    declare("isac_rt_arith_i64", {i64, i64, i32, i32}, {i64});
+    declare("isac_rt_arith_u64", {i64, i64, i32, i32}, {i64});
     declare("isac_rt_print_i32", {i32}, {});
     declare("isac_rt_print_usize", {size}, {});
     declare("isac_rt_div_i32", {i32, i32}, {i32});
@@ -418,7 +605,9 @@ public:
         for (auto &i : b.instructions)
           instruction(i);
         auto &t = b.end;
-        if (t.kind == runtime::Terminator::Return) {
+        if (t.kind == runtime::Terminator::Unreachable)
+          builder.create<LLVM::UnreachableOp>(loc);
+        else if (t.kind == runtime::Terminator::Return) {
           SmallVector<Value> args;
           if (t.value != runtime::NoValue)
             args.push_back(values.at(t.value));
@@ -440,10 +629,18 @@ public:
     }
     if (stage == BackendStage::LLVMDialect || stage == BackendStage::LLVMIR) {
       PassManager pm(&context);
-      pm.addPass(createArithToLLVMConversionPass());
-      pm.addPass(createFinalizeMemRefToLLVMConversionPass());
-      pm.addPass(createConvertControlFlowToLLVMPass());
-      pm.addPass(createConvertFuncToLLVMPass());
+      ArithToLLVMConversionPassOptions arithmeticOptions;
+      arithmeticOptions.indexBitwidth = input.target.pointerWidth;
+      pm.addPass(createArithToLLVMConversionPass(arithmeticOptions));
+      FinalizeMemRefToLLVMConversionPassOptions memoryOptions;
+      memoryOptions.indexBitwidth = input.target.pointerWidth;
+      pm.addPass(createFinalizeMemRefToLLVMConversionPass(memoryOptions));
+      ConvertControlFlowToLLVMPassOptions flowOptions;
+      flowOptions.indexBitwidth = input.target.pointerWidth;
+      pm.addPass(createConvertControlFlowToLLVMPass(flowOptions));
+      ConvertFuncToLLVMPassOptions functionOptions;
+      functionOptions.indexBitwidth = input.target.pointerWidth;
+      pm.addPass(createConvertFuncToLLVMPass(functionOptions));
       pm.addPass(createReconcileUnrealizedCastsPass());
       if (failed(pm.run(*module)))
         throw std::runtime_error("LLVM dialect lowering failed");

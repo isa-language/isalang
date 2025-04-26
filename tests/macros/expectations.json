@@ -1,0 +1,252 @@
+{
+  "valid_macro_empty": {
+    "stdout": "",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_expr": {
+    "stdout": "6\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_ident": {
+    "stdout": "42\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_type": {
+    "stdout": "7\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_multiple_arms": {
+    "stdout": "10\n3\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_repetition": {
+    "stdout": "3\n12\n5\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_semicolon": {
+    "stdout": "1\n2\n3\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_nested": {
+    "stdout": "8\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_hygiene": {
+    "stdout": "100 20\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_literal": {
+    "stdout": "hello\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_pattern": {
+    "stdout": "1\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_tt": {
+    "stdout": "42\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_macro_fragment_nested": {
+    "stdout": "4\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_macro_no_matching_rule": {
+    "stdout": "",
+    "code": "E8002",
+    "stdin": ""
+  },
+  "invalid_macro_recursion": {
+    "stdout": "",
+    "code": "E8003",
+    "stdin": ""
+  },
+  "invalid_macro_fragment": {
+    "stdout": "",
+    "code": "E8002",
+    "stdin": ""
+  },
+  "invalid_macro_expansion_syntax": {
+    "stdout": "",
+    "code": "E0002",
+    "stdin": ""
+  },
+  "invalid_macro_capture": {
+    "stdout": "",
+    "code": "E0102",
+    "stdin": ""
+  },
+  "invalid_macro_ownership": {
+    "stdout": "",
+    "code": "E0301",
+    "stdin": ""
+  },
+  "invalid_macro_protocol": {
+    "stdout": "",
+    "code": "E0401",
+    "stdin": ""
+  },
+  "valid_print_empty": {
+    "stdout": "\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_print_single": {
+    "stdout": "hello world\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_print_multiple": {
+    "stdout": "1 2 3\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_print_types": {
+    "stdout": "-8 -16 -32 -64 8 16 32 64 1 -1 1.25 2.5 true ç\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_format": {
+    "stdout": "{42}\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_format_debug": {
+    "stdout": "\"a\\nb\" 'ç'\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_format_order": {
+    "stdout": "1\n2\n10 20\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_format_string_borrow": {
+    "stdout": "hello\nhello!\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_format_nested": {
+    "stdout": "4\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_format_many": {
+    "stdout": "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_format_missing_arg": {
+    "stdout": "",
+    "code": "E8004",
+    "stdin": ""
+  },
+  "invalid_format_extra_arg": {
+    "stdout": "",
+    "code": "E8004",
+    "stdin": ""
+  },
+  "invalid_format_type": {
+    "stdout": "",
+    "code": "E8005",
+    "stdin": ""
+  },
+  "invalid_dynamic_format_initial_poc": {
+    "stdout": "",
+    "code": "E8004",
+    "stdin": ""
+  },
+  "invalid_format_moved": {
+    "stdout": "",
+    "code": "E0301",
+    "stdin": ""
+  },
+  "invalid_format_unique": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "valid_input_string": {
+    "stdout": "Name: Hello Olá\n",
+    "code": null,
+    "stdin": "Olá\n"
+  },
+  "valid_input_i32": {
+    "stdout": "Age: 42\n",
+    "code": null,
+    "stdin": "42\n"
+  },
+  "valid_input_invalid": {
+    "stdout": "4\n",
+    "code": null,
+    "stdin": "abc\n"
+  },
+  "valid_input_overflow": {
+    "stdout": "4\n",
+    "code": null,
+    "stdin": "2147483648\n"
+  },
+  "valid_input_unsigned_negative": {
+    "stdout": "4\n",
+    "code": null,
+    "stdin": "-1\n"
+  },
+  "valid_input_eof": {
+    "stdout": "1\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_input_bool": {
+    "stdout": "true\n",
+    "code": null,
+    "stdin": "true\n"
+  },
+  "valid_input_float": {
+    "stdout": "1.25\n",
+    "code": null,
+    "stdin": "1.25\n"
+  },
+  "invalid_input_move_view": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "valid_option": {
+    "stdout": "7\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_size_align": {
+    "stdout": "4 4 24\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_async": {
+    "stdout": "",
+    "code": "E8006",
+    "stdin": ""
+  },
+  "invalid_await": {
+    "stdout": "",
+    "code": "E8006",
+    "stdin": ""
+  },
+  "invalid_dot_await": {
+    "stdout": "",
+    "code": "E8006",
+    "stdin": ""
+  }
+}

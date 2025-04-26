@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let s = String::from("Hello");
+  s.push_str(", world");
+  print(s);
+  return 0;
+}

@@ -1,0 +1,44 @@
+@import "std.buffer"
+enum Command {
+  Increment(i32),
+  Reset,
+}
+struct Counter {
+  value: i32,
+}
+fn execute(command: Command, value: i32) -> i32 {
+  match command {
+    Command::Increment(amount) => {
+      return value + amount;
+    },
+    Command::Reset => {
+      return 0;
+    },
+  }
+}
+fn main() -> i32 {
+  let buffer = Buffer::new(4);
+  let counter = Counter::new();
+  for i in 0..4 {
+    let command = Command::Increment(1);
+    counter.value = execute(command.move(), counter.value);
+    buffer.write(i as usize, counter.value);
+  }
+  let index = 0;
+  while index < 4 {
+    if index == 1 {
+      index = index + 1;
+      continue;
+    }
+    print(buffer.read(index as usize));
+    index = index + 1;
+  }
+  loop {
+    if counter.value == 4 {
+      break;
+    }
+    counter.value = counter.value + 1;
+  }
+  buffer.release();
+  return 0;
+}

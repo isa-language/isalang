@@ -1,0 +1,10 @@
+@macro binding {
+  ($name: ident) => {
+    let$name = 42;
+  }
+}
+fn main() -> i32 {
+  @binding(answer);
+  print(answer);
+  return 0;
+}

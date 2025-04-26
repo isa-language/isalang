@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let s = String::new();
+  let t = s;
+  return 0;
+}

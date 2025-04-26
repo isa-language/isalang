@@ -1,0 +1,14 @@
+@macro identity {
+  ($v: expr) => {
+    $v
+  }
+}
+@macro twice {
+  ($v: expr) => {
+    $v * 2
+  }
+}
+fn main() -> i32 {
+  print(@identity(@twice(2)));
+  return 0;
+}

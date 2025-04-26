@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let s = String::new();
+  borrow shared s as v {
+    v.clear();
+  }
+  return 0;
+}

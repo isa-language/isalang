@@ -1,0 +1,9 @@
+fn foo() {
+  let s = String::from("a");
+  let v = s.as_str();
+  return;
+}
+fn main() -> i32 {
+  foo();
+  return 0;
+}

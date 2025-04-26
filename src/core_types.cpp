@@ -13,7 +13,9 @@ void checkTypes(const Program &p) {
     std::function<void(const std::vector<Inst> &)> block;
     block = [&](const std::vector<Inst> &ops) {
       for (const auto &i : ops) {
-        auto bad = [&]() { fail(i.loc, "E9001", "invalid typed Core instruction"); };
+        auto bad = [&]() {
+          fail(i.loc, DiagnosticCode::InvalidCore, "invalid typed Core instruction");
+        };
         auto expect = [&](TypeId got, TypeId wanted) {
           if (got != wanted)
             bad();
@@ -29,9 +31,20 @@ void checkTypes(const Program &p) {
                                                                       : Quantity::Omega;
         if (i.quantity != q)
           bad();
+        if (i.kind == Inst::Loop)
+          block(i.condition);
         switch (i.kind) {
+        case Inst::StaticStr:
+          expect(i.type, Str);
+          if (!validUtf8(i.text))
+            bad();
+          break;
+        case Inst::TextPrint:
+          if (p.semantics.types[slot()].representation != hir::Representation::StringRecord)
+            bad();
+          break;
         case Inst::Constant:
-          if (i.type != I32 && i.type != Bool && i.type != USize)
+          if (!scalar(i.type))
             bad();
           break;
         case Inst::Copy:
@@ -57,39 +70,65 @@ void checkTypes(const Program &p) {
           break;
         case Inst::Read:
         case Inst::Write:
-          if (i.offset >= p.semantics.types[slot()].width ||
-              (i.type != I32 && i.type != Bool && i.type != USize && i.type != RawPtr))
+          if (i.offset >= p.semantics.types[slot()].width || (!scalar(i.type) && i.type != RawPtr))
             bad();
           if (i.kind == Inst::Write)
             expect(arg(0), i.type);
           break;
+        case Inst::EnumConstruct: {
+          auto &t = p.semantics.types[i.type];
+          if (t.kind != hir::Type::Enum || i.offset >= t.variants.size())
+            bad();
+          auto &v = t.variants[i.offset];
+          if (i.args.size() != v.payload.size())
+            bad();
+          for (size_t n = 0; n < i.args.size(); ++n)
+            expect(arg(n), v.payload[n]);
+          break;
+        }
         case Inst::Create:
           if (p.semantics.types[i.type].kind != hir::Type::Structure)
             bad();
           break;
+        case Inst::Cast: {
+          auto from = arg(0);
+          if (!(from == i.type || (from == Char && integer(i.type)) ||
+                (numeric(from) && numeric(i.type) && !(floating(from) && integer(i.type)))))
+            bad();
+          break;
+        }
         case Inst::Binary: {
           auto operand = arg(0);
           expect(arg(1), operand);
           if (i.text == "&&" || i.text == "||") {
             expect(operand, Bool);
             expect(i.type, Bool);
-          } else if (i.text == "+" || i.text == "-" || i.text == "*" || i.text == "/") {
-            if (operand != I32 && operand != USize)
+          } else if (i.text == "==" || i.text == "!=" || i.text == "<" || i.text == ">" ||
+                     i.text == "<=" || i.text == ">=") {
+            if (!scalar(operand))
+              bad();
+            expect(i.type, Bool);
+          } else {
+            if (!numeric(operand))
+              bad();
+            if ((i.text == "&" || i.text == "|" || i.text == "^" || i.text == "<<" ||
+                 i.text == ">>") &&
+                !integer(operand))
               bad();
             expect(i.type, operand);
-          } else {
-            expect(i.type, Bool);
-            if (i.text != "==" && i.text != "!=") {
-              if (operand != I32 && operand != USize)
-                bad();
-            } else if (operand != I32 && operand != Bool && operand != USize)
-              bad();
           }
           break;
         }
         case Inst::Unary:
-          expect(arg(0), i.text == "!" ? Bool : I32);
           expect(i.type, arg(0));
+          if (i.text == "!")
+            expect(i.type, Bool);
+          else if (!numeric(i.type))
+            bad();
+          break;
+        case Inst::Loop:
+          if (!i.unconditional)
+            expect(arg(0), Bool);
           break;
         case Inst::If:
           expect(arg(0), Bool);
@@ -101,6 +140,8 @@ void checkTypes(const Program &p) {
           } else
             expect(arg(0), signature.result);
           break;
+        case Inst::InputCall:
+        case Inst::StringCall:
         case Inst::HeapAlloc:
         case Inst::HeapFree:
         case Inst::HeapLoad:
@@ -111,17 +152,28 @@ void checkTypes(const Program &p) {
         case Inst::ProtocolTransition: {
           const auto &target = p.semantics.functions.at(i.function);
           expect(i.type, target.result);
+          if (i.intrinsicId != target.intrinsicId)
+            bad();
           size_t skip = i.slot == None ? 0 : 1;
           if (i.args.size() + skip != target.params.size())
             bad();
-          if (skip)
+          if (skip) {
             expect(slot(), p.semantics.symbols.at(target.params[0]).type);
+            if (i.access != target.access)
+              bad();
+          }
+          if (i.kind == Inst::InputCall &&
+              intrinsicInfo(target.intrinsicId).lowering != IntrinsicLowering::InputRecord)
+            bad();
+          if (i.kind == Inst::StringCall &&
+              (!target.intrinsic.starts_with("string.") || i.text != target.intrinsic))
+            bad();
           for (size_t n = 0; n < i.args.size(); ++n)
             expect(arg(n), p.semantics.symbols.at(target.params[n + skip]).type);
           break;
         }
         case Inst::Print:
-          if (arg(0) != I32 && arg(0) != Bool && arg(0) != USize)
+          if (!scalar(arg(0)) && arg(0) != Str)
             bad();
           break;
         case Inst::Discard:
@@ -134,6 +186,7 @@ void checkTypes(const Program &p) {
           bad();
         auto before = values;
         block(i.body);
+        block(i.latch);
         values = before;
         block(i.otherwise);
         values = std::move(before);

@@ -1,0 +1,10 @@
+@macro capture {
+  () => {
+    temp
+  }
+}
+fn main() -> i32 {
+  let temp = 3;
+  print(@capture());
+  return 0;
+}

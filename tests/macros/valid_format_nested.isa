@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let s = @format("{}", @size_of<i32>());
+  print(s);
+  return 0;
+}

@@ -1,0 +1,20 @@
+@import "std.string"
+impl String {
+  @intrinsic "string.fmt_i8" pub fn fmt_i8(unique self, value: i8);
+  @intrinsic "string.fmt_i16" pub fn fmt_i16(unique self, value: i16);
+  @intrinsic "string.fmt_i32" pub fn fmt_i32(unique self, value: i32);
+  @intrinsic "string.fmt_i64" pub fn fmt_i64(unique self, value: i64);
+  @intrinsic "string.fmt_u8" pub fn fmt_u8(unique self, value: u8);
+  @intrinsic "string.fmt_u16" pub fn fmt_u16(unique self, value: u16);
+  @intrinsic "string.fmt_u32" pub fn fmt_u32(unique self, value: u32);
+  @intrinsic "string.fmt_u64" pub fn fmt_u64(unique self, value: u64);
+  @intrinsic "string.fmt_isize" pub fn fmt_isize(unique self, value: isize);
+  @intrinsic "string.fmt_usize" pub fn fmt_usize(unique self, value: usize);
+  @intrinsic "string.fmt_f32" pub fn fmt_f32(unique self, value: f32);
+  @intrinsic "string.fmt_f64" pub fn fmt_f64(unique self, value: f64);
+  @intrinsic "string.fmt_bool" pub fn fmt_bool(unique self, value: bool);
+  @intrinsic "string.fmt_char" pub fn fmt_char(unique self, value: char);
+  @intrinsic "string.fmt_str" pub fn fmt_str(unique self, value: str);
+  @intrinsic "string.fmt_debug_str" pub fn fmt_debug_str(unique self, value: str);
+  @intrinsic "string.fmt_debug_char" pub fn fmt_debug_char(unique self, value: char);
+}

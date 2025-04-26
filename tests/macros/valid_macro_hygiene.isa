@@ -1,0 +1,14 @@
+@macro local {
+  ($v: expr) => {
+    {
+      let temp = $v;
+      temp
+    }
+  }
+}
+fn main() -> i32 {
+  let temp = 100;
+  let value = @local(20);
+  @println("{} {}", temp, value);
+  return 0;
+}

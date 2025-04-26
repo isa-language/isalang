@@ -1,0 +1,9 @@
+@macro recurse {
+  () => {
+    @recurse()
+  }
+}
+fn main() -> i32 {
+  @recurse();
+  return 0;
+}

@@ -1,0 +1,6 @@
+struct R {}
+fn main() -> i32 {
+  let r = R::new();
+  @println("{}", r);
+  return 0;
+}

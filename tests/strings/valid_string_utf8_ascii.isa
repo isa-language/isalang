@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let s = String::from("ascii");
+  print(s);
+  print(s.len());
+  return 0;
+}

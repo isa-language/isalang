@@ -1,0 +1,12 @@
+@macro pick {
+  () => {
+    10
+  }($v: expr) => {
+    $v
+  }
+}
+fn main() -> i32 {
+  print(@pick());
+  print(@pick(3));
+  return 0;
+}

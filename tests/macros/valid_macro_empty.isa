@@ -1,0 +1,7 @@
+@macro nothing {
+  () => {}
+}
+fn main() -> i32 {
+  @nothing();
+  return 0;
+}

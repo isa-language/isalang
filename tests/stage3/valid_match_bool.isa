@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  match false {
+    true => print(1),
+    false => print(0),
+  }
+  return 0;
+}

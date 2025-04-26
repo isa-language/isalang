@@ -5,17 +5,19 @@
 #include <iterator>
 #include <set>
 namespace isac {
-ast::Program loadImports(ast::Program source) {
+ast::Program loadImports(ast::Program source, SourceManager *sources) {
   ast::Program result;
   std::set<std::string> loaded, loading;
-  const std::set<std::string> allowed = {"core.runtime", "std.mem", "std.box", "std.buffer",
-                                         "std.io"};
+  const std::set<std::string> allowed = {"core.runtime", "std.mem",    "std.box",    "std.buffer",
+                                         "std.io",       "std.string", "std",        "std.prelude",
+                                         "std.fmt",      "std.macros", "std.option", "std.result"};
   auto append = [&](ast::Program p) {
     auto offset = result.functions.size();
     for (auto &impl : p.impls)
       for (auto &method : impl.methods)
         method += offset;
     result.impls.insert(result.impls.end(), p.impls.begin(), p.impls.end());
+    result.enums.insert(result.enums.end(), p.enums.begin(), p.enums.end());
     result.structs.insert(result.structs.end(), p.structs.begin(), p.structs.end());
     result.protocols.insert(result.protocols.end(), p.protocols.begin(), p.protocols.end());
     result.functions.insert(result.functions.end(), p.functions.begin(), p.functions.end());
@@ -23,19 +25,23 @@ ast::Program loadImports(ast::Program source) {
   };
   std::function<void(const std::string &)> load = [&](const std::string &name) {
     if (!allowed.contains(name))
-      fail({}, "E0500", "unknown bundled module `" + name + "`");
+      fail({}, DiagnosticCode::RestrictedOperation, "unknown bundled module `" + name + "`");
+    if (name == "std.macros")
+      return;
     if (loaded.contains(name))
       return;
     if (!loading.insert(name).second)
-      fail({}, "E0500", "cyclic module import");
+      fail({}, DiagnosticCode::RestrictedOperation, "cyclic module import");
     auto relative = name;
-    relative[relative.find('.')] = std::filesystem::path::preferred_separator;
+    auto dot = relative.find('.');
+    if (dot != std::string::npos)
+      relative[dot] = std::filesystem::path::preferred_separator;
     auto path = std::filesystem::path(ISAC_LIBRARY_ROOT) / (relative + ".isa");
     std::ifstream file(path);
     if (!file)
-      fail({}, "E0500", "cannot open bundled module: " + path.string());
+      fail({}, DiagnosticCode::RestrictedOperation, "cannot open bundled module: " + path.string());
     std::string text{std::istreambuf_iterator<char>(file), {}};
-    auto tokens = lex(text);
+    auto tokens = lex(text, sources ? sources->add(path.string(), text) : NoFile);
     for (auto &t : tokens)
       t.loc.file = path.string();
     auto p = parse(tokens, true);
@@ -48,6 +54,7 @@ ast::Program loadImports(ast::Program source) {
   for (const auto &name : source.imports)
     load(name);
   append(std::move(source));
+  load("std.prelude");
   return result;
 }
 }

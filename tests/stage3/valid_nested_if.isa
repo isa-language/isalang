@@ -1,0 +1,12 @@
+fn main() -> i32 {
+  if false {
+    print(0);
+  } else if true {
+    if true {
+      print(3);
+    }
+  } else {
+    print(4);
+  }
+  return 0;
+}

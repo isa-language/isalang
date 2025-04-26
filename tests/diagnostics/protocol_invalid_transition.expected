@@ -1,0 +1,15 @@
+error[E0401]: operation `read` is not valid in the current state
+  --> tests/diagnostics/protocol_invalid_transition.isa:5:11
+   |
+  5 |     print(buffer.read(0));
+    |           ^^^^^^^^^^^^^^ operation is unavailable in state `Released`
+    = note: 
+            resource:
+                buffer
+            current state:
+                Released
+            operation:
+                read
+            available in:
+                Ready
+    = help: perform a valid protocol transition before this operation

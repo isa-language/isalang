@@ -1,0 +1,39 @@
+enum Command {
+  Quit,
+  Increment(i8),
+  Reset,
+}
+
+fn execute(command: Command, value: i8) -> i8 {
+  match command {
+    Command::Quit => {
+      return value;
+    },
+    Command::Increment(amount) => {
+      return value + amount;
+    },
+    Command::Reset => {
+      return 0;
+    },
+  }
+}
+
+fn print_nome(nome: str) {
+  print(nome);
+}
+
+fn main() -> i32 {
+  let value: i8 = 0;
+  for
+  i in 0..10 {
+    let c = Command::Increment(1);
+    value = execute(c.move(), value);
+  }
+  print(value);
+  match true {
+    true => print("true"),
+    false => print("false"),
+  }
+  print_nome("Guilherme");
+  return 0;
+}

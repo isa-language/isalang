@@ -1,0 +1,8 @@
+pub enum OptionI32 {
+  Some(i32),
+  None,
+}
+pub enum OptionBool {
+  Some(bool),
+  None,
+}

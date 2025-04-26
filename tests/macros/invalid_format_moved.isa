@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let a = String::from("a");
+  let b = a.move();
+  @println("{}", a);
+  return 0;
+}

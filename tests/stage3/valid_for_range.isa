@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  for i in 0..4 {
+    if i == 1 {
+      continue;
+    }
+    print(i);
+  }
+  return 0;
+}

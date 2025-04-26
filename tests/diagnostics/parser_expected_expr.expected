@@ -1,0 +1,6 @@
+error[E0002]: expected expression
+  --> tests/diagnostics/parser_expected_expr.isa:2:17
+   |
+  2 |     let value = ;
+    |                 ^ expected an expression before `;`
+    = help: provide an expression after `=`

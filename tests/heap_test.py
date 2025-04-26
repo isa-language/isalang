@@ -18,7 +18,11 @@ if mode == "check":
             r.stderr,
         )
         if case.stem == "invalid_heap_use_after_move":
-            assert "resource was moved to:\n    b" in r.stderr, r.stderr
+            assert (
+                "ownership moved here" in r.stderr
+                and "use `b`" in r.stderr
+                and "value used here" in r.stderr
+            ), r.stderr
         if case.stem == "invalid_buffer_after_release":
             assert "Released" in r.stderr and "Ready" in r.stderr, r.stderr
     else:

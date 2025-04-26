@@ -1,4 +1,6 @@
 #pragma once
+#include "isac/diagnostics.hpp"
+#include "isac/effects.hpp"
 #include <cstdint>
 #include <memory>
 #include <ostream>
@@ -6,24 +8,12 @@
 #include <string>
 #include <vector>
 namespace isac {
-struct Loc {
-  unsigned line = 1, column = 1;
-  std::string file;
-};
-struct Error : std::runtime_error {
-  Loc loc;
-  std::string code;
-  Error(Loc l, std::string c, std::string m) : std::runtime_error(m), loc(l), code(std::move(c)) {}
-};
-[[noreturn]] inline void fail(Loc l, std::string c, std::string m) {
-  throw Error(l, std::move(c), std::move(m));
-}
 struct Token {
   std::string text;
   Loc loc;
-  enum Kind { Identifier, Number, Punctuation, String, End } kind;
+  enum Kind { Identifier, Number, Punctuation, String, Character, End } kind;
 };
-std::vector<Token> lex(const std::string &);
+std::vector<Token> lex(const std::string &, FileId file = NoFile);
 struct TypeSyntax {
   std::string name = "unit";
   int count = 0;
@@ -32,20 +22,46 @@ struct TypeSyntax {
 enum class Access { Own, Shared, Unique };
 const char *accessName(Access);
 namespace ast {
+struct Stmt;
 struct Expr {
-  enum Kind { Int, Bool, Name, Binary, Call, Method, Member, Index, Array, Assign, Unary } kind;
+  enum Kind {
+    Int,
+    Bool,
+    Name,
+    Binary,
+    Call,
+    Method,
+    Member,
+    Index,
+    Array,
+    Assign,
+    Unary,
+    Cast,
+    Char,
+    String,
+    Block,
+    AtCall
+  } kind;
   Loc loc;
   std::string text;
   std::vector<Expr> args;
+  std::vector<Stmt> body;
+};
+struct Pattern {
+  enum Kind { Wildcard, Binding, Integer, Boolean, Variant } kind;
+  Loc loc;
+  std::string name;
+  std::vector<std::string> bindings;
 };
 struct Stmt {
-  enum Kind { Let, Return, Expression, If, Borrow } kind;
+  enum Kind { Let, Return, Expression, If, Borrow, While, Loop, For, Break, Continue, Match } kind;
   Loc loc;
   std::string name;
   TypeSyntax annotation;
   bool annotated = false;
   Access access = Access::Own;
-  Expr expr;
+  Expr expr, limit;
+  Pattern pattern;
   std::vector<Stmt> body, otherwise;
 };
 struct Param {
@@ -55,6 +71,8 @@ struct Param {
   Loc loc;
 };
 struct Function {
+  FunctionKind kind = FunctionKind::Normal;
+  FunctionEffects effects;
   bool trusted = false, external = false, releases = false;
   std::string intrinsic;
   std::string name, owner;
@@ -62,7 +80,7 @@ struct Function {
   bool pub = false;
   std::vector<Param> params;
   TypeSyntax result;
-  std::vector<Stmt> body;
+  std::vector<Stmt> body = {};
 };
 struct Field {
   std::string name;
@@ -100,7 +118,18 @@ struct Impl {
   Loc loc;
   std::vector<uint32_t> methods;
 };
+struct EnumVariant {
+  std::string name;
+  Loc loc;
+  std::vector<TypeSyntax> payload;
+};
+struct Enum {
+  std::string name;
+  Loc loc;
+  std::vector<EnumVariant> variants;
+};
 struct Program {
+  std::vector<Enum> enums;
   std::vector<std::string> imports;
   std::vector<Impl> impls;
   std::vector<Struct> structs;
@@ -109,6 +138,7 @@ struct Program {
 };
 }
 ast::Program parse(const std::vector<Token> &, bool trusted = false);
-ast::Program loadImports(ast::Program);
+bool parseFragment(const std::vector<Token> &, const std::string &);
+ast::Program loadImports(ast::Program, SourceManager *sources = nullptr);
 void printAST(const ast::Program &, std::ostream &);
 }

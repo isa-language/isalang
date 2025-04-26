@@ -12,6 +12,9 @@
 #endif
 namespace isac {
 void compileNative(const std::string &ir, const std::string &output, NativeOptions options) {
+  if (!options.target.triple.empty() && options.target.triple != hostTriple())
+    throw std::runtime_error(
+        "cross-linking requires a target runtime, linker and sysroot; use --emit-obj");
   std::string pattern = (std::filesystem::temp_directory_path() / "isac-XXXXXX").string();
   std::vector<char> tmp(pattern.begin(), pattern.end());
   tmp.push_back(0);
@@ -34,6 +37,10 @@ void compileNative(const std::string &ir, const std::string &output, NativeOptio
   }
   std::string target = std::filesystem::absolute(output).string();
   std::vector<std::string> arguments = {ISAC_CLANG, "-Wno-override-module", "-x", "ir", ll};
+  static const char *levels[] = {"-O0", "-O1", "-O2", "-O3", "-Os", "-Oz"};
+  arguments.push_back(levels[static_cast<unsigned>(options.optimization)]);
+  if (!options.target.triple.empty())
+    arguments.push_back("--target=" + options.target.triple);
   if (options.sanitize || options.counters)
     arguments.insert(arguments.end(), {"-x", "c", ISAC_RUNTIME_SOURCE, "-I", ISAC_RUNTIME_INCLUDE});
   else

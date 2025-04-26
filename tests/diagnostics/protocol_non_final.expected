@@ -1,0 +1,15 @@
+error[E0410]: resource leaves scope in a non-final protocol state
+  --> tests/diagnostics/protocol_non_final.isa:4:5
+   |
+  4 |     return 0;
+    |     ^^^^^^ resource leaves its scope here
+    = note: 
+            resource:
+                buffer
+            protocol:
+                BufferState
+            current state:
+                Ready
+            valid final states:
+                Released
+    = help: transition the resource to a final state before leaving this scope

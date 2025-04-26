@@ -36,17 +36,32 @@ struct Inst {
     HeapLoad,
     HeapStore,
     MemCopy,
-    MemMove
+    MemMove,
+    Cast,
+    Loop,
+    Break,
+    Continue,
+    EnumConstruct,
+    Inspect,
+    StaticStr,
+    StringCall,
+    TextPrint,
+    EndViews,
+    InputCall
   } kind;
   Loc loc;
   ValueId result = None;
   TypeId type = Unit;
   SymbolId slot = None;
   uint32_t offset = 0;
+  uint32_t loop = None;
+  bool unconditional = false;
   FunctionId function = None;
+  IntrinsicId intrinsicId = IntrinsicId::None;
   std::string text;
+  hir::Expr::OperatorClass operatorClass = hir::Expr::OperatorClass::Other;
   std::vector<ValueId> args;
-  std::vector<Inst> body, otherwise;
+  std::vector<Inst> body, otherwise, condition, latch;
   std::vector<SymbolId> locals;
   ValueId resourceInput = None;
   std::vector<Merge> merges;

@@ -1,0 +1,6 @@
+error[E0200]: expected `i32`, found `str`
+  --> tests/diagnostics/string_type_mismatch.isa:2:22
+   |
+  2 |     let value: i32 = "hello";
+    |                --- expected because of this annotation
+    |                      ^^^^^^^

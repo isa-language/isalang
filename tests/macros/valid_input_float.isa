@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let r = @input<f64>();
+  if r.is_ok() {
+    @println("{}", r.value());
+  } else {
+    print(r.error());
+  }
+  return 0;
+}

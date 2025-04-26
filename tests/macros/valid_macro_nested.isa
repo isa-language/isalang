@@ -1,0 +1,14 @@
+@macro inner {
+  ($v: expr) => {
+    $v * 2
+  }
+}
+@macro outer {
+  ($v: expr) => {
+    @inner($v)
+  }
+}
+fn main() -> i32 {
+  print(@outer(4));
+  return 0;
+}

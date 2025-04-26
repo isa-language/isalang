@@ -1,0 +1,6 @@
+error[E0004]: unterminated string literal
+  --> tests/diagnostics/lexer_unterminated_string.isa:2:16
+   |
+  2 |     let text = "hello;
+    |                ^^^^^^^
+    = help: add a closing quote to terminate the string

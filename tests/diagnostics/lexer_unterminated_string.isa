@@ -1,0 +1,4 @@
+fn main() -> i32 {
+    let text = "hello;
+    return 0;
+}

@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let s = String::from("abc");
+  let v = s.as_str();
+  s.clear();
+  print(v);
+  return 0;
+}

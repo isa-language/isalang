@@ -1,0 +1,10 @@
+fn show(text: str) {
+  print(text);
+}
+fn main() -> i32 {
+  let s = String::from("abc");
+  show(s.as_str());
+  s.clear();
+  print(s);
+  return 0;
+}

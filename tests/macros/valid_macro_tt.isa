@@ -1,0 +1,9 @@
+@macro identity {
+  ($v: tt) => {
+    $v
+  }
+}
+fn main() -> i32 {
+  print(@identity(42));
+  return 0;
+}

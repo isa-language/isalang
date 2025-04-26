@@ -1,0 +1,10 @@
+fn main() -> i32 {
+  let s = String::from("hello");
+  s.clear();
+  print(s.len());
+  print(s.capacity());
+  print(s.is_empty());
+  s.push_str("á");
+  print(s);
+  return 0;
+}

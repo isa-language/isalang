@@ -1,0 +1,20 @@
+@macro format {
+  ($($args: tt) *) => {
+    @__format($($args) *)
+  }
+}
+@macro print {
+  ($($args: tt) *) => {
+    @__print($($args) *)
+  }
+}
+@macro println {
+  ($($args: tt) *) => {
+    @__println($($args) *)
+  }
+}
+@macro input {
+  ($($args: tt) *) => {
+    @__input($($args) *)
+  }
+}

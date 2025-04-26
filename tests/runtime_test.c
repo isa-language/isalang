@@ -1,7 +1,12 @@
 #include "isac_runtime.h"
 #include <stdint.h>
 #include <string.h>
-int main(void) {
+int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "oom") == 0) {
+    void *p = isac_rt_alloc(SIZE_MAX);
+    isac_rt_free(p);
+    return 5;
+  }
   unsigned char *a = isac_rt_alloc(16), *b = isac_rt_alloc_zeroed(16);
   for (size_t i = 0; i < 16; ++i)
     if (b[i] != 0)

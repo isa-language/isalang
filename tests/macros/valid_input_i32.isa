@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let r = @input<i32>("Age: ");
+  if r.is_ok() {
+    print(r.value());
+  } else {
+    print(r.error());
+  }
+  return 0;
+}

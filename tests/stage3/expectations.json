@@ -1,0 +1,170 @@
+{
+  "valid_if": {
+    "error": null,
+    "stdout": "1\n"
+  },
+  "valid_if_else": {
+    "error": null,
+    "stdout": "2\n"
+  },
+  "valid_nested_if": {
+    "error": null,
+    "stdout": "3\n"
+  },
+  "invalid_if_condition_type": {
+    "error": "E0200",
+    "stdout": ""
+  },
+  "valid_resource_if_join": {
+    "error": null,
+    "stdout": ""
+  },
+  "invalid_resource_if_join": {
+    "error": "E0420",
+    "stdout": ""
+  },
+  "valid_while": {
+    "error": null,
+    "stdout": "0\n1\n2\n"
+  },
+  "valid_loop_break": {
+    "error": null,
+    "stdout": "7\n"
+  },
+  "valid_continue": {
+    "error": null,
+    "stdout": "1\n3\n4\n"
+  },
+  "valid_for_range": {
+    "error": null,
+    "stdout": "0\n2\n3\n"
+  },
+  "invalid_break_outside_loop": {
+    "error": "E0601",
+    "stdout": ""
+  },
+  "invalid_continue_outside_loop": {
+    "error": "E0601",
+    "stdout": ""
+  },
+  "invalid_loop_resource_state": {
+    "error": "E0603",
+    "stdout": ""
+  },
+  "valid_loop_protocol_exit": {
+    "error": null,
+    "stdout": ""
+  },
+  "invalid_loop_exit_join": {
+    "error": "E0603",
+    "stdout": ""
+  },
+  "valid_loop_heap_cleanup": {
+    "error": null,
+    "stdout": "0\n2\n3\n0\n2\n3\n99\n"
+  },
+  "valid_nested_loops": {
+    "error": null,
+    "stdout": "0\n1\n"
+  },
+  "valid_loop_return": {
+    "error": null,
+    "stdout": "8\n"
+  },
+  "valid_enum": {
+    "error": null,
+    "stdout": ""
+  },
+  "valid_enum_payload": {
+    "error": null,
+    "stdout": ""
+  },
+  "invalid_enum_variant": {
+    "error": "E0610",
+    "stdout": ""
+  },
+  "invalid_enum_payload_type": {
+    "error": "E0200",
+    "stdout": ""
+  },
+  "valid_match_enum": {
+    "error": null,
+    "stdout": "2\n"
+  },
+  "valid_match_payload": {
+    "error": null,
+    "stdout": "7\n"
+  },
+  "valid_match_bool": {
+    "error": null,
+    "stdout": "0\n"
+  },
+  "valid_match_wildcard": {
+    "error": null,
+    "stdout": "1\n"
+  },
+  "valid_match_binding": {
+    "error": null,
+    "stdout": "42\n"
+  },
+  "valid_match_enum_binding": {
+    "error": null,
+    "stdout": "1\n"
+  },
+  "invalid_non_exhaustive_match": {
+    "error": "E0622",
+    "stdout": ""
+  },
+  "warning_unreachable_match_arm": {
+    "error": "E0621",
+    "stdout": ""
+  },
+  "invalid_match_pattern_type": {
+    "error": "E0620",
+    "stdout": ""
+  },
+  "invalid_match_resource_join": {
+    "error": "E0420",
+    "stdout": ""
+  },
+  "invalid_match_moved_enum": {
+    "error": "E0301",
+    "stdout": ""
+  },
+  "valid_primitives": {
+    "error": null,
+    "stdout": "-128\n18446744073709551615\n3\n-64\n1\n128\n225\n"
+  },
+  "valid_operators": {
+    "error": null,
+    "stdout": "3\n6\n5\n-4\n1\n1\n-1\n"
+  },
+  "valid_scalar_struct": {
+    "error": null,
+    "stdout": "1.5\n65535\n"
+  },
+  "valid_size_types": {
+    "error": null,
+    "stdout": "20\n-2\n"
+  },
+  "invalid_implicit_cast": {
+    "error": "E0200",
+    "stdout": ""
+  },
+  "invalid_float_integer_cast": {
+    "error": "E0206",
+    "stdout": ""
+  },
+  "invalid_float_bitwise": {
+    "error": "E0200",
+    "stdout": ""
+  },
+  "invalid_integer_range": {
+    "error": "E0202",
+    "stdout": ""
+  },
+  "invalid_bool_arithmetic": {
+    "error": "E0200",
+    "stdout": ""
+  }
+}

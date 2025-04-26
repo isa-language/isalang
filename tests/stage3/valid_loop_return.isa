@@ -1,0 +1,10 @@
+@import "std.box" fn foo() -> i32 {
+  loop {
+    let x = BoxI32::new(8);
+    return x.get();
+  }
+}
+fn main() -> i32 {
+  print(foo());
+  return 0;
+}

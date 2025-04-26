@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let s = String::from("abc");
+  borrow unique s as e {
+    let v = e.as_str();
+    e.clear();
+  }
+  return 0;
+}

@@ -1,0 +1,9 @@
+@macro twice {
+  ($v: expr) => {
+    $v * 2
+  }
+}
+fn main() -> i32 {
+  print(@twice(1 + 2));
+  return 0;
+}

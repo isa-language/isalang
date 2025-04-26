@@ -1,0 +1,13 @@
+fn main() -> i32 {
+  for i in 0..4 {
+    let s = String::from("a");
+    if i == 1 {
+      continue;
+    }
+    if i == 3 {
+      break;
+    }
+    print(s);
+  }
+  return 0;
+}

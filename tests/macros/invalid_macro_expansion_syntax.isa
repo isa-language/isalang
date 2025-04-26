@@ -1,0 +1,9 @@
+@macro bad {
+  () => {
+    let x =;
+  }
+}
+fn main() -> i32 {
+  @bad();
+  return 0;
+}

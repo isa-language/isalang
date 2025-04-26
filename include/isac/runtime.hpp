@@ -1,5 +1,6 @@
 #pragma once
 
+#include "isac/target.hpp"
 #include <cstdint>
 #include <ostream>
 #include <string>
@@ -8,9 +9,10 @@ namespace isac::runtime {
 using Value = uint32_t;
 inline constexpr Value NoValue = UINT32_MAX;
 struct Type {
-  enum Kind { Void, Scalar, Buffer, Size, Pointer } kind = Void;
+  enum Kind { Void, Scalar, Buffer, Size, Pointer, Float } kind = Void;
   uint32_t width = 0;
   unsigned elementBits = 32;
+  bool isSigned = true;
   bool operator==(const Type &) const = default;
 };
 struct Instruction {
@@ -29,16 +31,25 @@ struct Instruction {
     RawLoad,
     RawStore,
     MemCopy,
-    MemMove
+    MemMove,
+    Cast,
+    Loop,
+    Break,
+    Continue,
+    StaticStr,
+    RecordAlloc
   } kind;
   Value result = NoValue;
   Type type;
   std::vector<Value> args;
   uint64_t literal = 0;
+  double real = 0;
   bool unsignedOperands = false;
   uint32_t offset = 0;
+  uint32_t loop = 0;
+  bool unconditional = false;
   std::string callee;
-  std::vector<Instruction> body, otherwise;
+  std::vector<Instruction> body, otherwise, condition, latch;
 };
 struct Parameter {
   Value value;
@@ -52,11 +63,12 @@ struct Function {
   std::vector<Instruction> body;
 };
 struct Erased {
+  TargetInfo target;
   std::vector<Function> functions;
   uint32_t values = 0;
 };
 struct Terminator {
-  enum Kind { Jump, Branch, Return } kind;
+  enum Kind { Jump, Branch, Return, Unreachable } kind;
   Value value = NoValue;
   uint32_t first = 0, second = 0;
 };
@@ -73,6 +85,7 @@ struct CFGFunction {
   std::vector<Block> blocks;
 };
 struct LIR {
+  TargetInfo target;
   std::vector<CFGFunction> functions;
   uint32_t values = 0;
 };

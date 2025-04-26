@@ -12,3 +12,7 @@ extern "C" fn isac_rt_buffer_read(ptr: RawPtr, index: usize) -> i32;
 extern "C" fn isac_rt_buffer_write(ptr: RawPtr, index: usize, value: i32);
 extern "C" fn isac_rt_print_i32(value: i32);
 extern "C" fn isac_rt_print_usize(value: usize);
+extern "C" fn isac_rt_print_bool(value: bool);
+
+extern "C" fn isac_rt_stdout_write(data: str);
+extern "C" fn isac_rt_stderr_write(data: str);

@@ -1,0 +1,12 @@
+@macro test {
+  ($p: pattern) => {
+    match true {
+      $p => print(1),
+      _ => print(0),
+    }
+  }
+}
+fn main() -> i32 {
+  @test(true);
+  return 0;
+}

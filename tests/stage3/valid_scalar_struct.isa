@@ -1,0 +1,12 @@
+struct S {
+  x: f32,
+  y: u16,
+}
+fn main() -> i32 {
+  let s = S::new();
+  s.x = 1.5f32;
+  s.y = 65535u16;
+  print(s.x);
+  print(s.y);
+  return 0;
+}

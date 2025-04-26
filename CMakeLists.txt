@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(
   Isac
-  VERSION 0.1
+  VERSION 0.2
   LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,12 +10,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(
   isac_frontend
   src/frontend.cpp
+  src/intrinsics.cpp
+  src/macros.cpp
+  src/diagnostics.cpp
+  src/primitives.cpp
   src/modules.cpp
   src/hir.cpp
   src/core.cpp
   src/core_types.cpp
   src/erasure.cpp
-  src/runtime.cpp)
+  src/runtime.cpp
+  src/liveness.cpp)
 target_include_directories(isac_frontend PUBLIC include)
 target_compile_definitions(isac_frontend
                            PRIVATE ISAC_LIBRARY_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/lib")
@@ -30,7 +35,7 @@ add_library(isac_runtime STATIC runtime/src/isac_runtime.c)
 target_include_directories(isac_runtime PUBLIC runtime/include)
 target_compile_options(isac_runtime PRIVATE -Wall -Wextra -Wpedantic)
 
-add_library(isac_backend src/backend.cpp src/native.cpp)
+add_library(isac_backend src/backend.cpp src/native.cpp src/target.cpp)
 target_include_directories(isac_backend PUBLIC include)
 target_include_directories(isac_backend SYSTEM PRIVATE ${MLIR_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(
@@ -58,6 +63,8 @@ target_link_libraries(
           MLIRBuiltinToLLVMIRTranslation
           MLIRLLVMToLLVMIRTranslation
           MLIRTargetLLVMIRExport)
+llvm_map_components_to_libnames(ISAC_LLVM_TARGET_LIBS ${LLVM_TARGETS_TO_BUILD} Passes AsmParser)
+target_link_libraries(isac_backend PRIVATE ${ISAC_LLVM_TARGET_LIBS})
 target_link_libraries(isac PRIVATE isac_backend)
 if(NOT LLVM_ENABLE_RTTI)
   target_compile_options(isac_backend PRIVATE -fno-rtti)
@@ -137,5 +144,90 @@ if(BUILD_TESTING)
   add_test(NAME library_contracts COMMAND isac_library_test)
   add_test(NAME runtime_panics
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_failures.py
-                   $<TARGET_FILE:isac>)
+                   $<TARGET_FILE:isac> $<TARGET_FILE:isac_runtime_test>)
+endif()
+if(BUILD_TESTING)
+  add_test(NAME heap_pipeline_boundaries
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/heap_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
+if(BUILD_TESTING)
+  file(GLOB STAGE3_CASES CONFIGURE_DEPENDS tests/stage3/*.isa)
+  foreach(CASE IN LISTS STAGE3_CASES)
+    get_filename_component(NAME ${CASE} NAME_WE)
+    add_test(NAME stage3_${NAME}
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/stage3_test.py
+                     $<TARGET_FILE:isac> ${CASE})
+  endforeach()
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    foreach(NAME valid_loop_heap_cleanup valid_loop_return valid_match_payload valid_primitives)
+      add_test(
+        NAME stage3_sanitized_${NAME}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/stage3_test.py
+                $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR}/tests/stage3/${NAME}.isa sanitized)
+      set_tests_properties(stage3_sanitized_${NAME} PROPERTIES LABELS "sanitizers")
+    endforeach()
+  endif()
+endif()
+if(BUILD_TESTING)
+  add_test(NAME stage3_targets
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/targets.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME stage3_optimization
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/optimization.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+if(BUILD_TESTING)
+  file(GLOB STRING_CASES CONFIGURE_DEPENDS tests/strings/*.isa)
+  foreach(CASE IN LISTS STRING_CASES)
+    get_filename_component(NAME ${CASE} NAME_WE)
+    add_test(NAME string_${NAME}
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/string_test.py
+                     $<TARGET_FILE:isac> ${CASE})
+    if(NAME MATCHES "^valid_" AND ISAC_SANITIZER_STATUS EQUAL 0)
+      add_test(NAME string_sanitized_${NAME}
+               COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/string_test.py
+                       $<TARGET_FILE:isac> ${CASE} sanitized)
+      set_tests_properties(string_sanitized_${NAME} PROPERTIES LABELS "sanitizers")
+    endif()
+  endforeach()
+endif()
+if(BUILD_TESTING)
+  add_test(NAME diagnostic_snapshots
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/diagnostics_test.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME string_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/string_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+if(BUILD_TESTING)
+  add_executable(isac_diagnostics_test tests/diagnostics_unit.cpp)
+  target_link_libraries(isac_diagnostics_test PRIVATE isac_frontend)
+  add_test(NAME diagnostic_model COMMAND isac_diagnostics_test)
+  add_executable(isac_string_runtime_test tests/string_runtime.c runtime/src/isac_runtime.c)
+  target_include_directories(isac_string_runtime_test PRIVATE runtime/include)
+  target_compile_definitions(isac_string_runtime_test PRIVATE ISAC_RT_TESTING)
+  add_test(NAME string_runtime_abi COMMAND isac_string_runtime_test)
+endif()
+
+if(BUILD_TESTING)
+  file(GLOB MACRO_CASES CONFIGURE_DEPENDS tests/macros/*.isa)
+  foreach(CASE IN LISTS MACRO_CASES)
+    get_filename_component(NAME ${CASE} NAME_WE)
+    add_test(NAME macro_${NAME}
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_test.py
+                     $<TARGET_FILE:isac> ${CASE})
+    if(NAME MATCHES "^valid_" AND ISAC_SANITIZER_STATUS EQUAL 0)
+      add_test(NAME macro_sanitized_${NAME}
+               COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_test.py
+                       $<TARGET_FILE:isac> ${CASE} sanitized)
+      set_tests_properties(macro_sanitized_${NAME} PROPERTIES LABELS "sanitizers")
+    endif()
+  endforeach()
+endif()
+if(BUILD_TESTING)
+  add_executable(isac_liveness_test tests/liveness_test.cpp)
+  target_link_libraries(isac_liveness_test PRIVATE isac_frontend)
+  add_test(NAME cfg_liveness COMMAND isac_liveness_test)
 endif()

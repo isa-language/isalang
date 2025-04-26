@@ -1,0 +1,28 @@
+protocol P {
+  initial A;
+  final A;
+  state A {
+    open(self) -> B;
+  }
+  state B {
+    close(self) -> A;
+  }
+}
+struct R: P {}
+impl R {
+  fn open(self) {}
+  fn close(self) {}
+}
+@macro twice {
+  ($v: expr) => {
+    $v.close();
+    $v.close();
+  }
+}
+
+fn main() -> i32 {
+  let r = R::new();
+  r.open();
+  @twice(r);
+  return 0;
+}

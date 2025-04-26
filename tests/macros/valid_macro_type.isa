@@ -1,0 +1,10 @@
+@macro typed {
+  ($ty: type) => {
+    let value: $ty = 7;
+    print(value);
+  }
+}
+fn main() -> i32 {
+  @typed(i64);
+  return 0;
+}

@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let s = String::new();
+  print(s.len());
+  print(s.capacity());
+  print(s.is_empty());
+  return 0;
+}

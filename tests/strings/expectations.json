@@ -1,0 +1,162 @@
+{
+  "valid_string_new": {
+    "stdout": "0\n0\n1\n",
+    "error": null,
+    "allocations": 0
+  },
+  "valid_string_from_literal": {
+    "stdout": "Hello\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_move": {
+    "stdout": "Isalang\n",
+    "error": null,
+    "allocations": 1
+  },
+  "invalid_string_use_after_move": {
+    "stdout": "",
+    "error": "E0301",
+    "allocations": null
+  },
+  "valid_string_shared": {
+    "stdout": "hello\nhello!\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_unique": {
+    "stdout": "hello\n",
+    "error": null,
+    "allocations": 1
+  },
+  "invalid_string_mutate_shared": {
+    "stdout": "",
+    "error": "E0312",
+    "allocations": null
+  },
+  "invalid_string_write_shared_alias": {
+    "stdout": "",
+    "error": "E0311",
+    "allocations": null
+  },
+  "valid_string_push_str": {
+    "stdout": "Hello, world\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_clear": {
+    "stdout": "0\n5\n1\ná\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_utf8_ascii": {
+    "stdout": "ascii\n5\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_utf8_unicode": {
+    "stdout": "áçãé😀\n12\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_drop": {
+    "stdout": "",
+    "error": null,
+    "allocations": 1
+  },
+  "invalid_string_double_drop": {
+    "stdout": "",
+    "error": "E0301",
+    "allocations": null
+  },
+  "valid_static_str": {
+    "stdout": "Olá\nOlá\n",
+    "error": null,
+    "allocations": 0
+  },
+  "valid_string_embedded_nul": {
+    "stdout": "a\u0000b\n3\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_escapes": {
+    "stdout": "\"\\\t\n\n",
+    "error": null,
+    "allocations": 0
+  },
+  "valid_string_view_parameter": {
+    "stdout": "abc\n\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_view_copy": {
+    "stdout": "abc\nabc\n",
+    "error": null,
+    "allocations": 1
+  },
+  "invalid_view_mutation": {
+    "stdout": "",
+    "error": "E0312",
+    "allocations": null
+  },
+  "invalid_view_move_owner": {
+    "stdout": "",
+    "error": "E0312",
+    "allocations": null
+  },
+  "invalid_view_drop_owner": {
+    "stdout": "",
+    "error": "E0312",
+    "allocations": null
+  },
+  "invalid_view_return": {
+    "stdout": "",
+    "error": "E6003",
+    "allocations": null
+  },
+  "invalid_view_self_append": {
+    "stdout": "",
+    "error": "E0312",
+    "allocations": null
+  },
+  "invalid_unique_derived_view_mutation": {
+    "stdout": "",
+    "error": "E0312",
+    "allocations": null
+  },
+  "valid_unique_derived_view": {
+    "stdout": "abc\n\n",
+    "error": null,
+    "allocations": 1
+  },
+  "valid_string_loop_cleanup": {
+    "stdout": "a\na\n",
+    "error": null,
+    "allocations": 4
+  },
+  "valid_string_early_return": {
+    "stdout": "",
+    "error": null,
+    "allocations": 1
+  },
+  "invalid_string_implicit_copy": {
+    "stdout": "",
+    "error": "E0302",
+    "allocations": null
+  },
+  "invalid_string_index": {
+    "stdout": "",
+    "error": "E0200",
+    "allocations": null
+  },
+  "invalid_string_type_mismatch": {
+    "stdout": "",
+    "error": "E0200",
+    "allocations": null
+  },
+  "valid_string_punctuation": {
+    "stdout": "!\ntrue\n(\nas\n",
+    "error": null,
+    "allocations": 0
+  }
+}

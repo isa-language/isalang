@@ -1,0 +1,12 @@
+fn main() -> i32 {
+  let message = String::from("Olá");
+  message.push_str(", ");
+  message.push_str("Isalang");
+  print(message);
+  borrow shared message as view {
+    print(view.as_str());
+  }
+  message.push_str("!");
+  print(message);
+  return 0;
+}

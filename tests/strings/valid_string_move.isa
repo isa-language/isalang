@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let a = String::from("Isalang");
+  let b = a.move();
+  print(b);
+  return 0;
+}

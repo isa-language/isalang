@@ -5,3 +5,23 @@ pub fn print_i32(value: i32) {
 pub fn print_usize(value: usize) {
   isac_rt_print_usize(value);
 }
+pub fn print_bool(value: bool) {
+  isac_rt_print_bool(value);
+}
+
+pub fn write_stdout(data: str) {
+  isac_rt_stdout_write(data);
+}
+pub fn write_stderr(data: str) {
+  isac_rt_stderr_write(data);
+}
+
+@import "std.result"
+@intrinsic "io.read_i32" pub fn read_i32() -> ResultI32;
+@intrinsic "io.read_i64" pub fn read_i64() -> ResultI64;
+@intrinsic "io.read_u32" pub fn read_u32() -> ResultU32;
+@intrinsic "io.read_u64" pub fn read_u64() -> ResultU64;
+@intrinsic "io.read_f32" pub fn read_f32() -> ResultF32;
+@intrinsic "io.read_f64" pub fn read_f64() -> ResultF64;
+@intrinsic "io.read_bool" pub fn read_bool() -> ResultBool;
+@intrinsic "io.read_String" pub fn read_line() -> ResultString;

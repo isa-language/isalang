@@ -1,5 +1,6 @@
 #include "isac/core.hpp"
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <set>
 namespace isac::core {
@@ -32,14 +33,31 @@ class Builder {
     using E = hir::Expr;
     Inst i = make(Inst::Constant, e.loc, e.type);
     i.text = e.text;
+    i.operatorClass = e.operatorClass;
     switch (e.kind) {
+    case E::Block: {
+      auto instructions = block(e.body);
+      auto cleanup = instructions.back();
+      instructions.pop_back();
+      out->insert(out->end(), instructions.begin(), instructions.end());
+      auto value = expr(e.args.at(0));
+      emit(cleanup, false);
+      return value;
+    }
+    case E::Cast:
+      i.kind = Inst::Cast;
+      i.args = {expr(e.args[0])};
+      return emit(i);
+    case E::StaticStr:
+      i.kind = Inst::StaticStr;
+      return emit(i);
     case E::Constant:
       return emit(i);
     case E::UnitValue:
       return None;
     case E::Variable:
       if (p.semantics.linear(e.type))
-        fail(e.loc, "E0302",
+        fail(e.loc, DiagnosticCode::ImplicitCopy,
              "resource `" + p.semantics.symbols[e.ref].name + "` cannot be copied; use .move()");
       i.kind = Inst::Copy;
       i.slot = e.ref;
@@ -47,7 +65,8 @@ class Builder {
     case E::Field:
     case E::Index: {
       if (p.semantics.linear(e.type))
-        fail(e.loc, "E0302", "partial resource moves/copies are outside this PoC");
+        fail(e.loc, DiagnosticCode::ImplicitCopy,
+             "partial resource moves/copies are outside this PoC");
       auto [id, off] = place(e);
       i.kind = Inst::Read;
       i.slot = id;
@@ -100,6 +119,12 @@ class Builder {
       emit(i, false);
       return None;
     }
+    case E::EnumConstruct:
+      i.kind = Inst::EnumConstruct;
+      i.offset = e.ref;
+      for (auto &a : e.args)
+        i.args.push_back(expr(a));
+      return emit(i);
     case E::Construct:
       i.kind = Inst::Create;
       return emit(i);
@@ -118,6 +143,16 @@ class Builder {
       emit(i, false);
       return None;
     case E::Print:
+      if (p.semantics.types[e.args[0].type].representation == hir::Representation::StringRecord) {
+        if (e.args[0].kind != E::Variable)
+          fail(e.loc, DiagnosticCode::InvalidStringOperation,
+               "print(String) requires a named owner or borrow");
+        i.kind = Inst::TextPrint;
+        i.slot = e.args[0].ref;
+        i.loc = e.args[0].loc;
+        emit(i, false);
+        return None;
+      }
       i.kind = Inst::Print;
       i.args = {expr(e.args[0])};
       emit(i, false);
@@ -127,6 +162,7 @@ class Builder {
       i.kind = Inst::Call;
       i.function = e.ref;
       auto &f = p.semantics.functions[e.ref];
+      i.intrinsicId = f.intrinsicId;
       size_t start = 0;
       if (e.kind == E::Method) {
         i.slot = e.args[0].ref;
@@ -141,7 +177,11 @@ class Builder {
       for (size_t n = start; n < e.args.size(); ++n)
         i.args.push_back(expr(e.args[n]));
       if (!f.intrinsic.empty()) {
-        i.kind = Inst::HeapAlloc;
+        i.kind = intrinsicInfo(f.intrinsicId).lowering == IntrinsicLowering::StringRecord
+                     ? Inst::StringCall
+                 : intrinsicInfo(f.intrinsicId).lowering == IntrinsicLowering::InputRecord
+                     ? Inst::InputCall
+                     : Inst::HeapAlloc;
         i.text = f.intrinsic;
       }
       if (f.external) {
@@ -163,7 +203,7 @@ class Builder {
       return emit(i, e.type != Unit || i.kind == Inst::ProtocolTransition);
     }
     }
-    fail(e.loc, "E9000", "unhandled HIR expression");
+    fail(e.loc, DiagnosticCode::InternalError, "unhandled HIR expression");
   }
   std::vector<Inst> block(const std::vector<hir::Stmt> &ss) {
     std::vector<Inst> result;
@@ -202,8 +242,60 @@ class Builder {
       case hir::Stmt::If:
         i.kind = Inst::If;
         i.args = {expr(s.expr)};
+        emit(make(Inst::EndViews, s.loc), false);
         i.body = block(s.body);
         i.otherwise = block(s.otherwise);
+        emit(i, false);
+        break;
+      case hir::Stmt::Match: {
+        Inst inspect = make(Inst::Inspect, s.loc);
+        inspect.slot = s.symbol;
+        emit(inspect, false);
+
+        std::function<std::vector<Inst>(size_t)> arms = [&](size_t n) {
+          auto &arm = s.body.at(n);
+          if (arm.catchall || n + 1 == s.body.size())
+            return block(arm.body);
+          std::vector<Inst> branch;
+          auto savedOut = out;
+          out = &branch;
+          Inst cond = make(Inst::If, arm.loc);
+          cond.args = {expr(arm.expr)};
+          cond.body = block(arm.body);
+          cond.otherwise = arms(n + 1);
+          emit(cond, false);
+          out = savedOut;
+          return branch;
+        };
+        auto lowered = arms(0);
+        out->insert(out->end(), lowered.begin(), lowered.end());
+        break;
+      }
+      case hir::Stmt::Scope: {
+        auto nested = block(s.body);
+        out->insert(out->end(), nested.begin(), nested.end());
+        break;
+      }
+      case hir::Stmt::Loop: {
+        i.kind = Inst::Loop;
+        i.loop = s.loop;
+        i.unconditional = s.unconditional;
+        if (!s.unconditional) {
+          auto savedOut = out;
+          out = &i.condition;
+          i.args = {expr(s.expr)};
+          emit(make(Inst::EndViews, s.loc), false);
+          out = savedOut;
+        }
+        i.body = block(s.body);
+        i.latch = block(s.latch);
+        emit(i, false);
+        break;
+      }
+      case hir::Stmt::Break:
+      case hir::Stmt::Continue:
+        i.kind = s.kind == hir::Stmt::Break ? Inst::Break : Inst::Continue;
+        i.loop = s.loop;
         emit(i, false);
         break;
       case hir::Stmt::Borrow:
@@ -223,7 +315,10 @@ class Builder {
         emit(i, false);
         break;
       }
+      emit(make(Inst::EndViews, s.loc), false);
     }
+    Inst viewsEnd = make(Inst::EndViews, ss.empty() ? Loc{} : ss.back().loc);
+    emit(viewsEnd, false);
     Inst end = make(Inst::ScopeEnd, ss.empty() ? Loc{} : ss.back().loc);
     end.locals = std::move(locals);
     emit(end, false);
@@ -263,6 +358,7 @@ struct Resource {
   bool allocation = false;
   std::string consumedBy;
   SymbolId movedTo = None;
+  Loc consumedAt = {}, borrowAt = {}, stateAt = {};
   MemoryState memory() const {
     return !live                      ? MemoryState::Dead
            : access == Access::Shared ? MemoryState::Shared
@@ -286,25 +382,48 @@ struct Context {
   std::map<ValueId, Temporary> values;
   std::map<ValueId, SymbolId> pointers;
   std::map<SymbolId, SymbolId> pointerSlots;
+  std::map<ValueId, SymbolId> views;
   bool returned = false;
 };
 class Checker {
   Program p;
   hir::Function *function = nullptr;
+  struct LoopCheck {
+    uint32_t id;
+    Context entry;
+    std::vector<Context> exits;
+  };
+  std::vector<LoopCheck> loops;
+  void compatible(const Context &entry, const Context &edge, Loc loc, const char *edgeName) {
+    for (auto &[id, r] : entry.vars)
+      if (!edge.vars.contains(id) || r != edge.vars.at(id))
+        fail(loc, DiagnosticCode::LoopInvariant,
+             std::string("incompatible resource state at ") + edgeName + ": `" + symbol(id).name +
+                 "`");
+  }
+
   const hir::Symbol &symbol(SymbolId id) {
     return p.semantics.symbols.at(id);
   }
   Resource &live(Context &c, SymbolId id, Loc l) {
     auto it = c.vars.find(id);
     if (it == c.vars.end() || !it->second.live) {
-      std::string message = "use of moved or dropped resource `" + symbol(id).name +
-                            "`\nresource:\n    " + symbol(id).name;
-      if (it != c.vars.end()) {
-        message += "\nprevious operation:\n    " + it->second.consumedBy;
-        if (it->second.movedTo != None)
-          message += "\nresource was moved to:\n    " + symbol(it->second.movedTo).name;
-      }
-      fail(l, "E0301", message);
+      bool moved = it != c.vars.end() && it->second.consumedBy == "move";
+      auto d = DiagnosticEngine()
+                   .error(DiagnosticCode::ConsumedResource, l,
+                          std::string("use of ") + (moved ? "moved" : "dropped") + " value `" +
+                              symbol(id).name + "`")
+                   .label(l, "value used here after ownership was consumed")
+                   .note("the original binding no longer owns this resource");
+      if (it != c.vars.end())
+        d.secondary(it->second.consumedAt,
+                    moved ? "ownership moved here" : "resource dropped here");
+      if (it != c.vars.end() && it->second.movedTo != None)
+        d.help("use `" + symbol(it->second.movedTo).name + "`, or borrow `" + symbol(id).name +
+               "` instead of moving it");
+      else
+        d.help("borrow the value if ownership transfer is not required");
+      d.emit();
     }
     return it->second;
   }
@@ -313,27 +432,50 @@ class Checker {
     auto &root = r.root == None ? r : live(c, r.root, l);
     if (r.root != None) {
       if (requested == Access::Own)
-        fail(l, "E0310",
+        fail(l, DiagnosticCode::BorrowConflict,
              "cannot move, drop or transition borrowed resource `" + symbol(id).name + "`");
+      if (requested == Access::Unique && root.shared && r.access == Access::Unique)
+        DiagnosticEngine()
+            .error(DiagnosticCode::InvalidReborrow, l,
+                   "cannot mutate while a derived str view is active")
+            .secondary(root.borrowAt, "view created here")
+            .help("end the view scope before mutation")
+            .emit();
       if (requested == Access::Unique && r.access == Access::Shared)
-        fail(l, "E0311", "cannot write through shared borrow `" + symbol(id).name + "`");
+        DiagnosticEngine()
+            .error(DiagnosticCode::SharedMutation, l,
+                   "cannot write through shared borrow `" + symbol(id).name + "`")
+            .secondary(r.borrowAt, "shared borrow starts here")
+            .note("shared access is read-only")
+            .help("use a unique borrow after the shared borrow ends")
+            .emit();
     } else {
       if (r.unique || (requested != Access::Shared && r.shared)) {
         std::string reason = r.unique ? "resource already has an active unique borrow"
                                       : "incompatible access while shared borrows are active";
-        fail(l, "E0312",
-             reason + "\nresource:\n    " + symbol(id).name + "\nactive borrow:\n    " +
-                 (r.unique ? "unique" : "shared") + "\nrequested access:\n    " +
-                 accessName(requested));
+        Loc activeOrigin = r.borrowAt;
+        for (auto &[alias, resource] : c.vars)
+          if (resource.live && resource.root == id) {
+            activeOrigin = resource.borrowAt;
+            break;
+          }
+        DiagnosticEngine()
+            .error(DiagnosticCode::InvalidReborrow, l, reason + " for `" + symbol(id).name + "`")
+            .label(l, "incompatible access requested here")
+            .secondary(activeOrigin, "active borrow starts here")
+            .note("unique access requires exclusive access to the resource")
+            .help("end the active borrow before moving, dropping or mutating this resource")
+            .emit();
       }
     }
     if (r.access == Access::Shared && requested != Access::Shared)
-      fail(l, "E0311", "shared self/resource is read-only: `" + symbol(id).name + "`");
+      fail(l, DiagnosticCode::SharedMutation,
+           "shared self/resource is read-only: `" + symbol(id).name + "`");
     if (r.access == Access::Unique && requested == Access::Own)
-      fail(l, "E0310", "unique borrow does not grant ownership");
+      fail(l, DiagnosticCode::BorrowConflict, "unique borrow does not grant ownership");
     return root;
   }
-  void final(TypeId t, StateId s, const std::string &n, Loc l) {
+  void final(TypeId t, StateId s, const std::string &n, Loc l, Loc origin = {}) {
     auto pid = p.semantics.types[t].protocol;
     if (pid == None)
       return;
@@ -347,7 +489,13 @@ class Checker {
                     "\nvalid final states:";
     for (auto f : q.finals)
       m += "\n    " + q.states[f];
-    fail(l, "E0410", m);
+    auto d = DiagnosticEngine()
+                 .error(DiagnosticCode::NonFinalState, l, m)
+                 .label(l, "resource leaves its scope here")
+                 .help("transition the resource to a final state before leaving this scope");
+    if (origin.span.file != NoFile)
+      d.secondary(origin, "resource entered this protocol state here");
+    d.emit();
   }
   StateId initial(TypeId t) {
     auto pid = p.semantics.types[t].protocol;
@@ -358,28 +506,37 @@ class Checker {
     if (implicit && (it == c.vars.end() || !it->second.live))
       return;
     if (!implicit && it != c.vars.end() && !it->second.live)
-      fail(l, "E0301",
-           "resource `" + symbol(id).name +
-               "` has already been consumed\nprevious operation:\n    " + it->second.consumedBy +
-               "\ncurrent operation:\n    drop");
+      DiagnosticEngine()
+          .error(DiagnosticCode::ConsumedResource, l,
+                 "resource `" + symbol(id).name + "` has already been consumed")
+          .label(l, "drop requested here")
+          .secondary(it->second.consumedAt, "previous " + it->second.consumedBy + " occurred here")
+          .note("a resource may be consumed only once")
+          .help("remove the repeated drop")
+          .emit();
+    if (it != c.vars.end() && symbol(id).type == Str && it->second.root != None) {
+      endBorrow(c, id);
+      return;
+    }
     auto &r = access(c, id, Access::Own, l);
     if (symbol(id).receiver) {
       if (implicit)
         return;
-      fail(l, "E0310",
+      fail(l, DiagnosticCode::BorrowConflict,
            "method self cannot be dropped or moved; it is returned by the protocol transition");
     }
-    final(symbol(id).type, r.state, symbol(id).name, l);
+    final(symbol(id).type, r.state, symbol(id).name, l, r.stateAt);
     if (r.allocation)
       site.cleanup.push_back(id);
     r.allocation = false;
     c.vars[id].live = false;
     c.vars[id].consumedBy = "drop";
+    c.vars[id].consumedAt = l;
   }
   Temporary &take(Context &c, ValueId v, Loc l) {
     auto it = c.values.find(v);
     if (it == c.values.end() || !it->second.available)
-      fail(l, "E0303", "linear temporary was already consumed");
+      fail(l, DiagnosticCode::UnconsumedResource, "linear temporary was already consumed");
     it->second.available = false;
     return it->second;
   }
@@ -395,7 +552,13 @@ class Checker {
       root.unique = false;
     r.live = false;
   }
+  void endViews(Context &c) {
+    for (auto &[v, root] : c.views)
+      --c.vars.at(root).shared;
+    c.views.clear();
+  }
   void finish(Context &c, Loc l, Inst &site) {
+    endViews(c);
     for (auto &[id, r] : c.vars)
       if (r.live && r.root != None)
         endBorrow(c, id);
@@ -406,11 +569,13 @@ class Checker {
         drop(c, id, l, true, site);
       if (r.live && symbol(id).receiver && p.semantics.heap(symbol(id).type) &&
           r.allocation == function->releases)
-        fail(l, "E0430", "method body does not satisfy its allocation-retention/release contract");
+        fail(l, DiagnosticCode::AllocationContract,
+             "method body does not satisfy its allocation-retention/release contract");
     }
     for (auto &[v, t] : c.values)
       if (t.available && p.semantics.linear(t.type))
-        fail(l, "E0303", "unconsumed linear temporary %" + std::to_string(v));
+        fail(l, DiagnosticCode::UnconsumedResource,
+             "unconsumed linear temporary %" + std::to_string(v));
   }
   void call(Inst &i, Context &c) {
     auto &f = p.semantics.functions[i.function];
@@ -432,22 +597,29 @@ class Checker {
           for (auto &op : q.operations)
             if (op.name == name)
               m += "\n    " + q.states[op.from];
-          fail(i.loc, "E0401", m);
+          DiagnosticEngine()
+              .error(DiagnosticCode::InvalidProtocolOperation, i.loc, m)
+              .label(i.loc, "operation is unavailable in state `" + q.states[r.state] + "`")
+              .help("perform a valid protocol transition before this operation")
+              .emit();
         }
 
         if (symbol(i.slot).receiver && i.access == Access::Own)
-          fail(i.loc, "E0402", "owning protocol calls on method self are outside this PoC");
+          fail(i.loc, DiagnosticCode::ProtocolMismatch,
+               "owning protocol calls on method self are outside this PoC");
         i.operation = it->id;
         i.from = it->from;
         i.to = it->to;
         i.resourceInput = r.version;
         r.state = it->to;
+        r.stateAt = i.loc;
         if (i.access == Access::Own)
           r.version = i.result;
       }
       if (p.semantics.heap(symbol(i.slot).type)) {
         if (!r.allocation)
-          fail(i.loc, "E0430", "operation requires an allocation that was already released");
+          fail(i.loc, DiagnosticCode::AllocationContract,
+               "operation requires an allocation that was already released");
         if (f.releases)
           r.allocation = false;
       }
@@ -457,7 +629,8 @@ class Checker {
       if (p.semantics.linear(t)) {
         auto &v = take(c, i.args[n], i.loc);
         if (v.state != initial(t))
-          fail(i.loc, "E0403", "owned resource arguments must be in their initial protocol state");
+          fail(i.loc, DiagnosticCode::ProtocolReturn,
+               "owned resource arguments must be in their initial protocol state");
       }
     }
   }
@@ -465,12 +638,13 @@ class Checker {
     auto it = c.pointers.find(value);
     if (it == c.pointers.end()) {
       if (!function->trusted)
-        fail(loc, "E0500", "raw memory operation outside runtime bindings");
+        fail(loc, DiagnosticCode::RestrictedOperation,
+             "raw memory operation outside runtime bindings");
       return;
     }
     auto &r = access(c, it->second, requested, loc);
     if (!r.allocation)
-      fail(loc, "E0430", "allocation already released");
+      fail(loc, DiagnosticCode::AllocationContract, "allocation already released");
     if (free)
       r.allocation = false;
   }
@@ -481,6 +655,31 @@ class Checker {
       i.cleanup.clear();
       i.freeTemporary = false;
       switch (i.kind) {
+      case Inst::EndViews:
+        endViews(c);
+        break;
+      case Inst::TextPrint:
+        access(c, i.slot, Access::Shared, i.loc);
+        break;
+      case Inst::InputCall:
+      case Inst::StringCall: {
+        if (i.slot != None) {
+          auto &root = access(c, i.slot, i.access, i.loc);
+          if (i.intrinsicId == IntrinsicId::String_as_str ||
+              i.intrinsicId == IntrinsicId::Input_result_str) {
+            auto &source = c.vars.at(i.slot);
+            auto rid = source.root == None ? i.slot : source.root;
+            ++root.shared;
+            root.borrowAt = i.loc;
+            c.views[i.result] = rid;
+          }
+        } else
+          c.values[i.result] = {i.type, None, true, true};
+        break;
+      }
+      case Inst::Inspect:
+        access(c, i.slot, Access::Shared, i.loc);
+        break;
       case Inst::HeapAlloc:
         if (p.semantics.linear(i.type))
           c.values[i.result] = {i.type, initial(i.type), true, true};
@@ -499,6 +698,7 @@ class Checker {
         pointerAccess(c, i.args[0], Access::Unique, i.loc);
         pointerAccess(c, i.args[1], Access::Shared, i.loc);
         break;
+      case Inst::EnumConstruct:
       case Inst::Create:
       case Inst::Array:
         c.values[i.result] = {i.type, initial(i.type), true};
@@ -506,17 +706,23 @@ class Checker {
       case Inst::Move: {
         auto &r = access(c, i.slot, Access::Own, i.loc);
         if (symbol(i.slot).receiver)
-          fail(i.loc, "E0310", "method self cannot be moved");
+          fail(i.loc, DiagnosticCode::BorrowConflict, "method self cannot be moved");
         i.resourceInput = r.version;
         c.values[i.result] = {i.type, r.state, true, r.allocation, i.slot};
         c.vars[i.slot].allocation = false;
         c.vars[i.slot].live = false;
         c.vars[i.slot].consumedBy = "move";
+        c.vars[i.slot].consumedAt = i.loc;
         break;
       }
       case Inst::Copy:
       case Inst::Read:
         access(c, i.slot, Access::Shared, i.loc);
+        if (i.type == Str && c.vars.at(i.slot).root != None) {
+          auto root = c.vars.at(i.slot).root;
+          ++c.vars.at(root).shared;
+          c.views[i.result] = root;
+        }
         if (i.type == RawPtr) {
           if (p.semantics.heap(symbol(i.slot).type))
             c.pointers[i.result] = i.slot;
@@ -539,6 +745,12 @@ class Checker {
         }
         c.vars[i.slot] = {true,  state,     Access::Own, None, 0,
                           false, i.args[0], allocation,  "",   None};
+        if (i.type == Str && c.views.contains(i.args[0])) {
+          c.vars[i.slot].root = c.views.at(i.args[0]);
+          c.vars[i.slot].access = Access::Shared;
+          c.vars[i.slot].borrowAt = c.vars.at(c.vars[i.slot].root).borrowAt;
+          c.views.erase(i.args[0]);
+        }
         if (i.type == RawPtr && c.pointers.contains(i.args[0]))
           c.pointerSlots[i.slot] = c.pointers.at(i.args[0]);
         break;
@@ -559,9 +771,10 @@ class Checker {
         bool shared = i.kind == Inst::BorrowShared;
 
         if (source.root != None && (!shared || source.access != Access::Shared))
-          fail(i.loc, "E0312", "exclusive reborrowing is outside this PoC");
+          fail(i.loc, DiagnosticCode::InvalidReborrow, "exclusive reborrowing is outside this PoC");
         auto &root = access(c, i.slot, shared ? Access::Shared : Access::Unique, i.loc);
         SymbolId rid = source.root == None ? i.slot : source.root;
+        root.borrowAt = i.loc;
         if (shared)
           ++root.shared;
         else
@@ -570,6 +783,7 @@ class Checker {
                             rid,          0,          false,
                             root.version, false,      "",
                             None};
+        c.vars[i.offset].borrowAt = i.loc;
         break;
       }
       case Inst::EndBorrow:
@@ -589,6 +803,52 @@ class Checker {
         finish(c, i.loc, i);
         c.returned = true;
         break;
+      case Inst::Break:
+      case Inst::Continue: {
+        if (loops.empty() || loops.back().id != i.loop)
+          fail(i.loc, DiagnosticCode::InvalidCore, "invalid loop target in Core");
+        auto &entry = loops.back().entry;
+        for (auto &[id, r] : c.vars)
+          if (!entry.vars.contains(id) && r.live && r.root != None)
+            endBorrow(c, id);
+        for (auto it = c.vars.rbegin(); it != c.vars.rend(); ++it)
+          if (!entry.vars.contains(it->first) && it->second.root == None)
+            drop(c, it->first, i.loc, true, i);
+        for (auto it = c.vars.begin(); it != c.vars.end();) {
+          if (!entry.vars.contains(it->first))
+            it = c.vars.erase(it);
+          else
+            ++it;
+        }
+        if (i.kind == Inst::Continue)
+          compatible(entry, c, i.loc, "loop backedge");
+        else
+          loops.back().exits.push_back(c);
+        c.returned = true;
+        break;
+      }
+      case Inst::Loop: {
+        block(i.condition, c);
+        Context entry = c, body = c;
+        loops.push_back({i.loop, entry, {}});
+        block(i.body, body);
+        if (!body.returned) {
+          block(i.latch, body);
+          compatible(entry, body, i.loc, "loop backedge");
+        }
+        auto exits = std::move(loops.back().exits);
+        loops.pop_back();
+        if (!i.unconditional)
+          exits.push_back(entry);
+        if (exits.empty())
+          c.returned = true;
+        else {
+          for (auto &edge : exits)
+            compatible(exits[0], edge, i.loc, "loop exit");
+          c = std::move(exits[0]);
+        }
+        break;
+      }
       case Inst::If: {
         Context then = c, other = c;
         block(i.body, then);
@@ -607,7 +867,7 @@ class Checker {
         }
         for (auto &[id, r] : c.vars) {
           if (then.vars.at(id) != other.vars.at(id))
-            fail(i.loc, "E0420",
+            fail(i.loc, DiagnosticCode::BranchJoin,
                  "branches leave resource `" + symbol(id).name +
                      "` with different ownership, borrows or protocol states");
         }
@@ -662,8 +922,9 @@ public:
         block(cf.body, c);
         if (!c.returned) {
           if (function->result != Unit)
-            fail(function->loc, "E0205", "not all paths return a value");
-          fail(function->loc, "E9001", "missing Core fallthrough cleanup point");
+            fail(function->loc, DiagnosticCode::MissingReturn, "not all paths return a value");
+          fail(function->loc, DiagnosticCode::InvalidCore,
+               "missing Core fallthrough cleanup point");
         }
       }
     }
@@ -684,11 +945,22 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                                 "discard",       "heap.alloc",
                                 "heap.free",     "heap.load",
                                 "heap.store",    "memcpy",
-                                "memmove"};
+                                "memmove",       "cast",
+                                "loop",          "break",
+                                "continue",      "enum.construct",
+                                "inspect",       "static_str",
+                                "string.call",   "print.text",
+                                "end_views",     "input.call"};
   for (auto &i : ops) {
+    if (i.kind == Inst::Loop)
+      dump(i.condition, p, o, d + 2);
     for (auto id : i.cleanup)
       o << std::string(d, ' ') << "drop #v" << id << " DropGlue(#T" << p.symbols[id].type
-        << ") => heap.free\n";
+        << (p.types[p.symbols[id].type].dropGlue == hir::DropGlue::StringAllocation
+                ? ") => string.drop (free payload)\n"
+            : p.types[p.symbols[id].type].dropGlue == hir::DropGlue::InputAllocation
+                ? ") => input.drop (free successful text payload)\n"
+                : ") => heap.free\n");
     if (i.freeTemporary)
       o << std::string(d, ' ') << "drop temporary => heap.free\n";
     o << std::string(d, ' ');
@@ -700,9 +972,18 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
     if (i.function != None)
       o << " #F" << i.function;
     if (!i.text.empty())
-      o << " " << i.text;
+      o << " " << (i.kind == Inst::StaticStr ? quoteText(i.text) : i.text);
+    if (i.kind == Inst::StringCall)
+      o << " memory=" << accessName(i.access)
+        << (i.text == "string.as_str" ? " [retain shared view]" : "");
+    if (i.kind == Inst::TextPrint)
+      o << " [temporary Shared access; no consume]";
     for (auto a : i.args)
       o << " %" << a;
+    if (i.loop != None)
+      o << " target=#L" << i.loop;
+    if (i.kind == Inst::EnumConstruct)
+      o << " variant=#V" << i.offset;
     if (i.kind == Inst::Read || i.kind == Inst::Write)
       o << " offset=" << i.offset;
     if (i.kind == Inst::BorrowShared || i.kind == Inst::BorrowUnique)
@@ -735,6 +1016,7 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
       o << " allocation=present memory=Own";
     o << "\n";
     dump(i.body, p, o, d + 2);
+    dump(i.latch, p, o, d + 2);
     if (!i.otherwise.empty()) {
       o << std::string(d, ' ') << "else\n";
       dump(i.otherwise, p, o, d + 2);
@@ -757,7 +1039,8 @@ void print(const Program &p, std::ostream &o) {
   o << "Verified Core (0 / 1 / omega; MemoryState independent of ProtocolState)\n";
   for (auto &f : p.functions) {
     auto &hf = p.semantics.functions[f.id];
-    o << "fn #F" << f.id << " " << hf.name << "\n";
+    o << "fn #F" << f.id << " " << hf.name << " kind=Normal effects={" << hf.effects.describe()
+      << " }\n";
     for (size_t n = 0; n < hf.params.size(); ++n) {
       auto id = hf.params[n];
       auto &s = p.semantics.symbols[id];

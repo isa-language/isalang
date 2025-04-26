@@ -1,0 +1,4 @@
+fn main() -> i32 {
+	print("Olá"); print(missing);
+	return 0;
+}

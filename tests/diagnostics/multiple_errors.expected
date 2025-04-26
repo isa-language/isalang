@@ -1,0 +1,11 @@
+error[E0102]: unknown name `missing`
+  --> tests/diagnostics/multiple_errors.isa:1:20
+   |
+  1 | fn first() { print(missing); }
+    |                    ^^^^^^^
+error[E0200]: expected `i32`, found `str`
+  --> tests/diagnostics/multiple_errors.isa:2:32
+   |
+  2 | fn second() { let value: i32 = "hello"; }
+    |                          --- expected because of this annotation
+    |                                ^^^^^^^

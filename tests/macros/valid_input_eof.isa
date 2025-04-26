@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let r = @input();
+  print(r.error());
+  return 0;
+}

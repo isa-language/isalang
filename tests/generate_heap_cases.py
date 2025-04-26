@@ -217,9 +217,9 @@ cases = {
     ),
     "valid_usize": (
         '@import "std.io"\nfn half(n: usize) -> usize { return n / 2; }',
-        "let n: usize=64; n=n+2; print_usize(half(n)); print(18446744073709551615usize > n); print(18446744073709551615usize + 1);",
+        "let n: usize=64; n=n+2; print_usize(half(n)); print(18446744073709551615usize > n); print(18446744073709551615usize + 1); print_bool(true); print_bool(false);",
         None,
-        "33\n1\n0\n",
+        "33\n1\n0\n1\n0\n",
         0,
     ),
 }

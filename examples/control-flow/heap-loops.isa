@@ -1,0 +1,26 @@
+@import "std.box"
+fn main() -> i32 {
+  let n = 0;
+  while n<5 {
+    let x = BoxI32::new(n);
+    n = n + 1;
+    if n == 2 {
+      continue;
+    }
+    print(x.get());
+    if n == 4 {
+      break;
+    }
+  }
+  for i in 0..4 {
+    if i == 1 {
+      continue;
+    }
+    print(i);
+  }
+  loop {
+    print(99);
+    break;
+  }
+  return 0;
+}

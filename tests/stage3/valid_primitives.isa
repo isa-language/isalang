@@ -1,0 +1,15 @@
+fn main() -> i32 {
+
+  let a: i8 = -128i8;
+  let b: u64 = 18446744073709551615u64;
+  let f: f32 = 1.5f32;
+  print(a);
+  print(b);
+  print(f * 2.0f32);
+  print((a as i64) / 2i64);
+  print(7u16 % 3u16);
+  print(1u8 << 7u8);
+  print('á' as u32);
+
+  return 0;
+}

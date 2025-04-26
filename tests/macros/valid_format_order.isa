@@ -1,0 +1,12 @@
+fn f() -> i32 {
+  print(1);
+  return 10;
+}
+fn g() -> i32 {
+  print(2);
+  return 20;
+}
+fn main() -> i32 {
+  @println("{} {}", f(), g());
+  return 0;
+}

@@ -10,6 +10,7 @@ pub protocol FileState {
     close(self) -> Closed;
   }
 }
+
 pub struct File: FileState {
   fd: i32,
 }

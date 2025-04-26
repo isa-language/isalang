@@ -1,0 +1,9 @@
+error[E0312]: incompatible access while shared borrows are active for `text`
+  --> tests/diagnostics/borrow_shared_unique.isa:4:9
+   |
+  3 |     borrow shared text as view {
+    |     ------ active borrow starts here
+  4 |         text.push_str("!");
+    |         ^^^^^^^^^^^^^^^^^^ incompatible access requested here
+    = note: unique access requires exclusive access to the resource
+    = help: end the active borrow before moving, dropping or mutating this resource

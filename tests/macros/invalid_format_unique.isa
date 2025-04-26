@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let a = String::from("a");
+  borrow unique a as edit {
+    @println("{}", a);
+  }
+  return 0;
+}

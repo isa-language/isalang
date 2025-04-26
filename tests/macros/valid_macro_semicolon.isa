@@ -1,0 +1,9 @@
+@macro all {
+  ($($v: expr); *) => {
+    $(print($v);) *
+  }
+}
+fn main() -> i32 {
+  @all(1; 2; 3);
+  return 0;
+}

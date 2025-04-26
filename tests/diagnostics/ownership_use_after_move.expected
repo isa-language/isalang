@@ -1,0 +1,9 @@
+error[E0301]: use of moved value `first`
+  --> tests/diagnostics/ownership_use_after_move.isa:4:11
+   |
+  3 |     let second = first.move();
+    |                  ------------ ownership moved here
+  4 |     print(first);
+    |           ^^^^^ value used here after ownership was consumed
+    = note: the original binding no longer owns this resource
+    = help: use `second`, or borrow `first` instead of moving it

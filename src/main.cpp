@@ -1,4 +1,6 @@
 #include "isac/backend.hpp"
+#include "isac/macros.hpp"
+#include "isac/liveness.hpp"
 #include "isac/erasure.hpp"
 #include <fstream>
 #include <iostream>
@@ -8,7 +10,9 @@ int main(int argc, char **argv) {
   const char *usage =
       "usage: isac file.isa [--check | --emit-tokens | --emit-ast | --emit-hir | "
       "--emit-core | --emit-erased | --emit-lir | --emit-mlir | --emit-std-mlir | "
-      "--emit-llvm-dialect | --emit-llvm | -o executable [--sanitize] [--runtime-test-counters]]\n";
+      "--emit-llvm-dialect | --emit-llvm | --emit-asm | --emit-obj | -o executable "
+      "[--sanitize] [--runtime-test-counters]]\nOptions: --target=TRIPLE --cpu=CPU "
+      "--features=+FEATURE -O0/-O1/-O2/-O3/-Os/-Oz --print-target --color=auto/always/never\n";
   if (argc == 2 && std::string(argv[1]) == "--help") {
     std::cout << usage;
     return 0;
@@ -16,13 +20,52 @@ int main(int argc, char **argv) {
   std::string input, mode = "--check", output;
   bool selected = false;
   isac::NativeOptions nativeOptions;
+  isac::CompilerOptions options;
+  bool printTarget = false;
+  isac::SourceManager sources;
+  isac::ColorMode color = isac::ColorMode::Auto;
   try {
     std::set<std::string> modes = {
-        "--check",         "--emit-tokens",       "--emit-ast", "--emit-hir",
-        "--emit-core",     "--emit-erased",       "--emit-lir", "--emit-mlir",
-        "--emit-std-mlir", "--emit-llvm-dialect", "--emit-llvm"};
+        "--check",         "--emit-expanded",     "--emit-liveness", "--emit-tokens", "--emit-ast",
+        "--emit-hir",      "--emit-core",         "--emit-erased",   "--emit-lir",    "--emit-mlir",
+        "--emit-std-mlir", "--emit-llvm-dialect", "--emit-llvm",     "--emit-asm",    "--emit-obj"};
     for (int n = 1; n < argc; ++n) {
       std::string arg = argv[n];
+      if (arg.starts_with("--color=")) {
+        auto c = arg.substr(8);
+        if (c != "auto" && c != "always" && c != "never")
+          throw std::runtime_error("invalid color mode");
+        color = c == "always"  ? isac::ColorMode::Always
+                : c == "never" ? isac::ColorMode::Never
+                               : isac::ColorMode::Auto;
+        continue;
+      }
+      if (arg == "--print-target") {
+        printTarget = true;
+        continue;
+      }
+      if (arg.starts_with("--target=")) {
+        options.target.triple = arg.substr(9);
+        continue;
+      }
+      if (arg.starts_with("--cpu=")) {
+        options.target.cpu = arg.substr(6);
+        continue;
+      }
+      if (arg.starts_with("--features=")) {
+        options.target.features = arg.substr(11);
+        continue;
+      }
+      if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3" || arg == "-Os" ||
+          arg == "-Oz") {
+        options.optimization = arg == "-O0"   ? isac::OptimizationLevel::O0
+                               : arg == "-O1" ? isac::OptimizationLevel::O1
+                               : arg == "-O2" ? isac::OptimizationLevel::O2
+                               : arg == "-O3" ? isac::OptimizationLevel::O3
+                               : arg == "-Os" ? isac::OptimizationLevel::Os
+                                              : isac::OptimizationLevel::Oz;
+        continue;
+      }
       if (arg == "--sanitize") {
         nativeOptions.sanitize = true;
         continue;
@@ -32,11 +75,8 @@ int main(int argc, char **argv) {
         continue;
       }
       if (arg == "-o") {
-        if (selected || n + 1 == argc)
-          throw std::runtime_error(
-              "-o requires an output path and cannot be combined with emit/check");
-        selected = true;
-        mode = "native";
+        if (!output.empty() || n + 1 == argc)
+          throw std::runtime_error("-o requires one output path");
         output = argv[++n];
       } else if (modes.contains(arg)) {
         if (selected)
@@ -51,6 +91,16 @@ int main(int argc, char **argv) {
         input = arg;
       }
     }
+    nativeOptions.target = isac::selectTarget(options.target);
+    nativeOptions.optimization = options.optimization;
+    if (printTarget) {
+      std::cout << nativeOptions.target.triple << "\n";
+      return 0;
+    }
+    if (!selected && !output.empty())
+      mode = "native";
+    if ((mode == "--emit-obj" || mode == "--emit-asm") && output.empty())
+      throw std::runtime_error("object/assembly emission requires -o path");
     if (input.empty()) {
       std::cerr << usage;
       return 1;
@@ -62,7 +112,7 @@ int main(int argc, char **argv) {
       throw std::runtime_error("cannot open input: " + input);
     std::stringstream b;
     b << f.rdbuf();
-    auto ts = isac::lex(b.str());
+    auto ts = isac::lex(b.str(), sources.add(input, b.str()));
     if (mode == "--emit-tokens") {
       for (auto &t : ts)
         std::cout << t.loc.line << ":" << t.loc.column << " " << t.text << "\n";
@@ -70,12 +120,17 @@ int main(int argc, char **argv) {
     }
     for (auto &t : ts)
       t.loc.file = input;
-    auto ast = isac::loadImports(isac::parse(ts));
+    auto expanded = isac::macros::expand(ts, &sources);
+    if (mode == "--emit-expanded") {
+      isac::macros::print(expanded, std::cout);
+      return 0;
+    }
+    auto ast = isac::loadImports(isac::parse(expanded.tokens), &sources);
     if (mode == "--emit-ast") {
       isac::printAST(ast, std::cout);
       return 0;
     }
-    auto h = isac::resolve(ast);
+    auto h = isac::resolve(ast, nativeOptions.target);
     if (mode == "--emit-hir") {
       isac::printHIR(h, std::cout);
       return 0;
@@ -93,6 +148,10 @@ int main(int argc, char **argv) {
       return 0;
     }
     auto lir = isac::runtime::lower(erased);
+    if (mode == "--emit-liveness") {
+      isac::runtime::printLiveness(lir, std::cout);
+      return 0;
+    }
     if (mode == "--emit-lir") {
       isac::runtime::print(lir, std::cout);
       return 0;
@@ -102,16 +161,29 @@ int main(int argc, char **argv) {
                  : mode == "--emit-llvm-dialect" ? isac::BackendStage::LLVMDialect
                                                  : isac::BackendStage::LLVMIR;
     auto text = isac::generate(lir, stage, nativeOptions.sanitize);
-    if (mode == "native")
+    if (stage == isac::BackendStage::LLVMIR)
+      text = isac::optimizeLLVM(text, nativeOptions.target, options.optimization);
+    if (mode == "--emit-obj" || mode == "--emit-asm")
+      isac::emitMachine(text, output, nativeOptions.target, options.optimization,
+                        mode == "--emit-asm");
+    else if (mode == "native")
       isac::compileNative(text, output, nativeOptions);
-    else
+    else if (!output.empty()) {
+      std::ofstream emitted(output);
+      emitted << text;
+      if (!emitted)
+        throw std::runtime_error("cannot write output");
+    } else
       std::cout << text;
     return 0;
   } catch (const isac::Error &e) {
-    std::cerr << (e.loc.file.empty() ? input : e.loc.file) << ":" << e.loc.line << ":"
-              << e.loc.column << ": error[" << e.code << "]: " << e.what() << "\n";
+    isac::TerminalRenderer(sources, color).render(e.diagnostic, std::cerr);
+    for (auto &d : e.additional)
+      isac::TerminalRenderer(sources, color).render(d, std::cerr);
   } catch (const std::exception &e) {
-    std::cerr << "error: " << e.what() << "\n";
+    auto d =
+        isac::DiagnosticEngine().error(isac::DiagnosticCode::BackendError, {}, e.what()).build();
+    isac::TerminalRenderer(sources, color).render(d, std::cerr);
   }
   return 1;
 }

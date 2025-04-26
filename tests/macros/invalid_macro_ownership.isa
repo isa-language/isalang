@@ -1,0 +1,11 @@
+@macro consume {
+  ($v: expr) => {
+    $v.move()
+  }
+}
+fn main() -> i32 {
+  let a = String::from("hi");
+  let b = @consume(a);
+  print(a);
+  return 0;
+}

@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let s = String::from("hello");
+  borrow shared s as v {
+    s.push_str("!");
+  }
+  return 0;
+}

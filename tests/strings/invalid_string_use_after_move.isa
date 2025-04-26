@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let a = String::from("hello");
+  let b = a.move();
+  print(a);
+  return 0;
+}
