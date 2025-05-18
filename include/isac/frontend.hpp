@@ -18,6 +18,7 @@ struct TypeSyntax {
   std::string name = "unit";
   int count = 0;
   Loc loc;
+  bool reference = false, mutableReference = false;
 };
 enum class Access { Own, Shared, Unique };
 const char *accessName(Access);
@@ -40,12 +41,15 @@ struct Expr {
     Char,
     String,
     Block,
-    AtCall
+    AtCall,
+    Borrow
   } kind;
   Loc loc;
   std::string text;
   std::vector<Expr> args;
   std::vector<Stmt> body;
+  Expr();
+  Expr(Kind, Loc, std::string, std::vector<Expr>);
 };
 struct Pattern {
   enum Kind { Wildcard, Binding, Integer, Boolean, Variant } kind;
@@ -64,6 +68,9 @@ struct Stmt {
   Pattern pattern;
   std::vector<Stmt> body, otherwise;
 };
+inline Expr::Expr() : kind(Int) {}
+inline Expr::Expr(Kind k, Loc l, std::string text, std::vector<Expr> args)
+    : kind(k), loc(std::move(l)), text(std::move(text)), args(std::move(args)) {}
 struct Param {
   std::string name;
   TypeSyntax type;

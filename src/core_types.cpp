@@ -163,7 +163,8 @@ void checkTypes(const Program &p) {
               bad();
           }
           if (i.kind == Inst::InputCall &&
-              intrinsicInfo(target.intrinsicId).lowering != IntrinsicLowering::InputRecord)
+              (intrinsicInfo(target.intrinsicId).lowering != IntrinsicLowering::InputRecord ||
+               i.text != target.intrinsic))
             bad();
           if (i.kind == Inst::StringCall &&
               (!target.intrinsic.starts_with("string.") || i.text != target.intrinsic))

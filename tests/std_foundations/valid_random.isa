@@ -1,0 +1,16 @@
+@import "std.random"
+fn main() -> i32 {
+  let rng = Random::new();
+  rng.seed(1u32);
+  @assert(rng.next_u32() == 270369u32);
+  @assert(rng.next_u32() == 67634689u32);
+  for i in 0..1000 {
+    let v = rng.range(-10, 10);
+    @assert(v >= -10 && v < 10);
+    @assert(rng.range(7, 8) == 7);
+    let wide = rng.range(-2147483648, 2147483647);
+    @assert(wide < 2147483647);
+  }
+  print(1);
+  return 0;
+}

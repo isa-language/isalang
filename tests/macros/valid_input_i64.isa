@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let result = @input<i64>();
+  if result.is_ok() {
+    @println("{}", result.value());
+  }
+  return 0;
+}

@@ -1,0 +1,16 @@
+fn run(flag: bool) {
+  let text = String::from("alive");
+  let view = &text;
+  if flag {
+    print(view);
+    return;
+  }
+  print(view);
+  text.push_str("!");
+  print(text);
+}
+fn main() -> i32 {
+  run(true);
+  run(false);
+  return 0;
+}

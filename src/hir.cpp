@@ -17,11 +17,16 @@ class Resolver {
   hir::Function *current = nullptr;
   bool privileged = false;
   uint32_t nextLoop = 0;
+  RegionId nextRegion = 0;
   std::vector<uint32_t> loops;
   void duplicate(Loc l, const std::string &n) {
     fail(l, DiagnosticCode::DuplicateDeclaration, "duplicate declaration `" + n + "`");
   }
-  TypeId getType(const TypeSyntax &s) {
+  TypeId getType(const TypeSyntax &s, bool allowReference = false) {
+    if (s.reference && !allowReference)
+      fail(s.loc, DiagnosticCode::EscapingView,
+           "reference types currently require a local borrow binding; aggregate and function "
+           "region contracts are not implemented");
     auto it = types.find(s.name);
     if (it == types.end())
       fail(s.loc, DiagnosticCode::UnknownName, "unknown type `" + s.name + "`");
@@ -117,14 +122,29 @@ class Resolver {
         alignment = p.target.pointerAlignment;
       } else if (p.linear(id)) {
         size = 8 * t.width;
-        alignment = std::min(8u, p.target.pointerAlignment);
+        alignment = p.target.integerAlignment[3];
       } else {
         size = bitWidth(id, p.target.pointerWidth) / 8;
-        alignment = std::min(static_cast<unsigned>(size), p.target.pointerAlignment);
+        alignment = floating(id) ? p.target.floatAlignment[id == F64]
+                                 : p.target.integerAlignment[size == 1   ? 0
+                                                             : size == 2 ? 1
+                                                             : size == 4 ? 2
+                                                                         : 3];
       }
       e.kind = H::Constant;
       e.type = USize;
       e.text = std::to_string(builtin == macros::BuiltinId::SizeOf ? size : alignment);
+      return e;
+    }
+    if (a.kind == A::Borrow) {
+      e.kind = H::Borrow;
+      e.args.push_back(expr(a.args.at(0)));
+      if (e.args[0].kind != H::Variable)
+        fail(a.loc, DiagnosticCode::InvalidPlace,
+             "this reference increment requires a named owner or borrow");
+      e.type = e.args[0].type;
+      e.borrowKind = a.text == "unique" ? BorrowKind::Unique : BorrowKind::Shared;
+      e.region = nextRegion++;
       return e;
     }
     if (a.kind == A::Block) {
@@ -208,6 +228,10 @@ class Resolver {
       e.args.push_back(expr(x));
     switch (a.kind) {
     case A::Cast: {
+      if (e.args[0].kind == H::Borrow ||
+          (e.args[0].kind == H::Variable && p.symbols[e.args[0].ref].reference))
+        fail(a.loc, DiagnosticCode::InvalidCast,
+             "cannot cast a reference; reference addresses are not exposed to safe code");
       e.kind = H::Cast;
       e.type = getType({a.text, 0, a.loc});
       auto from = e.args[0].type;
@@ -331,15 +355,29 @@ class Resolver {
         break;
       }
       auto method = a.text;
+      std::vector<hir::Stmt> formattingTemps;
       if (method == "append_display" || method == "append_debug") {
         if (p.types[recv.type].representation != hir::Representation::StringRecord ||
             e.args.size() != 2)
           fail(a.loc, DiagnosticCode::FormatType, "format append requires String and one argument");
         auto &value = e.args[1];
         if (p.types[value.type].representation == hir::Representation::StringRecord) {
-          if (value.kind != H::Variable)
-            fail(value.loc, DiagnosticCode::FormatType,
-                 "bind a temporary String before formatting it");
+          if (value.kind != H::Variable) {
+            SymbolId id = p.symbols.size();
+            p.symbols.push_back({id, "$format_value" + std::to_string(id), value.type, Access::Own,
+                                 false, false, value.loc});
+            hir::Stmt binding{};
+            binding.kind = hir::Stmt::Let;
+            binding.symbol = id;
+            binding.loc = value.loc;
+            binding.expr = value;
+            formattingTemps.push_back(std::move(binding));
+            value = {};
+            value.kind = H::Variable;
+            value.ref = id;
+            value.type = p.symbols[id].type;
+            value.loc = a.loc;
+          }
           H view{};
           view.kind = H::Method;
           view.loc = value.loc;
@@ -369,6 +407,15 @@ class Resolver {
       e.kind = H::Method;
       e.type = f.result;
       args(e, f, 0);
+      if (!formattingTemps.empty()) {
+        H block{};
+        block.kind = H::Block;
+        block.loc = a.loc;
+        block.type = e.type;
+        block.body = std::move(formattingTemps);
+        block.args.push_back(std::move(e));
+        return block;
+      }
       break;
     }
     case A::Call: {
@@ -411,10 +458,76 @@ class Resolver {
     }
     return e;
   }
+  bool uses(const ast::Expr &e, const std::string &name, SyntaxContext context) {
+    if (e.kind == ast::Expr::Name && e.text == name && e.loc.context == context)
+      return true;
+    for (auto &a : e.args)
+      if (uses(a, name, context))
+        return true;
+    for (auto &s : e.body)
+      if (uses(s, name, context))
+        return true;
+    return false;
+  }
+  bool uses(const ast::Stmt &s, const std::string &name, SyntaxContext context) {
+    if (uses(s.expr, name, context) || uses(s.limit, name, context))
+      return true;
+    for (auto &b : s.body)
+      if (uses(b, name, context))
+        return true;
+    for (auto &b : s.otherwise)
+      if (uses(b, name, context))
+        return true;
+    return false;
+  }
   std::vector<hir::Stmt> block(const std::vector<ast::Stmt> &ss, bool keepScope = false) {
     scopes.emplace_back();
     std::vector<hir::Stmt> out;
-    for (auto &a : ss) {
+    std::map<size_t, std::vector<hir::Stmt>> endings;
+    for (size_t position = 0; position < ss.size(); ++position) {
+      struct EndRegions {
+        std::function<void()> action;
+        ~EndRegions() {
+          action();
+        }
+      } endRegions{[&] {
+        auto found = endings.find(position);
+        if (found != endings.end())
+          out.insert(out.end(), found->second.begin(), found->second.end());
+      }};
+      auto &a = ss[position];
+      if (a.kind == ast::Stmt::Let && a.expr.kind == ast::Expr::Borrow) {
+        hir::Stmt borrowed{};
+        borrowed.kind = hir::Stmt::BorrowStart;
+        borrowed.loc = a.loc;
+        borrowed.expr = expr(a.expr);
+        borrowed.access =
+            borrowed.expr.borrowKind == BorrowKind::Unique ? Access::Unique : Access::Shared;
+        if (a.annotated && (!a.annotation.reference ||
+                            a.annotation.mutableReference != (borrowed.access == Access::Unique)))
+          fail(a.loc, DiagnosticCode::TypeMismatch,
+               "reference binding requires matching & or &mut annotation");
+        if (a.annotated)
+          same(getType(a.annotation, true), borrowed.expr.type, a.annotation.loc);
+        size_t last = position;
+        for (size_t n = position + 1; n < ss.size(); ++n)
+          if (uses(ss[n], a.name, a.loc.context))
+            last = n;
+        borrowed.symbol = add(a.name, borrowed.expr.type, a.loc, borrowed.access);
+        p.symbols[borrowed.symbol].reference = true;
+        p.symbols[borrowed.symbol].region = borrowed.expr.region;
+        p.symbols[borrowed.symbol].lastUse = ss[last].loc;
+        if (keepScope)
+          last = ss.size() - 1;
+        hir::Stmt end{};
+        end.unconditional = keepScope;
+        end.kind = hir::Stmt::BorrowEnd;
+        end.symbol = borrowed.symbol;
+        end.loc = ss[last].loc;
+        endings[last].push_back(end);
+        out.push_back(std::move(borrowed));
+        continue;
+      }
       hir::Stmt s{};
       s.kind = static_cast<hir::Stmt::Kind>(a.kind);
       s.loc = a.loc;
@@ -535,7 +648,14 @@ class Resolver {
             borrow.loc = pat.loc;
             borrow.access = Access::Shared;
             borrow.symbol = alias;
-            borrow.expr = base;
+            borrow.expr.kind = hir::Expr::Borrow;
+            borrow.expr.loc = pat.loc;
+            borrow.expr.type = base.type;
+            borrow.expr.args = {base};
+            borrow.expr.borrowKind = BorrowKind::Shared;
+            borrow.expr.region = nextRegion++;
+            p.symbols[alias].reference = true;
+            p.symbols[alias].region = borrow.expr.region;
             borrow.body = std::move(body);
             h.body.push_back(borrow);
           } else
@@ -649,7 +769,14 @@ class Resolver {
         continue;
       }
       s.expr = expr(a.expr);
+      if (s.expr.kind == hir::Expr::Borrow)
+        fail(a.loc, DiagnosticCode::EscapingView,
+             "reference expression currently requires a local let binding; reference calls and "
+             "returns need region contracts");
       if (a.kind == ast::Stmt::Let) {
+        if (a.annotated && a.annotation.reference)
+          fail(a.loc, DiagnosticCode::TypeMismatch,
+               "a reference annotation requires a borrow initializer");
         if (s.expr.type == Unit)
           fail(a.loc, DiagnosticCode::TypeMismatch, "cannot bind unit");
         if (a.annotated) {
@@ -668,10 +795,20 @@ class Resolver {
       if (a.kind == ast::Stmt::If)
         same(Bool, s.expr.type, a.loc);
       if (a.kind == ast::Stmt::Borrow) {
-        if (s.expr.kind != hir::Expr::Variable || !p.linear(s.expr.type))
+        if (s.expr.kind != hir::Expr::Variable)
           fail(a.loc, DiagnosticCode::InvalidPlace, "borrow requires a named resource");
         scopes.emplace_back();
         s.symbol = add(a.name, s.expr.type, a.loc, a.access);
+        hir::Expr borrowed{};
+        borrowed.kind = hir::Expr::Borrow;
+        borrowed.loc = a.loc;
+        borrowed.type = s.expr.type;
+        borrowed.args.push_back(s.expr);
+        borrowed.borrowKind = a.access == Access::Unique ? BorrowKind::Unique : BorrowKind::Shared;
+        borrowed.region = nextRegion++;
+        s.expr = std::move(borrowed);
+        p.symbols[s.symbol].reference = true;
+        p.symbols[s.symbol].region = s.expr.region;
         s.body = block(a.body);
         scopes.pop_back();
       } else
@@ -884,6 +1021,10 @@ public:
           fail(a.loc, DiagnosticCode::RestrictedOperation,
                "bundled heap types cannot be extended by application impls");
       }
+      if (a.result.reference)
+        fail(a.result.loc, DiagnosticCode::EscapingView,
+             "reference return requires an inferred input-region contract; returning local owners "
+             "is forbidden");
       f.result = getType(a.result);
       if (f.result == Str && f.intrinsic.empty())
         fail(f.loc, DiagnosticCode::EscapingView,
@@ -894,6 +1035,10 @@ public:
       scopes.emplace_back();
       for (size_t i = 0; i < a.params.size(); ++i) {
         auto &ap = a.params[i];
+        if (ap.type.reference)
+          fail(ap.loc, DiagnosticCode::EscapingView,
+               "reference parameters require function-region contracts, not yet implemented in "
+               "this increment");
         bool self = ap.name == "self";
         if (self && i != 0)
           fail(ap.loc, DiagnosticCode::TypeMismatch, "self must be first");
@@ -916,7 +1061,17 @@ public:
           if (!f.trusted)
             fail(f.loc, DiagnosticCode::RestrictedOperation,
                  "input intrinsics are private library implementation");
-          if (f.intrinsic.starts_with("io.read_")) {
+          if (f.intrinsic.starts_with("io.parse_")) {
+            auto suffix = f.intrinsic.substr(9);
+            auto cap = suffix;
+            cap[0] = static_cast<char>(std::toupper(cap[0]));
+            if (f.owner == None ||
+                p.types[f.owner].representation != hir::Representation::StringRecord ||
+                f.params.size() != 1 || !p.symbols[f.params[0]].receiver ||
+                f.access != Access::Shared || p.types[f.result].name != "Result" + cap ||
+                p.types[f.result].representation != hir::Representation::InputRecord)
+              fail(f.loc, DiagnosticCode::RestrictedOperation, "invalid parsing signature");
+          } else if (f.intrinsic.starts_with("io.read_")) {
             auto suffix = f.intrinsic.substr(8);
             auto cap = suffix;
             cap[0] = static_cast<char>(std::toupper(cap[0]));
@@ -1083,16 +1238,25 @@ public:
     return std::move(p);
   }
 };
+void printS(const std::vector<hir::Stmt> &, std::ostream &, int);
 void printE(const hir::Expr &e, std::ostream &o) {
   static const char *names[] = {"constant", "symbol",         "binary",     "unary", "call",
                                 "method",   "field",          "index",      "array", "assign",
                                 "move",     "drop",           "construct",  "print", "unit",
-                                "cast",     "enum.construct", "static_str", "block"};
+                                "cast",     "enum.construct", "static_str", "block", "borrow"};
   o << names[e.kind] << "<T" << e.type << ">";
+  if (e.kind == hir::Expr::Borrow)
+    o << " region=#R" << e.region
+      << " access=" << (e.borrowKind == BorrowKind::Shared ? "Shared" : "Unique");
   if (e.ref != None)
     o << "#" << e.ref;
   if (!e.text.empty())
     o << " " << (e.kind == hir::Expr::StaticStr ? quoteText(e.text) : e.text);
+  if (!e.body.empty()) {
+    o << " {\n";
+    printS(e.body, o, 4);
+    o << "  }";
+  }
   for (auto &a : e.args) {
     o << " (";
     printE(a, o);
@@ -1100,8 +1264,9 @@ void printE(const hir::Expr &e, std::ostream &o) {
   }
 }
 void printS(const std::vector<hir::Stmt> &ss, std::ostream &o, int d) {
-  static const char *names[] = {"let",  "return", "expr",     "if",    "borrow",
-                                "loop", "break",  "continue", "scope", "match"};
+  static const char *names[] = {"let",    "return", "expr",         "if",
+                                "borrow", "loop",   "break",        "continue",
+                                "scope",  "match",  "borrow.start", "borrow.end"};
   for (auto &s : ss) {
     o << std::string(d, ' ') << names[s.kind];
     if (s.symbol != None)

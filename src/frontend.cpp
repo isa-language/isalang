@@ -250,8 +250,12 @@ class Parser {
     return t;
   }
   TypeSyntax type() {
+    bool reference = eat("&");
+    bool unique = reference && eat("mut");
     auto n = ident();
     TypeSyntax t{n.text, 0, n.loc};
+    t.reference = reference;
+    t.mutableReference = unique;
     if (eat("[")) {
       auto v = peek();
       if (v.kind != Token::Number)
@@ -301,6 +305,9 @@ class Parser {
       e.text = ident().text;
       if (eat("<")) {
         auto t = type();
+        if (t.reference)
+          fail(t.loc, DiagnosticCode::EscapingView,
+               "reference type arguments require complete region contracts");
         e.args.push_back({ast::Expr::Name, t.loc, t.name, {}});
         if (t.count)
           e.args.back().text += "[" + std::to_string(t.count) + "]";
@@ -351,6 +358,10 @@ class Parser {
         } while (eat(","));
         need("]");
       }
+    } else if (eat("&")) {
+      e.kind = ast::Expr::Borrow;
+      e.text = eat("mut") ? "unique" : "shared";
+      e.args.push_back(primary());
     } else if (eat("-") || eat("!")) {
       e.kind = ast::Expr::Unary;
       e.args.push_back(primary());
@@ -420,7 +431,7 @@ class Parser {
     auto e = primary();
     while (allowCast && eat("as")) {
       auto t = type();
-      if (t.count)
+      if (t.count || t.reference)
         fail(t.loc, DiagnosticCode::InvalidCast, "cast target must be scalar");
       e = {ast::Expr::Cast, t.loc, t.name, {std::move(e)}};
     }
@@ -792,17 +803,17 @@ bool parseFragment(const std::vector<Token> &ts, const std::string &kind) {
 }
 static void printStmts(const std::vector<ast::Stmt> &, std::ostream &, int);
 static void printExpr(const ast::Expr &e, std::ostream &o) {
-  static const char *names[] = {"LiteralInt", "LiteralBool",   "Identifier", "Binary",
-                                "Call",       "MethodCall",    "Member",     "Index",
-                                "Array",      "Assignment",    "Unary",      "Cast",
-                                "Char",       "StringLiteral", "BlockExpr",  "AtCall"};
+  static const char *names[] = {
+      "LiteralInt", "LiteralBool",   "Identifier", "Binary",     "Call",      "MethodCall",
+      "Member",     "Index",         "Array",      "Assignment", "Unary",     "Cast",
+      "Char",       "StringLiteral", "BlockExpr",  "AtCall",     "BorrowExpr"};
   o << "(" << names[e.kind] << " " << (e.kind == ast::Expr::String ? quoteText(e.text) : e.text);
+  if (!e.body.empty())
+    printStmts(e.body, o, 2);
   for (auto &a : e.args) {
     o << " ";
     printExpr(a, o);
   }
-  if (!e.body.empty())
-    printStmts(e.body, o, 2);
   o << ")";
 }
 static void printStmts(const std::vector<ast::Stmt> &ss, std::ostream &o, int depth) {

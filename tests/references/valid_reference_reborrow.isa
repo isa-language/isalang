@@ -1,0 +1,13 @@
+struct Data {
+  value: i32,
+}
+fn main() -> i32 {
+  let data = Data::new();
+  let first = &data;
+  let second = &first;
+  print(second.value);
+  let writer = &mut data;
+  writer.value = 12;
+  print(data.value);
+  return 0;
+}

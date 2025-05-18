@@ -52,6 +52,13 @@ typedef struct {
   int32_t error;
 } IsacInputResult;
 
+void isac_rt_input_parse_i32(IsacInputResult *, const IsacString *);
+void isac_rt_input_parse_i64(IsacInputResult *, const IsacString *);
+void isac_rt_input_parse_u32(IsacInputResult *, const IsacString *);
+void isac_rt_input_parse_u64(IsacInputResult *, const IsacString *);
+void isac_rt_input_parse_f32(IsacInputResult *, const IsacString *);
+void isac_rt_input_parse_f64(IsacInputResult *, const IsacString *);
+void isac_rt_input_parse_bool(IsacInputResult *, const IsacString *);
 void isac_rt_input_drop(IsacInputResult *);
 void isac_rt_input_read_String(IsacInputResult *);
 int32_t isac_rt_input_result_ok(const IsacInputResult *);
@@ -83,6 +90,7 @@ void isac_rt_string_clear(IsacString *text);
 void isac_rt_string_drop(IsacString *text);
 void isac_rt_print_str(const uint8_t *ptr, size_t len);
 void isac_rt_print_view(const IsacStr *text);
+void isac_rt_panic_str(const IsacStr *text);
 void isac_rt_string_print(const IsacString *text);
 #ifdef __cplusplus
 [[noreturn]]

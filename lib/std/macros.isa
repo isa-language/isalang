@@ -18,3 +18,26 @@
     @__input($($args) *)
   }
 }
+@macro panic {
+  () => {
+    panic("explicit panic")
+  }
+  ($($args: tt) +) => {
+    {
+      let message = @format($($args) *);
+      panic(message.as_str());
+    }
+  }
+}
+@macro assert {
+  ($condition: expr) => {
+    if !($condition) {
+      panic("assertion failed");
+    }
+  }
+  ($condition: expr, $($args: tt) +) => {
+    if !($condition) {
+      @panic($($args) *);
+    }
+  }
+}

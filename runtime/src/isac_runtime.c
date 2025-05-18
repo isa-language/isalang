@@ -1,7 +1,7 @@
+#include "isac_runtime.h"
+#include <ctype.h>
 #include <errno.h>
 #include <math.h>
-#include <ctype.h>
-#include "isac_runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -207,6 +207,13 @@ void isac_rt_print_str(const uint8_t *ptr, size_t len) {
 void isac_rt_print_view(const IsacStr *text) {
   isac_rt_print_str(text->ptr, text->len);
 }
+void isac_rt_panic_str(const IsacStr *text) {
+  fputs("isac runtime panic: ", stderr);
+  if (text->len)
+    fwrite(text->ptr, 1, text->len, stderr);
+  fputc('\n', stderr);
+  abort();
+}
 void isac_rt_string_print(const IsacString *text) {
   isac_rt_print_str(text->ptr, text->len);
 }
@@ -409,60 +416,74 @@ void isac_rt_input_result_str(IsacStr *out, const IsacInputResult *input) {
   input_require_ok(input);
   isac_rt_string_as_str(out, &input->text);
 }
-static char *input_cstr(IsacInputResult *out) {
-  isac_rt_input_read_String(out);
-  if (out->error)
-    return NULL;
-  if (out->text.len == SIZE_MAX)
+static char *input_cstr(const IsacString *source) {
+  if (source->len == SIZE_MAX)
     isac_rt_panic("input size overflow");
-  char *text = isac_rt_alloc(out->text.len + 1);
-  if (out->text.len)
-    isac_rt_memcpy(text, out->text.ptr, out->text.len);
-  text[out->text.len] = 0;
+  char *text = isac_rt_alloc(source->len + 1);
+  if (source->len)
+    isac_rt_memcpy(text, source->ptr, source->len);
+  text[source->len] = 0;
   return text;
 }
-void isac_rt_input_read_i32(IsacInputResult *out) {
-  char *text = input_cstr(out);
-  if (!text)
-    return;
+void isac_rt_input_parse_i32(IsacInputResult *out, const IsacString *source) {
+  *out = (IsacInputResult){0};
+  char *text = input_cstr(source);
   char *end = text;
   errno = 0;
   long long value = strtoll(text, &end, 10);
   out->value.signed_value = value;
   if (value < INT32_MIN || value > INT32_MAX)
     out->error = 4;
-  if (errno == ERANGE || end == text || (size_t)(end - text) != out->text.len ||
+  if (errno == ERANGE || end == text || (size_t)(end - text) != source->len ||
       isspace((unsigned char)text[0]))
     out->error = 4;
   isac_rt_free(text);
-  isac_rt_string_drop(&out->text);
 }
+void isac_rt_input_read_i32(IsacInputResult *out) {
+  IsacInputResult line;
+  isac_rt_input_read_String(&line);
+  if (line.error) {
+    *out = line;
+    return;
+  }
+  isac_rt_input_parse_i32(out, &line.text);
+  isac_rt_input_drop(&line);
+}
+
 int32_t isac_rt_input_result_i32(const IsacInputResult *out) {
   input_require_ok(out);
   return (int32_t)out->value.signed_value;
 }
-void isac_rt_input_read_i64(IsacInputResult *out) {
-  char *text = input_cstr(out);
-  if (!text)
-    return;
+void isac_rt_input_parse_i64(IsacInputResult *out, const IsacString *source) {
+  *out = (IsacInputResult){0};
+  char *text = input_cstr(source);
   char *end = text;
   errno = 0;
   long long value = strtoll(text, &end, 10);
   out->value.signed_value = value;
-  if (errno == ERANGE || end == text || (size_t)(end - text) != out->text.len ||
+  if (errno == ERANGE || end == text || (size_t)(end - text) != source->len ||
       isspace((unsigned char)text[0]))
     out->error = 4;
   isac_rt_free(text);
-  isac_rt_string_drop(&out->text);
 }
+void isac_rt_input_read_i64(IsacInputResult *out) {
+  IsacInputResult line;
+  isac_rt_input_read_String(&line);
+  if (line.error) {
+    *out = line;
+    return;
+  }
+  isac_rt_input_parse_i64(out, &line.text);
+  isac_rt_input_drop(&line);
+}
+
 int64_t isac_rt_input_result_i64(const IsacInputResult *out) {
   input_require_ok(out);
   return (int64_t)out->value.signed_value;
 }
-void isac_rt_input_read_u32(IsacInputResult *out) {
-  char *text = input_cstr(out);
-  if (!text)
-    return;
+void isac_rt_input_parse_u32(IsacInputResult *out, const IsacString *source) {
+  *out = (IsacInputResult){0};
+  char *text = input_cstr(source);
   char *end = text;
   errno = 0;
   unsigned long long value = strtoull(text, &end, 10);
@@ -471,95 +492,141 @@ void isac_rt_input_read_u32(IsacInputResult *out) {
     out->error = 4;
   if (value > UINT32_MAX)
     out->error = 4;
-  if (errno == ERANGE || end == text || (size_t)(end - text) != out->text.len ||
+  if (errno == ERANGE || end == text || (size_t)(end - text) != source->len ||
       isspace((unsigned char)text[0]))
     out->error = 4;
   isac_rt_free(text);
-  isac_rt_string_drop(&out->text);
 }
+void isac_rt_input_read_u32(IsacInputResult *out) {
+  IsacInputResult line;
+  isac_rt_input_read_String(&line);
+  if (line.error) {
+    *out = line;
+    return;
+  }
+  isac_rt_input_parse_u32(out, &line.text);
+  isac_rt_input_drop(&line);
+}
+
 uint32_t isac_rt_input_result_u32(const IsacInputResult *out) {
   input_require_ok(out);
   return (uint32_t)out->value.unsigned_value;
 }
-void isac_rt_input_read_u64(IsacInputResult *out) {
-  char *text = input_cstr(out);
-  if (!text)
-    return;
+void isac_rt_input_parse_u64(IsacInputResult *out, const IsacString *source) {
+  *out = (IsacInputResult){0};
+  char *text = input_cstr(source);
   char *end = text;
   errno = 0;
   unsigned long long value = strtoull(text, &end, 10);
   out->value.unsigned_value = value;
   if (text[0] == '-')
     out->error = 4;
-  if (errno == ERANGE || end == text || (size_t)(end - text) != out->text.len ||
+  if (errno == ERANGE || end == text || (size_t)(end - text) != source->len ||
       isspace((unsigned char)text[0]))
     out->error = 4;
   isac_rt_free(text);
-  isac_rt_string_drop(&out->text);
 }
+void isac_rt_input_read_u64(IsacInputResult *out) {
+  IsacInputResult line;
+  isac_rt_input_read_String(&line);
+  if (line.error) {
+    *out = line;
+    return;
+  }
+  isac_rt_input_parse_u64(out, &line.text);
+  isac_rt_input_drop(&line);
+}
+
 uint64_t isac_rt_input_result_u64(const IsacInputResult *out) {
   input_require_ok(out);
   return (uint64_t)out->value.unsigned_value;
 }
-void isac_rt_input_read_f32(IsacInputResult *out) {
-  char *text = input_cstr(out);
-  if (!text)
-    return;
+void isac_rt_input_parse_f32(IsacInputResult *out, const IsacString *source) {
+  *out = (IsacInputResult){0};
+  char *text = input_cstr(source);
   char *end = text;
   errno = 0;
   float value = strtof(text, &end);
   out->value.float_value = value;
   if (!isfinite(value))
     out->error = 4;
-  if (errno == ERANGE || end == text || (size_t)(end - text) != out->text.len ||
+  if (errno == ERANGE || end == text || (size_t)(end - text) != source->len ||
       isspace((unsigned char)text[0]))
     out->error = 4;
   isac_rt_free(text);
-  isac_rt_string_drop(&out->text);
 }
+void isac_rt_input_read_f32(IsacInputResult *out) {
+  IsacInputResult line;
+  isac_rt_input_read_String(&line);
+  if (line.error) {
+    *out = line;
+    return;
+  }
+  isac_rt_input_parse_f32(out, &line.text);
+  isac_rt_input_drop(&line);
+}
+
 float isac_rt_input_result_f32(const IsacInputResult *out) {
   input_require_ok(out);
   return (float)out->value.float_value;
 }
-void isac_rt_input_read_f64(IsacInputResult *out) {
-  char *text = input_cstr(out);
-  if (!text)
-    return;
+void isac_rt_input_parse_f64(IsacInputResult *out, const IsacString *source) {
+  *out = (IsacInputResult){0};
+  char *text = input_cstr(source);
   char *end = text;
   errno = 0;
   double value = strtod(text, &end);
   out->value.float_value = value;
   if (!isfinite(value))
     out->error = 4;
-  if (errno == ERANGE || end == text || (size_t)(end - text) != out->text.len ||
+  if (errno == ERANGE || end == text || (size_t)(end - text) != source->len ||
       isspace((unsigned char)text[0]))
     out->error = 4;
   isac_rt_free(text);
-  isac_rt_string_drop(&out->text);
 }
+void isac_rt_input_read_f64(IsacInputResult *out) {
+  IsacInputResult line;
+  isac_rt_input_read_String(&line);
+  if (line.error) {
+    *out = line;
+    return;
+  }
+  isac_rt_input_parse_f64(out, &line.text);
+  isac_rt_input_drop(&line);
+}
+
 double isac_rt_input_result_f64(const IsacInputResult *out) {
   input_require_ok(out);
   return (double)out->value.float_value;
 }
-void isac_rt_input_read_bool(IsacInputResult *out) {
-  char *text = input_cstr(out);
-  if (!text)
-    return;
+void isac_rt_input_parse_bool(IsacInputResult *out, const IsacString *source) {
+  *out = (IsacInputResult){0};
+  char *text = input_cstr(source);
   char *end = text;
   errno = 0;
-  if (out->text.len == 4 && memcmp(text, "true", 4) == 0) {
+  if (source->len == 4 && memcmp(text, "true", 4) == 0) {
     out->value.signed_value = 1;
     end = text + 4;
-  } else if (out->text.len == 5 && memcmp(text, "false", 5) == 0) {
+  } else if (source->len == 5 && memcmp(text, "false", 5) == 0) {
     out->value.signed_value = 0;
     end = text + 5;
   }
-  if (errno == ERANGE || end == text || (size_t)(end - text) != out->text.len ||
+  if (errno == ERANGE || end == text || (size_t)(end - text) != source->len ||
       isspace((unsigned char)text[0]))
     out->error = 4;
   isac_rt_free(text);
-  isac_rt_string_drop(&out->text);
 }
+void isac_rt_input_read_bool(IsacInputResult *out) {
+  IsacInputResult line;
+  isac_rt_input_read_String(&line);
+  if (line.error) {
+    *out = line;
+    return;
+  }
+  isac_rt_input_parse_bool(out, &line.text);
+  isac_rt_input_drop(&line);
+}
+
 int32_t isac_rt_input_result_bool(const IsacInputResult *out) {
   input_require_ok(out);
   return (int32_t)out->value.signed_value;

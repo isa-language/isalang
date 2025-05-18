@@ -1,0 +1,11 @@
+@import "std.string"
+@import "std.result"
+impl String {
+  @intrinsic "io.parse_i32" pub fn parse_i32(shared self) -> ResultI32;
+  @intrinsic "io.parse_i64" pub fn parse_i64(shared self) -> ResultI64;
+  @intrinsic "io.parse_u32" pub fn parse_u32(shared self) -> ResultU32;
+  @intrinsic "io.parse_u64" pub fn parse_u64(shared self) -> ResultU64;
+  @intrinsic "io.parse_f32" pub fn parse_f32(shared self) -> ResultF32;
+  @intrinsic "io.parse_f64" pub fn parse_f64(shared self) -> ResultF64;
+  @intrinsic "io.parse_bool" pub fn parse_bool(shared self) -> ResultBool;
+}

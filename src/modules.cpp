@@ -8,9 +8,10 @@ namespace isac {
 ast::Program loadImports(ast::Program source, SourceManager *sources) {
   ast::Program result;
   std::set<std::string> loaded, loading;
-  const std::set<std::string> allowed = {"core.runtime", "std.mem",    "std.box",    "std.buffer",
-                                         "std.io",       "std.string", "std",        "std.prelude",
-                                         "std.fmt",      "std.macros", "std.option", "std.result"};
+  const std::set<std::string> allowed = {
+      "core.runtime", "std.mem",     "std.box",    "std.buffer",      "std.io",      "std.string",
+      "std",          "std.prelude", "std.fmt",    "std.macros",      "std.option",  "std.result",
+      "std.parse",    "std.math",    "std.random", "std.ui.geometry", "std.ui.color"};
   auto append = [&](ast::Program p) {
     auto offset = result.functions.size();
     for (auto &impl : p.impls)
@@ -33,9 +34,9 @@ ast::Program loadImports(ast::Program source, SourceManager *sources) {
     if (!loading.insert(name).second)
       fail({}, DiagnosticCode::RestrictedOperation, "cyclic module import");
     auto relative = name;
-    auto dot = relative.find('.');
-    if (dot != std::string::npos)
-      relative[dot] = std::filesystem::path::preferred_separator;
+    for (auto &character : relative)
+      if (character == '.')
+        character = std::filesystem::path::preferred_separator;
     auto path = std::filesystem::path(ISAC_LIBRARY_ROOT) / (relative + ".isa");
     std::ifstream file(path);
     if (!file)

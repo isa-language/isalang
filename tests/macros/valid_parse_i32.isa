@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let text = String::from("-42");
+  let result = text.parse_i32();
+  if result.is_ok() {
+    @println("{}", result.value());
+  }
+  print(text);
+  return 0;
+}

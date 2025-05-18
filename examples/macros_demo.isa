@@ -1,0 +1,28 @@
+@import "std"
+
+@macro debug_pair {
+  ($a: expr, $b: expr) => {
+    @println("({}, {})", $a, $b);
+  }
+}
+
+@macro calculate {
+  ($value: expr) => {
+    {
+      let temp = $value;
+      temp * 2
+    }
+  }
+}
+
+fn main() -> i32 {
+  let temp: i32 = 100;
+  let value = @calculate(10 + 5);
+  @debug_pair(temp, value);
+
+  let greeting = @format("Olá, {}!", "Isalang");
+  @println("{}", greeting);
+  greeting.push_str(" UTF-8");
+  @println("{:?}", greeting);
+  return 0;
+}

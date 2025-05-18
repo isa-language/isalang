@@ -1,4 +1,7 @@
 @import "core.runtime"
+pub fn panic(message: str) {
+  isac_rt_panic_str(message);
+}
 pub fn print_i32(value: i32) {
   isac_rt_print_i32(value);
 }

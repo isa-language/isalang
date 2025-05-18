@@ -1,0 +1,27 @@
+{
+  "valid_random": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_geometry": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_assert_lazy": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": null
+  },
+  "invalid_random_shared": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0311"
+  },
+  "invalid_assert_type": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  }
+}

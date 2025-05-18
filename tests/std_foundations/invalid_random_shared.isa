@@ -1,0 +1,8 @@
+@import "std.random"
+fn main() -> i32 {
+  let rng = Random::new();
+  borrow shared rng as view {
+    view.next_u32();
+  }
+  return 0;
+}

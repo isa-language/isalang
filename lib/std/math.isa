@@ -1,0 +1,18 @@
+pub fn min_i32(a: i32, b: i32) -> i32 {
+  if a < b {
+    return a;
+  }
+  return b;
+}
+pub fn max_i32(a: i32, b: i32) -> i32 {
+  if a > b {
+    return a;
+  }
+  return b;
+}
+pub fn clamp_i32(value: i32, low: i32, high: i32) -> i32 {
+  if low > high {
+    panic("clamp requires low <= high");
+  }
+  return min_i32(max_i32(value, low), high);
+}

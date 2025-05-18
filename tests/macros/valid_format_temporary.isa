@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  @println("{}", String::from("temporary"));
+  @println("{}", @format("x = {}", 42));
+  return 0;
+}

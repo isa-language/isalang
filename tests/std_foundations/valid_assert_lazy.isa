@@ -1,0 +1,12 @@
+fn side_effect() -> i32 {
+  print(999);
+  return 0;
+}
+fn condition() -> bool {
+  print(1);
+  return true;
+}
+fn main() -> i32 {
+  @assert(condition(), "unused {}", side_effect());
+  return 0;
+}

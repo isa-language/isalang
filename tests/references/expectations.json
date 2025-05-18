@@ -1,0 +1,102 @@
+{
+  "valid_shared_reference": {
+    "stdout": "0\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_mut_reference": {
+    "stdout": "10\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_explicit_shared_borrow": {
+    "stdout": "0\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_explicit_unique_borrow": {
+    "stdout": "10\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_last_use": {
+    "stdout": "0\n20\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_scope_preservation": {
+    "stdout": "0\nalive\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_shared_aliases": {
+    "stdout": "0\n0\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_reference_annotation": {
+    "stdout": "0\n7\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_reference_loop": {
+    "stdout": "0\n0\n3\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_reference_block_tail": {
+    "stdout": "0\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_shared_then_mut": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_double_mut": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_shared_write": {
+    "stdout": "",
+    "code": "E0311",
+    "stdin": ""
+  },
+  "invalid_reference_cast": {
+    "stdout": "",
+    "code": "E0206",
+    "stdin": ""
+  },
+  "invalid_reference_annotation": {
+    "stdout": "",
+    "code": "E0200",
+    "stdin": ""
+  },
+  "invalid_reference_escape": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "invalid_reference_field": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "valid_reference_reborrow": {
+    "stdout": "0\n12\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_reference_reborrow_conflict": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "valid_reference_early_return": {
+    "stdout": "alive\nalive\nalive!\n",
+    "code": null,
+    "stdin": ""
+  }
+}

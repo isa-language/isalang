@@ -50,6 +50,7 @@ struct Inst {
     InputCall
   } kind;
   Loc loc;
+  RegionId region = None;
   ValueId result = None;
   TypeId type = Unit;
   SymbolId slot = None;

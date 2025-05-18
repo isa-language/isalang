@@ -84,6 +84,11 @@ TargetInfo selectTarget(const TargetOptions &options) {
   t.pointerWidth = dl.getPointerSizeInBits();
   t.pointerAlignment = dl.getPointerABIAlignment(0).value();
   t.littleEndian = dl.isLittleEndian();
+  llvm::LLVMContext context;
+  for (unsigned n = 0; n < 4; ++n)
+    t.integerAlignment[n] = dl.getABITypeAlign(llvm::IntegerType::get(context, 8u << n)).value();
+  t.floatAlignment[0] = dl.getABITypeAlign(llvm::Type::getFloatTy(context)).value();
+  t.floatAlignment[1] = dl.getABITypeAlign(llvm::Type::getDoubleTy(context)).value();
   if (t.pointerWidth != 32 && t.pointerWidth != 64)
     throw std::runtime_error("PoC supports 32-bit and 64-bit pointers");
   return t;

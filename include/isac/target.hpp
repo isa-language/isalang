@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <string>
 namespace isac {
 enum class OptimizationLevel { O0, O1, O2, O3, Os, Oz };
@@ -10,6 +11,8 @@ struct TargetInfo {
   std::string triple, cpu, features, dataLayout;
   unsigned pointerWidth = 64, pointerAlignment = 8;
   bool littleEndian = true;
+  std::array<unsigned, 4> integerAlignment = {1, 2, 4, 8};
+  std::array<unsigned, 2> floatAlignment = {4, 8};
 };
 struct CompilerOptions {
   TargetOptions target;

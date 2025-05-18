@@ -1,0 +1,14 @@
+fn main() -> i32 {
+  let name = @input("Your name: ");
+  if !name.is_ok() {
+    @println("input error: {}", name.error());
+    return 1;
+  }
+  let age = @input<i32>("How old are you, {}? ", name.value());
+  if !age.is_ok() {
+    @println("invalid age: {}", age.error());
+    return 1;
+  }
+  @println("Hello {}, you are {} years old.", name.value(), age.value());
+  return 0;
+}

@@ -39,11 +39,23 @@ class Builder {
       auto instructions = block(e.body);
       auto cleanup = instructions.back();
       instructions.pop_back();
-      out->insert(out->end(), instructions.begin(), instructions.end());
+      std::vector<Inst> endReferences;
+      for (auto &instruction : instructions) {
+        if (instruction.kind == Inst::EndBorrow && instruction.unconditional)
+          endReferences.push_back(instruction);
+        else
+          out->push_back(instruction);
+      }
       auto value = expr(e.args.at(0));
+      if (e.type != Str)
+        emit(make(Inst::EndViews, e.loc), false);
+      for (auto &end : endReferences)
+        emit(end, false);
       emit(cleanup, false);
       return value;
     }
+    case E::Borrow:
+      fail(e.loc, DiagnosticCode::InvalidCore, "unbound BorrowExpr in Core elaboration");
     case E::Cast:
       i.kind = Inst::Cast;
       i.args = {expr(e.args[0])};
@@ -298,14 +310,24 @@ class Builder {
         i.loop = s.loop;
         emit(i, false);
         break;
+      case hir::Stmt::BorrowEnd:
+        i.kind = Inst::EndBorrow;
+        i.slot = s.symbol;
+        i.unconditional = s.unconditional;
+        emit(i, false);
+        break;
+      case hir::Stmt::BorrowStart:
       case hir::Stmt::Borrow:
         i.kind = s.access == Access::Shared ? Inst::BorrowShared : Inst::BorrowUnique;
-        i.slot = s.expr.ref;
+        i.slot = s.expr.args.at(0).ref;
+        i.region = s.expr.region;
         i.offset = s.symbol;
         i.type = s.expr.type;
         i.quantity = Quantity::One;
         i.access = s.access;
         emit(i, false);
+        if (s.kind == hir::Stmt::BorrowStart)
+          break;
         {
           auto b = block(s.body);
           out->insert(out->end(), b.begin(), b.end());
@@ -454,18 +476,24 @@ class Checker {
         std::string reason = r.unique ? "resource already has an active unique borrow"
                                       : "incompatible access while shared borrows are active";
         Loc activeOrigin = r.borrowAt;
+        Loc lastUse;
         for (auto &[alias, resource] : c.vars)
           if (resource.live && resource.root == id) {
             activeOrigin = resource.borrowAt;
+            lastUse = symbol(alias).lastUse;
             break;
           }
-        DiagnosticEngine()
-            .error(DiagnosticCode::InvalidReborrow, l, reason + " for `" + symbol(id).name + "`")
-            .label(l, "incompatible access requested here")
-            .secondary(activeOrigin, "active borrow starts here")
-            .note("unique access requires exclusive access to the resource")
-            .help("end the active borrow before moving, dropping or mutating this resource")
-            .emit();
+        auto diagnostic =
+            DiagnosticEngine()
+                .error(DiagnosticCode::InvalidReborrow, l,
+                       reason + " for `" + symbol(id).name + "`")
+                .label(l, "incompatible access requested here")
+                .secondary(activeOrigin, "active borrow starts here")
+                .note("unique access requires exclusive access to the resource")
+                .help("end the active borrow before moving, dropping or mutating this resource");
+        if (lastUse.span.file != NoFile)
+          diagnostic.secondary(lastUse, "reference last used in this statement");
+        diagnostic.emit();
       }
     }
     if (r.access == Access::Shared && requested != Access::Shared)
@@ -673,7 +701,8 @@ class Checker {
             root.borrowAt = i.loc;
             c.views[i.result] = rid;
           }
-        } else
+        }
+        if (p.semantics.linear(i.type))
           c.values[i.result] = {i.type, None, true, true};
         break;
       }
@@ -986,6 +1015,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
       o << " variant=#V" << i.offset;
     if (i.kind == Inst::Read || i.kind == Inst::Write)
       o << " offset=" << i.offset;
+    if (i.region != None)
+      o << " region=#R" << i.region;
     if (i.kind == Inst::BorrowShared || i.kind == Inst::BorrowUnique)
       o << " as #v" << i.offset;
     if (i.kind == Inst::ProtocolTransition) {

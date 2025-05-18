@@ -144,11 +144,6 @@
     "code": null,
     "stdin": ""
   },
-  "valid_format_many": {
-    "stdout": "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49\n",
-    "code": null,
-    "stdin": ""
-  },
   "invalid_format_missing_arg": {
     "stdout": "",
     "code": "E8004",
@@ -247,6 +242,88 @@
   "invalid_dot_await": {
     "stdout": "",
     "code": "E8006",
+    "stdin": ""
+  },
+  "valid_format_temporary": {
+    "stdout": "temporary\nx = 42\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_parse_i32": {
+    "stdout": "-42\n-42\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_parse_range_error": {
+    "stdout": "4\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_parse_bool_error": {
+    "stdout": "4\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_input_invalid_utf8": {
+    "stdout": "3\n",
+    "code": null,
+    "stdin": "",
+    "stdin_hex": "ff0a"
+  },
+  "valid_input_nul_error": {
+    "stdout": "4\n",
+    "code": null,
+    "stdin": "",
+    "stdin_hex": "313200330a"
+  },
+  "valid_input_empty_line": {
+    "stdout": "[]\n",
+    "code": null,
+    "stdin": "\n"
+  },
+  "valid_input_u32": {
+    "stdout": "4294967295\n",
+    "code": null,
+    "stdin": "4294967295\n"
+  },
+  "valid_input_i64": {
+    "stdout": "-9223372036854775808\n",
+    "code": null,
+    "stdin": "-9223372036854775808\n"
+  },
+  "valid_input_u64": {
+    "stdout": "18446744073709551615\n",
+    "code": null,
+    "stdin": "18446744073709551615\n"
+  },
+  "valid_input_f32": {
+    "stdout": "1.25\n",
+    "code": null,
+    "stdin": "1.25\n"
+  },
+  "invalid_input_type": {
+    "stdout": "",
+    "code": "E8005",
+    "stdin": ""
+  },
+  "invalid_input_view_escape": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_macro_nested_repetition": {
+    "stdout": "",
+    "code": "E8001",
+    "stdin": ""
+  },
+  "invalid_macro_unknown_fragment": {
+    "stdout": "",
+    "code": "E8001",
+    "stdin": ""
+  },
+  "valid_format_many_arguments": {
+    "stdout": "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49\n",
+    "code": null,
     "stdin": ""
   }
 }

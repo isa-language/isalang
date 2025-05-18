@@ -115,6 +115,7 @@ class Eraser {
           i.args.insert(i.args.begin(), slots.at(c.slot));
         bool descriptor = c.text == "string.new" || c.text == "string.from" ||
                           c.text == "string.as_str" || c.text.starts_with("io.read_") ||
+                          c.text.starts_with("io.parse_") ||
                           c.intrinsicId == IntrinsicId::Input_result_str;
         if (descriptor) {
           I alloc{};

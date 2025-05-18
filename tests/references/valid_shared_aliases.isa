@@ -1,0 +1,11 @@
+struct Data {
+  value: i32,
+}
+fn main() -> i32 {
+  let data = Data::new();
+  let a = &data;
+  let b = &data;
+  print(a.value);
+  print(b.value);
+  return 0;
+}

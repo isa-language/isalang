@@ -1,6 +1,6 @@
 #include "isac/macros.hpp"
-#include <functional>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <set>
@@ -439,6 +439,11 @@ class Expander {
                  .contains(type))
           fail(t.token.loc, DiagnosticCode::FormatType,
                "unsupported typed input target `" + type + "`");
+        auto &macro = result.declarations.at(names.at("input"));
+        ExpansionId expansion = result.expansions.size() + 1;
+        t.token.loc.span.end = trees[i + 5].closing.loc.span.end;
+        result.expansions.push_back({expansion, parent, macro.id, t.token.loc, macro.origin});
+        t.token.loc.expansions.push_back({expansion, macro.origin.span, macro.name});
         auto expanded = format(Builtin::Input, trees[i + 5].children, t.token.loc, type);
         expanded = expandTrees(expanded, depth + 1, parent);
         out.insert(out.end(), expanded.begin(), expanded.end());

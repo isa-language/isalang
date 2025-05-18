@@ -1,8 +1,8 @@
 #pragma once
 #include "isac/effects.hpp"
 #include <cstdint>
-#include <string_view>
 #include <string>
+#include <string_view>
 #include <vector>
 namespace isac {
 enum class IntrinsicCategory { Memory, Arithmetic, IO, Compiler, Platform };

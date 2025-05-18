@@ -529,6 +529,13 @@ public:
     declare("isac_rt_string_fmt_str", {ptr, ptr}, {});
     declare("isac_rt_string_fmt_f32", {ptr, builder.getF32Type()}, {});
     declare("isac_rt_string_fmt_f64", {ptr, builder.getF64Type()}, {});
+    declare("isac_rt_input_parse_i32", {ptr, ptr}, {});
+    declare("isac_rt_input_parse_i64", {ptr, ptr}, {});
+    declare("isac_rt_input_parse_u32", {ptr, ptr}, {});
+    declare("isac_rt_input_parse_u64", {ptr, ptr}, {});
+    declare("isac_rt_input_parse_f32", {ptr, ptr}, {});
+    declare("isac_rt_input_parse_f64", {ptr, ptr}, {});
+    declare("isac_rt_input_parse_bool", {ptr, ptr}, {});
     declare("isac_rt_input_read_String", {ptr}, {});
     declare("isac_rt_input_drop", {ptr}, {});
     declare("isac_rt_input_result_ok", {ptr}, {i32});

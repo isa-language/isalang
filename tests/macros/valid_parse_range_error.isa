@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let text = String::from("2147483648");
+  let result = text.parse_i32();
+  print(result.error());
+  return 0;
+}

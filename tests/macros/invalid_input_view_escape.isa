@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let view = {
+    let result = @input();
+    result.value()
+  };
+  print(view);
+  return 0;
+}

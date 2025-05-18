@@ -1,7 +1,7 @@
 #include "isac/intrinsics.hpp"
 #include "isac/hir.hpp"
-#include <unordered_map>
 #include <stdexcept>
+#include <unordered_map>
 namespace isac {
 static const IntrinsicInfo registry[] = {
     {IntrinsicId::None, "", IntrinsicCategory::Compiler, IntrinsicLowering::ExternalCall, {}},
@@ -61,6 +61,8 @@ std::vector<uint32_t> intrinsicSignature(IntrinsicId id, uint32_t owner, uint32_
   if (info.lowering == IntrinsicLowering::InputRecord) {
     if (name.starts_with("io.read_"))
       return {result};
+    if (name.starts_with("io.parse_"))
+      return {result, owner};
     if (id == IntrinsicId::Input_result_error)
       return {I32, owner};
     if (id == IntrinsicId::Input_result_ok)
@@ -68,6 +70,7 @@ std::vector<uint32_t> intrinsicSignature(IntrinsicId id, uint32_t owner, uint32_
     return {primitives.at(name.substr(10)), owner};
   }
   static const std::unordered_map<std::string, std::vector<TypeId>> abi = {
+      {"isac_rt_panic_str", {Unit, Str}},
       {"isac_rt_stdout_write", {Unit, Str}},
       {"isac_rt_stderr_write", {Unit, Str}},
       {"isac_rt_alloc", {RawPtr, USize}},

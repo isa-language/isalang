@@ -1,0 +1,8 @@
+struct Data {
+  value: i32,
+}
+fn main() -> i32 {
+  let data = Data::new();
+  let r: &mut Data = &data;
+  return 0;
+}

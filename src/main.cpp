@@ -1,7 +1,7 @@
 #include "isac/backend.hpp"
-#include "isac/macros.hpp"
-#include "isac/liveness.hpp"
 #include "isac/erasure.hpp"
+#include "isac/liveness.hpp"
+#include "isac/macros.hpp"
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -9,7 +9,8 @@
 int main(int argc, char **argv) {
   const char *usage =
       "usage: isac file.isa [--check | --emit-tokens | --emit-ast | --emit-hir | "
-      "--emit-core | --emit-erased | --emit-lir | --emit-mlir | --emit-std-mlir | "
+      "--emit-expanded | --emit-core | --emit-erased | --emit-lir | --emit-liveness | --emit-mlir "
+      "| --emit-std-mlir | "
       "--emit-llvm-dialect | --emit-llvm | --emit-asm | --emit-obj | -o executable "
       "[--sanitize] [--runtime-test-counters]]\nOptions: --target=TRIPLE --cpu=CPU "
       "--features=+FEATURE -O0/-O1/-O2/-O3/-Os/-Oz --print-target --color=auto/always/never\n";

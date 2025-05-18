@@ -1,0 +1,36 @@
+pub struct Random {
+  state: u32,
+}
+impl Random {
+  pub fn seed(unique self, seed: u32) {
+    self.state = seed;
+    if self.state == 0u32 {
+      self.state = 1831565813u32;
+    }
+  }
+  pub fn next_u32(unique self) -> u32 {
+    let x = self.state;
+    if x == 0u32 {
+      x = 1831565813u32;
+    }
+    x = x ^(x << 13u32);
+    x = x ^(x >> 17u32);
+    x = x ^(x << 5u32);
+    self.state = x;
+    return x;
+  }
+
+  pub fn range(unique self, low: i32, high: i32) -> i32 {
+    if low >= high {
+      panic("Random.range requires low < high");
+    }
+    let span =((high as i64) -(low as i64)) as u32;
+    let threshold =(0u32 - span) % span;
+    loop {
+      let value = self.next_u32();
+      if value >= threshold {
+        return((low as i64) +((value % span) as i64)) as i32;
+      }
+    }
+  }
+}

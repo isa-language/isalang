@@ -29,9 +29,11 @@ else:
         assert built.returncode == 0, built.stderr
         run = subprocess.run(
             [str(executable)],
-            input=expected["stdin"],
+            input=bytes.fromhex(expected["stdin_hex"])
+            if "stdin_hex" in expected
+            else expected["stdin"].encode(),
             capture_output=True,
-            text=True,
+            timeout=15,
             env={
                 **os.environ,
                 "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
@@ -39,5 +41,5 @@ else:
             },
         )
         assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-        assert run.stdout == expected["stdout"], (run.stdout, expected["stdout"])
+        assert run.stdout.decode() == expected["stdout"], (run.stdout[:4096], expected["stdout"])
         assert not run.stderr, run.stderr

@@ -4,6 +4,8 @@
 #include "isac/target.hpp"
 #include <limits>
 namespace isac {
+using RegionId = uint32_t;
+enum class BorrowKind { Shared, Unique };
 using EnumId = uint32_t;
 using VariantId = uint32_t;
 using LoopId = uint32_t;
@@ -81,6 +83,9 @@ struct Symbol {
   Access access = Access::Own;
   bool parameter = false, receiver = false;
   Loc loc;
+  bool reference = false;
+  RegionId region = None;
+  Loc lastUse = {};
 };
 struct Stmt;
 struct Expr {
@@ -103,10 +108,13 @@ struct Expr {
     Cast,
     EnumConstruct,
     StaticStr,
-    Block
+    Block,
+    Borrow
   } kind;
   Loc loc;
   bool inferredLiteral = false;
+  BorrowKind borrowKind = BorrowKind::Shared;
+  RegionId region = None;
   enum class OperatorClass {
     Other,
     Arithmetic,
@@ -121,7 +129,20 @@ struct Expr {
   std::vector<Stmt> body;
 };
 struct Stmt {
-  enum Kind { Let, Return, Expression, If, Borrow, Loop, Break, Continue, Scope, Match } kind;
+  enum Kind {
+    Let,
+    Return,
+    Expression,
+    If,
+    Borrow,
+    Loop,
+    Break,
+    Continue,
+    Scope,
+    Match,
+    BorrowStart,
+    BorrowEnd
+  } kind;
   Loc loc;
   SymbolId symbol = None;
   uint32_t loop = None;

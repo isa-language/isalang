@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let text = String::from("False");
+  let result = text.parse_bool();
+  print(result.error());
+  return 0;
+}
