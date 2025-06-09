@@ -1,0 +1,53 @@
+@import "core.runtime"
+
+pub struct Duration {
+  nanos: u64,
+}
+impl Duration {
+  pub fn set_nanos(unique self, value: u64) {
+    self.nanos = value;
+  }
+  pub fn as_nanos(shared self) -> u64 {
+    return self.nanos;
+  }
+  pub fn as_millis(shared self) -> u64 {
+    return self.nanos / 1000000u64;
+  }
+  pub fn as_seconds(shared self) -> f64 {
+    return(self.nanos as f64) / 1000000000.0;
+  }
+}
+
+pub struct Instant {
+  ticks: u64,
+  initialized: bool,
+}
+impl Instant {
+  pub fn reset(unique self) {
+    self.ticks = isac_rt_monotonic_ns();
+    self.initialized = true;
+  }
+  pub fn elapsed_nanos(shared self) -> u64 {
+    if !self.initialized {
+      panic("Instant requires reset before elapsed_nanos");
+    }
+    return isac_rt_monotonic_ns() - self.ticks;
+  }
+}
+
+pub struct Clock {
+  ticks: u64,
+  initialized: bool,
+}
+impl Clock {
+  pub fn delta(unique self) -> f64 {
+    let now = isac_rt_monotonic_ns();
+    let elapsed = 0u64;
+    if self.initialized {
+      elapsed = now - self.ticks;
+    }
+    self.ticks = now;
+    self.initialized = true;
+    return(elapsed as f64) / 1000000000.0;
+  }
+}

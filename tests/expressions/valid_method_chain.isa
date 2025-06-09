@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let result = @input();
+  result.value().parse_i32();
+  print(result.value().parse_i32().value());
+  return 0;
+}

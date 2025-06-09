@@ -1,0 +1,21 @@
+@import "std.time"
+fn main() -> i32 {
+  let duration = Duration::new();
+  duration.set_nanos(1500000000u64);
+  @assert(duration.as_nanos() == 1500000000u64);
+  @assert(duration.as_millis() == 1500u64);
+  @assert(duration.as_seconds() == 1.5);
+  let instant = Instant::new();
+  instant.reset();
+  let first = instant.elapsed_nanos();
+  let second = instant.elapsed_nanos();
+  @assert(second >= first);
+  let clock = Clock::new();
+  @assert(clock.delta() == 0.0);
+  @assert(clock.delta() >= 0.0);
+  borrow shared duration as view {
+    @assert(view.as_millis() == 1500u64);
+  }
+  print(1);
+  return 0;
+}

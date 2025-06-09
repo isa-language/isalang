@@ -8,7 +8,7 @@ compiler, root = sys.argv[1:3]
 root = Path(root)
 with tempfile.TemporaryDirectory() as temporary:
     tmp = Path(temporary)
-    for name in ("valid_random", "valid_geometry", "valid_assert_lazy"):
+    for name in ("valid_random", "valid_geometry", "valid_assert_lazy", "valid_time"):
         source = root / "tests/std_foundations" / (name + ".isa")
         for opt in ("-O0", "-O2"):
             executable = tmp / (name + opt)
@@ -20,10 +20,15 @@ with tempfile.TemporaryDirectory() as temporary:
         ("panic", '@panic("Ol\u00e1 {}", 7);', "Ol\u00e1 7".encode()),
         ("range", "let rng = Random::new(); rng.range(4, 4);", b"low < high"),
         ("clamp", "clamp_i32(0, 2, 1);", b"low <= high"),
+        (
+            "instant",
+            "let instant = Instant::new(); instant.elapsed_nanos();",
+            b"Instant requires reset",
+        ),
     ):
         source = tmp / (name + ".isa")
         source.write_text(
-            '@import "std.random"\n@import "std.math"\nfn main() -> i32 {'
+            '@import "std.random"\n@import "std.math"\n@import "std.time"\nfn main() -> i32 {'
             + program
             + " return 0; }\n"
         )

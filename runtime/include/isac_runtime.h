@@ -6,6 +6,7 @@
 extern "C" {
 #endif
 void *isac_rt_alloc(size_t size);
+uint64_t isac_rt_monotonic_ns(void);
 void *isac_rt_alloc_zeroed(size_t size);
 void isac_rt_free(void *ptr);
 void *isac_rt_memcpy(void *dst, const void *src, size_t size);
@@ -59,6 +60,14 @@ void isac_rt_input_parse_u64(IsacInputResult *, const IsacString *);
 void isac_rt_input_parse_f32(IsacInputResult *, const IsacString *);
 void isac_rt_input_parse_f64(IsacInputResult *, const IsacString *);
 void isac_rt_input_parse_bool(IsacInputResult *, const IsacString *);
+void isac_rt_input_parse_view_i32(IsacInputResult *, const IsacStr *);
+void isac_rt_input_parse_view_i64(IsacInputResult *, const IsacStr *);
+void isac_rt_input_parse_view_u32(IsacInputResult *, const IsacStr *);
+void isac_rt_input_parse_view_u64(IsacInputResult *, const IsacStr *);
+void isac_rt_input_parse_view_f32(IsacInputResult *, const IsacStr *);
+void isac_rt_input_parse_view_f64(IsacInputResult *, const IsacStr *);
+void isac_rt_input_parse_view_bool(IsacInputResult *, const IsacStr *);
+
 void isac_rt_input_drop(IsacInputResult *);
 void isac_rt_input_read_String(IsacInputResult *);
 int32_t isac_rt_input_result_ok(const IsacInputResult *);

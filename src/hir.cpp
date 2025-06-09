@@ -147,6 +147,28 @@ class Resolver {
       e.region = nextRegion++;
       return e;
     }
+    if (a.kind == A::Match) {
+      ast::Stmt match{};
+      match.kind = ast::Stmt::Match;
+      match.loc = a.loc;
+      match.expr = a.args.at(0);
+      match.body = a.body;
+      match.expressionMatch = true;
+      e.kind = H::Match;
+      e.body = block({match});
+      auto id = e.body.at(0).body.back().matchResult;
+      auto resultBinding = e.body.at(0).body.front();
+      e.body.at(0).body.erase(e.body.at(0).body.begin());
+      e.body.insert(e.body.begin(), std::move(resultBinding));
+      e.type = p.symbols.at(id).type;
+      H value{};
+      value.kind = H::Variable;
+      value.loc = a.loc;
+      value.type = e.type;
+      value.ref = id;
+      e.args.push_back(value);
+      return e;
+    }
     if (a.kind == A::Block) {
       e.kind = H::Block;
       e.body = block(a.body, true);
@@ -307,8 +329,6 @@ class Resolver {
       e.kind = H::Field;
       e.ref = it->offset;
       e.type = it->type;
-      if (!place(e.args[0]))
-        fail(a.loc, DiagnosticCode::TypeMismatch, "field base must be a local place");
       break;
     }
     case A::Index: {
@@ -324,8 +344,6 @@ class Resolver {
       e.kind = H::Index;
       e.ref = n;
       e.type = t.element;
-      if (!place(e.args[0]))
-        fail(a.loc, DiagnosticCode::TypeMismatch, "array base must be a local place");
       break;
     }
     case A::Assign:
@@ -345,9 +363,9 @@ class Resolver {
       break;
     case A::Method: {
       auto &recv = e.args[0];
-      if (recv.kind != H::Variable)
-        fail(a.loc, DiagnosticCode::InvalidPlace, "method receiver must be a local name");
       if (a.text == "move" || a.text == "drop") {
+        if (recv.kind != H::Variable)
+          fail(a.loc, DiagnosticCode::InvalidPlace, "explicit move/drop requires a named place");
         if (e.args.size() != 1)
           fail(a.loc, DiagnosticCode::ArgumentMismatch, "move/drop take no arguments");
         e.kind = a.text == "move" ? H::Move : H::Drop;
@@ -399,7 +417,11 @@ class Resolver {
       }
       auto key = p.types[recv.type].name + "::" + method;
       if (!functions.contains(key))
-        fail(a.loc, DiagnosticCode::UnknownName, "unknown method `" + key + "`");
+        DiagnosticEngine()
+            .error(DiagnosticCode::UnknownName, a.loc,
+                   "no method `" + method + "` for type `" + p.types[recv.type].name + "`")
+            .secondary(recv.loc, "receiver expression produces `" + p.types[recv.type].name + "`")
+            .emit();
       e.ref = functions[key];
       auto &f = p.functions[e.ref];
       if (f.params.empty() || !p.symbols[f.params[0]].receiver)
@@ -539,10 +561,13 @@ class Resolver {
         s.expr = expr(a.expr);
         auto tid = s.expr.type;
         auto t = p.types[tid];
-        if (t.kind != hir::Type::Enum && tid != Bool && !integer(tid))
+        if (t.kind != hir::Type::Enum && tid != Bool && tid != Char && !integer(tid))
           fail(a.loc, DiagnosticCode::InvalidPattern, "match requires enum, bool or integer");
         scopes.emplace_back();
         std::vector<H> prefix;
+        TypeId armType = None;
+        if (a.expressionMatch)
+          s.matchResult = add("$match_result" + std::to_string(p.symbols.size()), Unit, a.loc);
         if (t.kind == hir::Type::Enum && s.expr.kind == hir::Expr::Variable)
           s.symbol = s.expr.ref;
         else {
@@ -566,8 +591,17 @@ class Resolver {
           h.kind = H::Scope;
           h.loc = arm.loc;
           auto &pat = arm.pattern;
-          if (all)
-            fail(pat.loc, DiagnosticCode::UnreachableArm, "unreachable match arm");
+          if (all) {
+            if (!a.expressionMatch)
+              fail(pat.loc, DiagnosticCode::UnreachableArm, "unreachable match arm");
+            auto warning = DiagnosticEngine()
+                               .error(DiagnosticCode::UnreachableMatchArmWarning, pat.loc,
+                                      "unreachable match arm")
+                               .build();
+            warning.severity = DiagnosticSeverity::Warning;
+            p.warnings.push_back(std::move(warning));
+            continue;
+          }
           scopes.emplace_back();
           SymbolId alias = None;
           h.catchall = pat.kind == ast::Pattern::Wildcard || pat.kind == ast::Pattern::Binding;
@@ -624,6 +658,7 @@ class Resolver {
                 }
             } else {
               if ((tid == Bool) != (pat.kind == ast::Pattern::Boolean) ||
+                  (tid == Char) != (pat.kind == ast::Pattern::Character) ||
                   pat.kind == ast::Pattern::Variant)
                 fail(pat.loc, DiagnosticCode::InvalidPattern,
                      "pattern type does not match scrutinee");
@@ -642,6 +677,35 @@ class Resolver {
             h.expr.args = {lhs, rhs};
           }
           auto body = block(arm.body);
+          if (a.expressionMatch) {
+            auto value = expr(arm.expr);
+            if (armType == None) {
+              armType = value.type;
+              if (!scalar(armType))
+                fail(arm.loc, DiagnosticCode::TypeMismatch,
+                     "this match expression increment requires scalar arm results");
+              p.symbols[s.matchResult].type = armType;
+            } else if (value.type != armType) {
+              DiagnosticEngine()
+                  .error(DiagnosticCode::TypeMismatch, value.loc, "incompatible match arm types")
+                  .note("first arm: " + p.types[armType].name)
+                  .note("this arm: " + p.types[value.type].name)
+                  .emit();
+            }
+            H assignment{};
+            assignment.kind = H::Expression;
+            assignment.loc = arm.loc;
+            assignment.expr.kind = hir::Expr::Assign;
+            assignment.expr.loc = arm.loc;
+            assignment.expr.type = Unit;
+            hir::Expr result{};
+            result.kind = hir::Expr::Variable;
+            result.type = armType;
+            result.ref = s.matchResult;
+            result.loc = arm.loc;
+            assignment.expr.args = {result, value};
+            body.push_back(std::move(assignment));
+          }
           if (alias != None) {
             H borrow{};
             borrow.kind = H::Borrow;
@@ -679,6 +743,19 @@ class Resolver {
           if (!missing.empty())
             fail(a.loc, DiagnosticCode::NonExhaustiveMatch,
                  "non-exhaustive match\nmissing pattern:" + missing);
+        }
+        if (a.expressionMatch) {
+          if (armType == None)
+            fail(a.loc, DiagnosticCode::NonExhaustiveMatch, "match expression requires an arm");
+          H result{};
+          result.kind = H::Let;
+          result.loc = a.loc;
+          result.symbol = s.matchResult;
+          result.expr.kind = hir::Expr::Constant;
+          result.expr.loc = a.loc;
+          result.expr.type = armType;
+          result.expr.text = "0";
+          prefix.insert(prefix.begin(), std::move(result));
         }
         scopes.pop_back();
         prefix.push_back(s);
@@ -992,7 +1069,9 @@ public:
              "heap wrappers require one private RawPtr field");
     }
     for (const auto &impl : ast.impls)
-      if (!types.contains(impl.owner) || p.types[types.at(impl.owner)].kind != hir::Type::Structure)
+      if (!types.contains(impl.owner) ||
+          (p.types[types.at(impl.owner)].kind != hir::Type::Structure &&
+           types.at(impl.owner) != Str))
         fail(impl.loc, DiagnosticCode::UnknownName, "unknown impl struct `" + impl.owner + "`");
     for (auto &a : ast.functions) {
       privileged = a.trusted;
@@ -1014,10 +1093,11 @@ public:
         duplicate(a.loc, f.name);
       functions[f.name] = f.id;
       if (!a.owner.empty()) {
-        if (!types.contains(a.owner) || p.types[types[a.owner]].kind != hir::Type::Structure)
+        if (!types.contains(a.owner) ||
+            (p.types[types[a.owner]].kind != hir::Type::Structure && types[a.owner] != Str))
           fail(a.loc, DiagnosticCode::UnknownName, "unknown impl struct");
         f.owner = types[a.owner];
-        if (p.heap(f.owner) && !a.trusted)
+        if ((p.heap(f.owner) || f.owner == Str) && !a.trusted)
           fail(a.loc, DiagnosticCode::RestrictedOperation,
                "bundled heap types cannot be extended by application impls");
       }
@@ -1062,11 +1142,13 @@ public:
             fail(f.loc, DiagnosticCode::RestrictedOperation,
                  "input intrinsics are private library implementation");
           if (f.intrinsic.starts_with("io.parse_")) {
-            auto suffix = f.intrinsic.substr(9);
+            bool view = f.intrinsic.starts_with("io.parse_view_");
+            auto suffix = f.intrinsic.substr(view ? 14 : 9);
             auto cap = suffix;
             cap[0] = static_cast<char>(std::toupper(cap[0]));
             if (f.owner == None ||
-                p.types[f.owner].representation != hir::Representation::StringRecord ||
+                (view ? f.owner != Str
+                      : p.types[f.owner].representation != hir::Representation::StringRecord) ||
                 f.params.size() != 1 || !p.symbols[f.params[0]].receiver ||
                 f.access != Access::Shared || p.types[f.result].name != "Result" + cap ||
                 p.types[f.result].representation != hir::Representation::InputRecord)
@@ -1240,10 +1322,10 @@ public:
 };
 void printS(const std::vector<hir::Stmt> &, std::ostream &, int);
 void printE(const hir::Expr &e, std::ostream &o) {
-  static const char *names[] = {"constant", "symbol",         "binary",     "unary", "call",
-                                "method",   "field",          "index",      "array", "assign",
-                                "move",     "drop",           "construct",  "print", "unit",
-                                "cast",     "enum.construct", "static_str", "block", "borrow"};
+  static const char *names[] = {
+      "constant", "symbol", "binary",         "unary",      "call",  "method",    "field",
+      "index",    "array",  "assign",         "move",       "drop",  "construct", "print",
+      "unit",     "cast",   "enum.construct", "static_str", "block", "borrow",    "match"};
   o << names[e.kind] << "<T" << e.type << ">";
   if (e.kind == hir::Expr::Borrow)
     o << " region=#R" << e.region

@@ -23,5 +23,15 @@
     "stdout": "",
     "stdin": "",
     "code": "E0200"
+  },
+  "valid_time": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": null
+  },
+  "invalid_clock_shared": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0311"
   }
 }

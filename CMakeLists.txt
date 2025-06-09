@@ -22,8 +22,10 @@ add_library(
   src/runtime.cpp
   src/liveness.cpp)
 target_include_directories(isac_frontend PUBLIC include)
-target_compile_definitions(isac_frontend
-                           PRIVATE ISAC_LIBRARY_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/lib")
+set(ISAC_LIBRARY_ROOT
+    "/usr/lib/isac/lib"
+    CACHE PATH "Path to the trusted Isalang standard library")
+target_compile_definitions(isac_frontend PRIVATE ISAC_LIBRARY_ROOT="${ISAC_LIBRARY_ROOT}")
 target_compile_options(isac_frontend PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(isac src/main.cpp)
@@ -271,6 +273,19 @@ if(BUILD_TESTING)
 endif()
 if(BUILD_TESTING)
   file(GLOB REFERENCE_CASES CONFIGURE_DEPENDS tests/references/*.isa)
+  file(GLOB EXPRESSION_CASES CONFIGURE_DEPENDS tests/expressions/*.isa)
+  foreach(CASE IN LISTS EXPRESSION_CASES)
+    get_filename_component(NAME ${CASE} NAME_WE)
+    add_test(NAME expression_${NAME}
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_test.py
+                     $<TARGET_FILE:isac> ${CASE})
+    if(NAME MATCHES "^valid_" AND ISAC_SANITIZER_STATUS EQUAL 0)
+      add_test(NAME expression_sanitized_${NAME}
+               COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_test.py
+                       $<TARGET_FILE:isac> ${CASE} sanitized)
+      set_tests_properties(expression_sanitized_${NAME} PROPERTIES LABELS "sanitizers")
+    endif()
+  endforeach()
   foreach(CASE IN LISTS REFERENCE_CASES)
     get_filename_component(NAME ${CASE} NAME_WE)
     add_test(NAME reference_${NAME}

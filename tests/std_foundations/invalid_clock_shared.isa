@@ -1,0 +1,8 @@
+@import "std.time"
+fn main() -> i32 {
+  let clock = Clock::new();
+  borrow shared clock as view {
+    view.delta();
+  }
+  return 0;
+}

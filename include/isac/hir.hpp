@@ -86,6 +86,7 @@ struct Symbol {
   bool reference = false;
   RegionId region = None;
   Loc lastUse = {};
+  bool temporary = false;
 };
 struct Stmt;
 struct Expr {
@@ -109,7 +110,8 @@ struct Expr {
     EnumConstruct,
     StaticStr,
     Block,
-    Borrow
+    Borrow,
+    Match
   } kind;
   Loc loc;
   bool inferredLiteral = false;
@@ -145,6 +147,7 @@ struct Stmt {
   } kind;
   Loc loc;
   SymbolId symbol = None;
+  SymbolId matchResult = None;
   uint32_t loop = None;
   bool unconditional = false;
   VariantId variant = None;
@@ -169,6 +172,7 @@ struct Function {
   Loc loc;
 };
 struct Program {
+  std::vector<Diagnostic> warnings;
   TargetInfo target;
   std::vector<Type> types;
   std::vector<Protocol> protocols;

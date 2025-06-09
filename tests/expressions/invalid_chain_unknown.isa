@@ -1,0 +1,4 @@
+fn main() -> i32 {
+  String::from("42").as_str().unknown();
+  return 0;
+}

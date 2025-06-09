@@ -297,6 +297,40 @@ class Parser {
       return 11;
     return 0;
   }
+  ast::Pattern pattern() {
+    ast::Pattern p{};
+    p.loc = peek().loc;
+    if (eat("_"))
+      p.kind = ast::Pattern::Wildcard;
+    else if (peek().text == "true" || peek().text == "false") {
+      p.kind = ast::Pattern::Boolean;
+      p.name = ts[pos++].text;
+    } else if (peek().kind == Token::Character) {
+      p.kind = ast::Pattern::Character;
+      p.name = ts[pos++].text;
+    } else if (peek().kind == Token::Number || peek().text == "-") {
+      p.kind = ast::Pattern::Integer;
+      if (eat("-"))
+        p.name = "-";
+      p.name += ts[pos++].text;
+    } else {
+      p.name = ident().text;
+      p.kind = ast::Pattern::Binding;
+      if (eat("::")) {
+        p.kind = ast::Pattern::Variant;
+        p.name += "::" + ident().text;
+        if (eat("(")) {
+          if (!eat(")")) {
+            do {
+              p.bindings.push_back(ident().text);
+            } while (eat(","));
+            need(")");
+          }
+        }
+      }
+    }
+    return p;
+  }
   ast::Expr primary() {
     Token t = peek();
     ast::Expr e{ast::Expr::Name, t.loc, t.text, {}};
@@ -320,14 +354,29 @@ class Parser {
         } while (eat(","));
         need(")");
       }
+    } else if (eat("match")) {
+      e.kind = ast::Expr::Match;
+      e.text.clear();
+      e.args.push_back(expr());
+      need("{");
+      while (!eat("}")) {
+        ast::Stmt arm{};
+        arm.kind = ast::Stmt::Expression;
+        arm.loc = peek().loc;
+        arm.pattern = pattern();
+        need("=>");
+        arm.expr = expr();
+        e.body.push_back(std::move(arm));
+        if (!eat(",") && peek().text != "}")
+          fail(peek().loc, DiagnosticCode::UnexpectedToken, "expected comma after match arm");
+      }
     } else if (eat("{")) {
       e.kind = ast::Expr::Block;
       e.text.clear();
       while (!eat("}")) {
         if (peek().text == "let" || peek().text == "if" || peek().text == "while" ||
             peek().text == "loop" || peek().text == "for" || peek().text == "borrow" ||
-            peek().text == "return" || peek().text == "match" || peek().text == "break" ||
-            peek().text == "continue") {
+            peek().text == "return" || peek().text == "break" || peek().text == "continue") {
           e.body.push_back(stmt());
           continue;
         }
@@ -504,34 +553,7 @@ class Parser {
         ast::Stmt arm{};
         arm.kind = ast::Stmt::Expression;
         arm.loc = peek().loc;
-        auto &p = arm.pattern;
-        p.loc = peek().loc;
-        if (eat("_"))
-          p.kind = ast::Pattern::Wildcard;
-        else if (peek().text == "true" || peek().text == "false") {
-          p.kind = ast::Pattern::Boolean;
-          p.name = ts[pos++].text;
-        } else if (peek().kind == Token::Number || peek().text == "-") {
-          p.kind = ast::Pattern::Integer;
-          if (eat("-"))
-            p.name = "-";
-          p.name += ts[pos++].text;
-        } else {
-          p.name = ident().text;
-          p.kind = ast::Pattern::Binding;
-          if (eat("::")) {
-            p.kind = ast::Pattern::Variant;
-            p.name += "::" + ident().text;
-            if (eat("(")) {
-              if (!eat(")")) {
-                do {
-                  p.bindings.push_back(ident().text);
-                } while (eat(","));
-                need(")");
-              }
-            }
-          }
-        }
+        arm.pattern = pattern();
         need("=>");
         if (peek().text == "{")
           arm.body = block();
@@ -804,9 +826,9 @@ bool parseFragment(const std::vector<Token> &ts, const std::string &kind) {
 static void printStmts(const std::vector<ast::Stmt> &, std::ostream &, int);
 static void printExpr(const ast::Expr &e, std::ostream &o) {
   static const char *names[] = {
-      "LiteralInt", "LiteralBool",   "Identifier", "Binary",     "Call",      "MethodCall",
-      "Member",     "Index",         "Array",      "Assignment", "Unary",     "Cast",
-      "Char",       "StringLiteral", "BlockExpr",  "AtCall",     "BorrowExpr"};
+      "LiteralInt", "LiteralBool",   "Identifier", "Binary",     "Call",       "MethodCall",
+      "Member",     "Index",         "Array",      "Assignment", "Unary",      "Cast",
+      "Char",       "StringLiteral", "BlockExpr",  "AtCall",     "BorrowExpr", "MatchExpr"};
   o << "(" << names[e.kind] << " " << (e.kind == ast::Expr::String ? quoteText(e.text) : e.text);
   if (!e.body.empty())
     printStmts(e.body, o, 2);

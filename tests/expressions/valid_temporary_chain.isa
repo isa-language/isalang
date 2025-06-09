@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  print(String::from("hello").len());
+  print(String::from("alive"));
+  return 0;
+}

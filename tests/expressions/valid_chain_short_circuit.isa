@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let b = false && String::from("42").parse_i32().value() == 42;
+  print(b);
+  let c = true || String::from("42").parse_i32().value() == 42;
+  print(c);
+  return 0;
+}

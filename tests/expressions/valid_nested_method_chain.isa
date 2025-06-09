@@ -1,0 +1,4 @@
+fn main() -> i32 {
+  print(String::from("13").as_str().parse_i32().value());
+  return 0;
+}

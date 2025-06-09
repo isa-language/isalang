@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let v = match 0 {
+    0 => 10,
+  };
+  return 0;
+}

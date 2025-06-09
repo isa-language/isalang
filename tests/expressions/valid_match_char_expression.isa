@@ -1,0 +1,7 @@
+fn main() -> i32 {
+    print(match 'á' {
+      'á' => 1,
+      _ => 2,
+  });
+  return 0;
+}

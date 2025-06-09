@@ -1,4 +1,5 @@
 extern "C" fn isac_rt_panic_str(message: str);
+extern "C" fn isac_rt_monotonic_ns() -> u64;
 extern "C" fn isac_rt_alloc(size: usize) -> RawPtr;
 extern "C" fn isac_rt_alloc_zeroed(size: usize) -> RawPtr;
 extern "C" fn isac_rt_free(ptr: RawPtr);

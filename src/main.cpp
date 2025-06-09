@@ -132,6 +132,8 @@ int main(int argc, char **argv) {
       return 0;
     }
     auto h = isac::resolve(ast, nativeOptions.target);
+    for (const auto &warning : h.warnings)
+      isac::TerminalRenderer(sources, color).render(warning, std::cerr);
     if (mode == "--emit-hir") {
       isac::printHIR(h, std::cout);
       return 0;

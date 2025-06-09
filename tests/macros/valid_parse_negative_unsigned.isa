@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let text = String::from("-1");
+  let result = text.parse_u32();
+  print(result.error());
+  return 0;
+}

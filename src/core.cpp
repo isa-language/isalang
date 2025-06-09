@@ -8,6 +8,7 @@ namespace {
 class Builder {
   Program p;
   std::vector<Inst> *out = nullptr;
+  std::vector<SymbolId> temporaries;
   Inst make(Inst::Kind k, Loc l, TypeId t = Unit) {
     Inst i{};
     i.kind = k;
@@ -23,9 +24,52 @@ class Builder {
     out->push_back(std::move(i));
     return v;
   }
+  SymbolId receiver(const hir::Expr &e) {
+    if (e.kind == hir::Expr::Variable)
+      return e.ref;
+    auto value = e.kind == hir::Expr::Borrow ? None : expr(e);
+    SymbolId id = p.semantics.symbols.size();
+    hir::Symbol symbol{id,   "$temporary" + std::to_string(id), e.type, Access::Own, false, false,
+                       e.loc};
+    symbol.temporary = true;
+    auto binding = make(Inst::Bind, e.loc, e.type);
+    binding.slot = id;
+    if (e.kind == hir::Expr::Borrow) {
+      symbol.reference = true;
+      symbol.access = e.borrowKind == BorrowKind::Shared ? Access::Shared : Access::Unique;
+      binding.kind = e.borrowKind == BorrowKind::Shared ? Inst::BorrowShared : Inst::BorrowUnique;
+      binding.slot = e.args.at(0).ref;
+      binding.offset = id;
+      binding.region = e.region;
+      binding.access = symbol.access;
+      binding.quantity = Quantity::One;
+    } else
+      binding.args = {value};
+    p.semantics.symbols.push_back(std::move(symbol));
+    emit(binding, false);
+    temporaries.push_back(id);
+    return id;
+  }
+  void endTemporaries(Loc loc) {
+    for (auto it = temporaries.rbegin(); it != temporaries.rend(); ++it) {
+      if (p.semantics.symbols[*it].reference) {
+        auto end = make(Inst::EndBorrow, loc);
+        end.slot = *it;
+        emit(end, false);
+      }
+    }
+    if (!temporaries.empty()) {
+      auto end = make(Inst::ScopeEnd, loc);
+      end.locals = std::move(temporaries);
+      emit(end, false);
+      temporaries.clear();
+    }
+  }
   std::pair<SymbolId, uint32_t> place(const hir::Expr &e) {
     if (e.kind == hir::Expr::Variable)
       return {e.ref, 0};
+    if (e.kind != hir::Expr::Field && e.kind != hir::Expr::Index)
+      return {receiver(e), 0};
     auto [id, off] = place(e.args[0]);
     return {id, off + e.ref};
   }
@@ -35,6 +79,7 @@ class Builder {
     i.text = e.text;
     i.operatorClass = e.operatorClass;
     switch (e.kind) {
+    case E::Match:
     case E::Block: {
       auto instructions = block(e.body);
       auto cleanup = instructions.back();
@@ -100,6 +145,8 @@ class Builder {
         auto branch = make(Inst::If, e.loc);
         branch.args = {lhs};
         auto *saved = out;
+        auto parentTemporaries = std::move(temporaries);
+        temporaries.clear();
         std::vector<Inst> rhs;
         out = &rhs;
         auto value = expr(e.args[1]);
@@ -107,6 +154,8 @@ class Builder {
         write.slot = slot;
         write.args = {value};
         emit(write, false);
+        endTemporaries(e.loc);
+        temporaries = std::move(parentTemporaries);
         out = saved;
         if (e.text == "&&")
           branch.body = std::move(rhs);
@@ -156,11 +205,8 @@ class Builder {
       return None;
     case E::Print:
       if (p.semantics.types[e.args[0].type].representation == hir::Representation::StringRecord) {
-        if (e.args[0].kind != E::Variable)
-          fail(e.loc, DiagnosticCode::InvalidStringOperation,
-               "print(String) requires a named owner or borrow");
         i.kind = Inst::TextPrint;
-        i.slot = e.args[0].ref;
+        i.slot = receiver(e.args[0]);
         i.loc = e.args[0].loc;
         emit(i, false);
         return None;
@@ -177,7 +223,7 @@ class Builder {
       i.intrinsicId = f.intrinsicId;
       size_t start = 0;
       if (e.kind == E::Method) {
-        i.slot = e.args[0].ref;
+        i.slot = receiver(e.args[0]);
         i.access = f.access;
         start = 1;
         if (!f.operations.empty()) {
@@ -218,6 +264,8 @@ class Builder {
     fail(e.loc, DiagnosticCode::InternalError, "unhandled HIR expression");
   }
   std::vector<Inst> block(const std::vector<hir::Stmt> &ss) {
+    auto enclosingTemporaries = std::move(temporaries);
+    temporaries.clear();
     std::vector<Inst> result;
     auto *saved = out;
     out = &result;
@@ -255,6 +303,7 @@ class Builder {
         i.kind = Inst::If;
         i.args = {expr(s.expr)};
         emit(make(Inst::EndViews, s.loc), false);
+        endTemporaries(s.loc);
         i.body = block(s.body);
         i.otherwise = block(s.otherwise);
         emit(i, false);
@@ -297,6 +346,7 @@ class Builder {
           out = &i.condition;
           i.args = {expr(s.expr)};
           emit(make(Inst::EndViews, s.loc), false);
+          endTemporaries(s.loc);
           out = savedOut;
         }
         i.body = block(s.body);
@@ -338,6 +388,7 @@ class Builder {
         break;
       }
       emit(make(Inst::EndViews, s.loc), false);
+      endTemporaries(s.loc);
     }
     Inst viewsEnd = make(Inst::EndViews, ss.empty() ? Loc{} : ss.back().loc);
     emit(viewsEnd, false);
@@ -345,6 +396,7 @@ class Builder {
     end.locals = std::move(locals);
     emit(end, false);
     out = saved;
+    temporaries = std::move(enclosingTemporaries);
     return result;
   }
 
@@ -546,6 +598,13 @@ class Checker {
       endBorrow(c, id);
       return;
     }
+    if (it != c.vars.end() && symbol(id).temporary && it->second.shared)
+      DiagnosticEngine()
+          .error(DiagnosticCode::EscapingView, l, "borrowed value outlives temporary owner")
+          .secondary(symbol(id).loc, "temporary owner created here")
+          .secondary(it->second.borrowAt, "borrow created here")
+          .help("bind the owner to a local variable before borrowing it")
+          .emit();
     auto &r = access(c, id, Access::Own, l);
     if (symbol(id).receiver) {
       if (implicit)

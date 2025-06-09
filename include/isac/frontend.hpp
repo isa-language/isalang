@@ -42,7 +42,8 @@ struct Expr {
     String,
     Block,
     AtCall,
-    Borrow
+    Borrow,
+    Match
   } kind;
   Loc loc;
   std::string text;
@@ -52,7 +53,7 @@ struct Expr {
   Expr(Kind, Loc, std::string, std::vector<Expr>);
 };
 struct Pattern {
-  enum Kind { Wildcard, Binding, Integer, Boolean, Variant } kind;
+  enum Kind { Wildcard, Binding, Integer, Boolean, Variant, Character } kind;
   Loc loc;
   std::string name;
   std::vector<std::string> bindings;
@@ -63,6 +64,7 @@ struct Stmt {
   std::string name;
   TypeSyntax annotation;
   bool annotated = false;
+  bool expressionMatch = false;
   Access access = Access::Own;
   Expr expr, limit;
   Pattern pattern;

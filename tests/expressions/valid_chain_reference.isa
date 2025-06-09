@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let text = String::from("12");
+  print((&text).parse_i32().value());
+  text.push_str("3");
+  print(text);
+  return 0;
+}

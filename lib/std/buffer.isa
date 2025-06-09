@@ -10,6 +10,7 @@ pub protocol BufferState {
   }
   state Released {}
 }
+
 @representation "buffer_i32"
 pub struct Buffer: BufferState {
   ptr: RawPtr,

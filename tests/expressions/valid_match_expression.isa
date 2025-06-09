@@ -1,0 +1,10 @@
+fn main() -> i32 {
+  let x = 1;
+  let valor = match x {
+    0 => 10,
+    1 => 20,
+    _ => 30,
+  };
+  print(valor);
+  return 0;
+}

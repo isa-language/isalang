@@ -4,7 +4,6 @@ pub struct BoxI32 {
   ptr: RawPtr,
 }
 impl BoxI32 {
-
   @intrinsic "box.new"
   pub fn new(value: i32) -> BoxI32;
   pub fn get(shared self) -> i32 {

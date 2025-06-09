@@ -1,0 +1,82 @@
+{
+  "valid_method_chain": {
+    "stdout": "42\n",
+    "stdin": "42\n",
+    "code": null
+  },
+  "valid_nested_method_chain": {
+    "stdout": "13\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_literal_method_chain": {
+    "stdout": "42\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_temporary_chain": {
+    "stdout": "5\nalive\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_chain_loop": {
+    "stdout": "3\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_chain_short_circuit": {
+    "stdout": "0\n1\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_chain_reference": {
+    "stdout": "12\n123\n",
+    "stdin": "",
+    "code": null
+  },
+  "invalid_temporary_escape": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E6003"
+  },
+  "invalid_chain_unknown": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0102"
+  },
+  "valid_match_expression": {
+    "stdout": "20\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_match_larger_expression": {
+    "stdout": "25\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_match_block_result": {
+    "stdout": "1\n10\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_match_bool_expression": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_match_char_expression": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": null
+  },
+  "invalid_match_arm_types": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "invalid_match_non_exhaustive": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0620"
+  }
+}

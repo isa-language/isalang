@@ -1,5 +1,4 @@
 @import "core.runtime"
-
 fn mem_alloc(size: usize) -> RawPtr {
   return isac_rt_alloc(size);
 }

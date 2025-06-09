@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let view = String::from("42").as_str();
+  print(view);
+  return 0;
+}

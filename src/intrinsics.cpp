@@ -71,6 +71,7 @@ std::vector<uint32_t> intrinsicSignature(IntrinsicId id, uint32_t owner, uint32_
   }
   static const std::unordered_map<std::string, std::vector<TypeId>> abi = {
       {"isac_rt_panic_str", {Unit, Str}},
+      {"isac_rt_monotonic_ns", {U64}},
       {"isac_rt_stdout_write", {Unit, Str}},
       {"isac_rt_stderr_write", {Unit, Str}},
       {"isac_rt_alloc", {RawPtr, USize}},

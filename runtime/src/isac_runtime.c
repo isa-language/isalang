@@ -1,3 +1,6 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "isac_runtime.h"
 #include <ctype.h>
 #include <errno.h>
@@ -5,6 +8,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+uint64_t isac_rt_monotonic_ns(void) {
+  struct timespec value;
+  if (clock_gettime(CLOCK_MONOTONIC, &value) != 0)
+    isac_rt_panic("monotonic clock unavailable");
+  if (value.tv_sec < 0 || (uint64_t)value.tv_sec > (UINT64_MAX - 999999999) / 1000000000)
+    isac_rt_panic("monotonic clock exceeds nanosecond representation");
+  return (uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec;
+}
 #ifdef ISAC_RT_TESTING
 static size_t allocations, frees;
 static int reporting;
@@ -662,4 +675,39 @@ void isac_rt_string_fmt_debug_char(IsacString *out, uint32_t value) {
   else
     isac_rt_string_fmt_char(out, value);
   append_bytes(out, "'", 1);
+}
+
+void isac_rt_input_parse_view_i32(IsacInputResult *out, const IsacStr *source) {
+  IsacString view = {(uint8_t *)source->ptr, source->len, 0};
+  isac_rt_input_parse_i32(out, &view);
+}
+
+void isac_rt_input_parse_view_i64(IsacInputResult *out, const IsacStr *source) {
+  IsacString view = {(uint8_t *)source->ptr, source->len, 0};
+  isac_rt_input_parse_i64(out, &view);
+}
+
+void isac_rt_input_parse_view_u32(IsacInputResult *out, const IsacStr *source) {
+  IsacString view = {(uint8_t *)source->ptr, source->len, 0};
+  isac_rt_input_parse_u32(out, &view);
+}
+
+void isac_rt_input_parse_view_u64(IsacInputResult *out, const IsacStr *source) {
+  IsacString view = {(uint8_t *)source->ptr, source->len, 0};
+  isac_rt_input_parse_u64(out, &view);
+}
+
+void isac_rt_input_parse_view_f32(IsacInputResult *out, const IsacStr *source) {
+  IsacString view = {(uint8_t *)source->ptr, source->len, 0};
+  isac_rt_input_parse_f32(out, &view);
+}
+
+void isac_rt_input_parse_view_f64(IsacInputResult *out, const IsacStr *source) {
+  IsacString view = {(uint8_t *)source->ptr, source->len, 0};
+  isac_rt_input_parse_f64(out, &view);
+}
+
+void isac_rt_input_parse_view_bool(IsacInputResult *out, const IsacStr *source) {
+  IsacString view = {(uint8_t *)source->ptr, source->len, 0};
+  isac_rt_input_parse_bool(out, &view);
 }

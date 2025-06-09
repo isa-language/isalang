@@ -9,9 +9,9 @@ ast::Program loadImports(ast::Program source, SourceManager *sources) {
   ast::Program result;
   std::set<std::string> loaded, loading;
   const std::set<std::string> allowed = {
-      "core.runtime", "std.mem",     "std.box",    "std.buffer",      "std.io",      "std.string",
-      "std",          "std.prelude", "std.fmt",    "std.macros",      "std.option",  "std.result",
-      "std.parse",    "std.math",    "std.random", "std.ui.geometry", "std.ui.color"};
+      "core.runtime", "std.mem",     "std.box",    "std.buffer",      "std.io",       "std.string",
+      "std",          "std.prelude", "std.fmt",    "std.macros",      "std.option",   "std.result",
+      "std.parse",    "std.math",    "std.random", "std.ui.geometry", "std.ui.color", "std.time"};
   auto append = [&](ast::Program p) {
     auto offset = result.functions.size();
     for (auto &impl : p.impls)

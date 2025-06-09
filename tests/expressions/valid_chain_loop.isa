@@ -1,0 +1,11 @@
+fn main() -> i32 {
+  let i = 0;
+  while String::from("1").as_str().parse_i32().value() == 1 {
+    i = i + 1;
+    if i == 3 {
+      break;
+    }
+  }
+  print(i);
+  return 0;
+}

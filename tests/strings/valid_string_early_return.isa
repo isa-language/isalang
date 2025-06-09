@@ -3,6 +3,7 @@ fn foo() {
   let v = s.as_str();
   return;
 }
+
 fn main() -> i32 {
   foo();
   return 0;
