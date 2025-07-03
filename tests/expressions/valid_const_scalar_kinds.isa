@@ -1,0 +1,11 @@
+const TEXT: str = "Olá";
+const C: char = 'ç';
+const X: i64 =(-10i32) as i64;
+const B: bool = false &&(1 / 0 == 0);
+fn main() -> i32 {
+  print(TEXT);
+  print(C);
+  print(X);
+  print(B);
+  return 0;
+}

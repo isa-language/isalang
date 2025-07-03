@@ -47,7 +47,8 @@ struct Inst {
     StringCall,
     TextPrint,
     EndViews,
-    InputCall
+    InputCall,
+    RefineVariant
   } kind;
   Loc loc;
   RegionId region = None;

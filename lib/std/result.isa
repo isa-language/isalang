@@ -1,3 +1,7 @@
+pub enum Result<T, E> {
+  Ok(T),
+  Err(E),
+}
 @representation "input_result" pub struct ResultI32 {
   ptr: RawPtr,
   len: usize,

@@ -315,14 +315,21 @@ class Builder {
 
         std::function<std::vector<Inst>(size_t)> arms = [&](size_t n) {
           auto &arm = s.body.at(n);
+          auto body = block(arm.body);
+          if (arm.variant != None) {
+            auto fact = make(Inst::RefineVariant, arm.loc);
+            fact.slot = s.symbol;
+            fact.offset = arm.variant;
+            body.insert(body.begin(), fact);
+          }
           if (arm.catchall || n + 1 == s.body.size())
-            return block(arm.body);
+            return body;
           std::vector<Inst> branch;
           auto savedOut = out;
           out = &branch;
           Inst cond = make(Inst::If, arm.loc);
           cond.args = {expr(arm.expr)};
-          cond.body = block(arm.body);
+          cond.body = std::move(body);
           cond.otherwise = arms(n + 1);
           emit(cond, false);
           out = savedOut;
@@ -452,6 +459,8 @@ struct Temporary {
   SymbolId movedFrom = None;
 };
 struct Context {
+
+  std::map<SymbolId, VariantId> variants;
   std::map<SymbolId, Resource> vars;
   std::map<ValueId, Temporary> values;
   std::map<ValueId, SymbolId> pointers;
@@ -619,6 +628,7 @@ class Checker {
     c.vars[id].live = false;
     c.vars[id].consumedBy = "drop";
     c.vars[id].consumedAt = l;
+    c.variants.erase(id);
   }
   Temporary &take(Context &c, ValueId v, Loc l) {
     auto it = c.values.find(v);
@@ -742,6 +752,10 @@ class Checker {
       i.cleanup.clear();
       i.freeTemporary = false;
       switch (i.kind) {
+      case Inst::RefineVariant:
+        access(c, i.slot, Access::Shared, i.loc);
+        c.variants[i.slot] = i.offset;
+        break;
       case Inst::EndViews:
         endViews(c);
         break;
@@ -792,6 +806,7 @@ class Checker {
         c.values[i.result] = {i.type, initial(i.type), true};
         break;
       case Inst::Move: {
+        c.variants.erase(i.slot);
         auto &r = access(c, i.slot, Access::Own, i.loc);
         if (symbol(i.slot).receiver)
           fail(i.loc, DiagnosticCode::BorrowConflict, "method self cannot be moved");
@@ -969,6 +984,13 @@ class Checker {
           }
         }
         c = std::move(then);
+        for (auto it = c.variants.begin(); it != c.variants.end();) {
+          auto fact = other.variants.find(it->first);
+          if (fact == other.variants.end() || fact->second != it->second)
+            it = c.variants.erase(it);
+          else
+            ++it;
+        }
         break;
       }
       default:
@@ -1038,7 +1060,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                                 "continue",      "enum.construct",
                                 "inspect",       "static_str",
                                 "string.call",   "print.text",
-                                "end_views",     "input.call"};
+                                "end_views",     "input.call",
+                                "refine.variant"};
   for (auto &i : ops) {
     if (i.kind == Inst::Loop)
       dump(i.condition, p, o, d + 2);
@@ -1055,6 +1078,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
     if (i.result != None)
       o << "%" << i.result << " = ";
     o << names[i.kind];
+    if (i.kind == Inst::RefineVariant)
+      o << " variant=#V" << i.offset;
     if (i.slot != None)
       o << " #v" << i.slot << "(" << p.symbols[i.slot].name << ")";
     if (i.function != None)

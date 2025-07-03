@@ -1,0 +1,15 @@
+struct Data {
+  value: i32,
+}
+impl i32 {
+  pub fn process(shared self) -> i32 {
+    return self * 2;
+  }
+}
+fn main() -> i32 {
+  let data = Data::new();
+  data.value = 7;
+  print(data.value.process());
+  print(Data::new().value.process());
+  return 0;
+}

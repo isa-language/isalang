@@ -1,0 +1,14 @@
+fn source() -> i32 {
+  print(99);
+  return 12;
+}
+fn main() -> i32 {
+    let x = Option::Some( {
+      let v = source(); v
+  });
+    print(match x {
+      Option::Some(v) => v,
+      Option::None => 0,
+  });
+  return 0;
+}

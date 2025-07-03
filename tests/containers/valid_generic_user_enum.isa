@@ -1,0 +1,12 @@
+enum Choice<A, B> {
+  First(A),
+  Second(B),
+}
+fn main() -> i32 {
+  let x: Choice<i32, bool> = Choice::Second(true);
+    print(match x {
+      Choice::First(_) => false,
+      Choice::Second(v) => v,
+  });
+  return 0;
+}

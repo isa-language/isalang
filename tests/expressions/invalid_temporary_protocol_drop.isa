@@ -1,0 +1,5 @@
+@import "std.buffer"
+fn main() -> i32 {
+  Buffer::new(1).len();
+  return 0;
+}

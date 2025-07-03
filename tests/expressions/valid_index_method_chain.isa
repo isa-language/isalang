@@ -1,0 +1,11 @@
+impl i32 {
+  pub fn process(shared self) -> i32 {
+    return self * 2;
+  }
+}
+fn main() -> i32 {
+  let values = [3, 4];
+  print(values[1].process());
+  print([5, 6][0].process());
+  return 0;
+}

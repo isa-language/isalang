@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  print(read_line().value().parse_i32().value());
+  print(read_line().value().parse_i32().value());
+  return 0;
+}

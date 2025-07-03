@@ -332,6 +332,7 @@ class Eraser {
         return out;
       case C::EndViews:
       case C::Inspect:
+      case C::RefineVariant:
       case C::Drop:
       case C::EndBorrow:
       case C::ScopeEnd:
@@ -366,6 +367,8 @@ public:
       std::vector<I> prefix;
       for (auto sid : hf.params) {
         auto t = type(core.semantics.symbols[sid].type);
+        if (core.semantics.symbols[sid].receiver && scalar(core.semantics.symbols[sid].type))
+          t = {T::Buffer, 1, 64};
         auto v = p.values++;
         f.params.push_back({v, t});
         runtimeTypes[v] = t;

@@ -1,0 +1,5 @@
+const A: i32 = 10;
+fn main() -> i32 {
+  print(A);
+  return 0;
+}

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <unordered_map>
 namespace isac {
@@ -11,9 +12,85 @@ class Resolver {
   const ast::Program &ast;
   hir::Program p;
   std::unordered_map<std::string, TypeId> types;
+  std::unordered_map<std::string, GenericDeclId> genericNames;
+  std::map<std::pair<GenericDeclId, std::vector<TypeId>>, TypeId> instanceCache;
+  TypeParamId nextTypeParam = 0;
+  TypeId instantiate(GenericDeclId id, const std::vector<TypeId> &arguments, Loc loc) {
+    const auto &decl = p.genericEnums.at(id);
+    if (arguments.size() != decl.parameters.size())
+      fail(loc, DiagnosticCode::TypeMismatch,
+           "wrong number of type arguments for `" + decl.name + "`");
+    auto key = std::make_pair(id, arguments);
+    if (auto found = instanceCache.find(key); found != instanceCache.end())
+      return found->second;
+    hir::GenericInstance instance{
+        static_cast<InstanceId>(p.instances.size()), id, {}, static_cast<TypeId>(p.types.size())};
+    std::string name = decl.name + "<";
+    for (size_t i = 0; i < arguments.size(); ++i) {
+      if (i)
+        name += ",";
+      name += p.types.at(arguments[i]).name;
+      instance.substitution.types.push_back({decl.parameters[i], arguments[i]});
+    }
+    hir::Type type{hir::Type::Enum, name + ">"};
+    for (const auto &source : decl.variants) {
+      hir::Variant variant{static_cast<VariantId>(type.variants.size()), source.name, {}};
+      for (auto payload : source.payload) {
+        TypeId tid = payload.id;
+        if (payload.parameter) {
+          auto found =
+              std::find_if(instance.substitution.types.begin(), instance.substitution.types.end(),
+                           [&](auto pair) { return pair.first == payload.id; });
+          tid = found->second;
+        }
+        if (!scalar(tid))
+          fail(loc, DiagnosticCode::InvalidPayload,
+               "generic enum payload `" + p.types[tid].name +
+                   "` requires aggregate payload ownership support");
+        variant.payload.push_back(tid);
+      }
+      type.width = std::max(type.width, static_cast<uint32_t>(1 + variant.payload.size()));
+      type.variants.push_back(std::move(variant));
+    }
+    auto tid = instance.type;
+    p.types.push_back(std::move(type));
+    p.instances.push_back(std::move(instance));
+    instanceCache.emplace(std::move(key), tid);
+    return tid;
+  }
+
   std::unordered_map<std::string, ProtocolId> protocols;
   std::unordered_map<std::string, FunctionId> functions;
-  std::vector<std::unordered_map<std::string, SymbolId>> scopes;
+  struct Binding {
+    uint32_t id;
+    bool constant;
+    Binding(uint32_t id = None, bool constant = false) : id(id), constant(constant) {}
+  };
+  std::vector<std::unordered_map<std::string, Binding>> scopes;
+  std::unordered_map<std::string, Binding> globalConstants;
+  std::optional<Binding> binding(const std::string &name, Loc loc) {
+    auto key = name + "#" + std::to_string(loc.context);
+    for (auto i = scopes.rbegin(); i != scopes.rend(); ++i)
+      if (i->contains(key))
+        return i->at(key);
+    if (globalConstants.contains(key))
+      return globalConstants.at(key);
+    return {};
+  }
+  void declareConstant(const ast::Stmt &a, bool global = false) {
+    auto key = a.name + "#" + std::to_string(a.loc.context);
+    auto &scope = global ? globalConstants : scopes.back();
+    if (scope.contains(key))
+      duplicate(a.loc, a.name);
+    auto expression = expr(a.expr);
+    coerce(getType(a.annotation), expression);
+    auto value = evaluateConstant(expression, p.target.pointerWidth);
+    value.inferredLiteral = false;
+    ConstId id = p.constants.size();
+    value.constant = id;
+    p.constants.push_back({id, a.name, value.type, expression, value, a.loc});
+    scope[key] = Binding{id, true};
+  }
   hir::Function *current = nullptr;
   bool privileged = false;
   uint32_t nextLoop = 0;
@@ -23,10 +100,39 @@ class Resolver {
     fail(l, DiagnosticCode::DuplicateDeclaration, "duplicate declaration `" + n + "`");
   }
   TypeId getType(const TypeSyntax &s, bool allowReference = false) {
+    if (!s.countName.empty()) {
+      auto resolved = s;
+      auto entry = binding(s.countName, s.loc);
+      if (!entry || !entry->constant)
+        fail(s.loc, DiagnosticCode::InvalidConstant,
+             "array size requires a previously declared constant");
+      const auto &value = p.constants[entry->id].value;
+      if (!integer(value.type) || value.text.starts_with('-'))
+        fail(s.loc, DiagnosticCode::InvalidConstant,
+             "array size must be a positive integer constant");
+      auto count = std::stoull(value.text);
+      if (count == 0 || count > 65536)
+        fail(s.loc, DiagnosticCode::InvalidConstant, "array size must be in 1..65536");
+      resolved.count = static_cast<int>(count);
+      resolved.countName.clear();
+      return getType(resolved, allowReference);
+    }
     if (s.reference && !allowReference)
       fail(s.loc, DiagnosticCode::EscapingView,
            "reference types currently require a local borrow binding; aggregate and function "
            "region contracts are not implemented");
+    if (genericNames.contains(s.name)) {
+      std::vector<TypeId> arguments;
+      for (const auto &argument : s.arguments)
+        arguments.push_back(getType(argument));
+      if (s.count)
+        fail(s.loc, DiagnosticCode::InvalidPayload,
+             "arrays of enum values are not implemented yet");
+      return instantiate(genericNames.at(s.name), arguments, s.loc);
+    }
+    if (!s.arguments.empty())
+      fail(s.loc, DiagnosticCode::TypeMismatch,
+           "type `" + s.name + "` does not accept type arguments");
     auto it = types.find(s.name);
     if (it == types.end())
       fail(s.loc, DiagnosticCode::UnknownName, "unknown type `" + s.name + "`");
@@ -60,7 +166,7 @@ class Resolver {
     auto key = n + "#" + std::to_string(l.context);
     for (auto i = scopes.rbegin(); i != scopes.rend(); ++i)
       if (i->contains(key))
-        return i->at(key);
+        return i->at(key).id;
     fail(l, DiagnosticCode::UnknownName, "unknown name `" + n + "`");
   }
   void same(TypeId a, TypeId b, Loc l) {
@@ -87,7 +193,7 @@ class Resolver {
     return e.kind == hir::Expr::Variable || e.kind == hir::Expr::Field ||
            e.kind == hir::Expr::Index;
   }
-  hir::Expr expr(const ast::Expr &a) {
+  hir::Expr expr(const ast::Expr &a, TypeId expected = None) {
     hir::Expr e{};
     e.loc = a.loc;
     e.text = a.text;
@@ -213,19 +319,57 @@ class Resolver {
       auto sep = a.text.find("::");
       auto tn = a.text.substr(0, sep);
       auto vn = a.text.substr(sep + 2);
-      if (types.contains(tn) && p.types[types[tn]].kind == hir::Type::Enum) {
-        e.type = types[tn];
+      std::vector<hir::Expr> inferredArguments;
+      TypeId enumType = types.contains(tn) ? types[tn] : None;
+      if (genericNames.contains(tn)) {
+        auto gid = genericNames.at(tn);
+        enumType = None;
+        for (const auto &instance : p.instances)
+          if (instance.type == expected && instance.declaration == gid)
+            enumType = expected;
+        if (enumType == None) {
+          const auto &decl = p.genericEnums[gid];
+          const auto &variants = p.genericEnums[gid].variants;
+          auto variant = std::find_if(variants.begin(), variants.end(),
+                                      [&](const auto &v) { return v.name == vn; });
+          if (variant == variants.end())
+            fail(a.loc, DiagnosticCode::InvalidVariant, "unknown enum variant `" + a.text + "`");
+          if (variant->payload.size() != a.args.size())
+            fail(a.loc, DiagnosticCode::InvalidPayload, "wrong enum payload arity");
+          std::vector<TypeId> arguments(decl.parameters.size(), None);
+          for (size_t i = 0; i < a.args.size(); ++i) {
+            auto value = expr(a.args[i]);
+            auto payload = variant->payload[i];
+            if (payload.parameter) {
+              auto index = std::find(decl.parameters.begin(), decl.parameters.end(), payload.id) -
+                           decl.parameters.begin();
+              if (arguments[index] != None)
+                same(arguments[index], value.type, value.loc);
+              arguments[index] = value.type;
+            }
+            inferredArguments.push_back(std::move(value));
+          }
+          if (std::find(arguments.begin(), arguments.end(), None) != arguments.end())
+            fail(a.loc, DiagnosticCode::TypeMismatch,
+                 "cannot infer all type arguments of `" + tn + "`; add a type annotation");
+          enumType = instantiate(gid, arguments, a.loc);
+        }
+      }
+      if (enumType != None && p.types[enumType].kind == hir::Type::Enum) {
+        e.type = enumType;
         e.kind = H::EnumConstruct;
         auto &vs = p.types[e.type].variants;
         auto it = std::find_if(vs.begin(), vs.end(), [&](auto &v) { return v.name == vn; });
         if (it == vs.end())
           fail(a.loc, DiagnosticCode::InvalidVariant, "unknown enum variant `" + a.text + "`");
+        auto payloadTypes = it->payload;
         e.ref = it->id;
-        if (a.args.size() != it->payload.size())
+        if (a.args.size() != payloadTypes.size())
           fail(a.loc, DiagnosticCode::InvalidPayload, "wrong enum payload arity");
         for (size_t i = 0; i < a.args.size(); ++i) {
-          auto arg = expr(a.args[i]);
-          coerce(it->payload[i], arg);
+          auto arg = inferredArguments.empty() ? expr(a.args[i], payloadTypes[i])
+                                               : std::move(inferredArguments[i]);
+          coerce(payloadTypes[i], arg);
           e.args.push_back(arg);
         }
         return e;
@@ -236,6 +380,11 @@ class Resolver {
         e.kind = H::UnitValue;
         return e;
       }
+      if (auto found = binding(a.text, a.loc); found && found->constant) {
+        auto value = p.constants[found->id].value;
+        value.loc = a.loc;
+        return value;
+      }
       e.kind = H::Variable;
       e.ref = lookup(a.text, a.loc);
       e.type = p.symbols[e.ref].type;
@@ -245,6 +394,12 @@ class Resolver {
       auto n = a.args[0];
       n.text = "-" + n.text;
       return expr(n);
+    }
+    if (a.kind == A::Assign && a.args[0].kind == A::Name) {
+      auto found = binding(a.args[0].text, a.args[0].loc);
+      if (found && found->constant)
+        fail(a.loc, DiagnosticCode::ConstantAssignment,
+             "cannot assign to constant `" + a.args[0].text + "`");
     }
     for (auto &x : a.args)
       e.args.push_back(expr(x));
@@ -518,6 +673,10 @@ class Resolver {
           out.insert(out.end(), found->second.begin(), found->second.end());
       }};
       auto &a = ss[position];
+      if (a.kind == ast::Stmt::Const) {
+        declareConstant(a);
+        continue;
+      }
       if (a.kind == ast::Stmt::Let && a.expr.kind == ast::Expr::Borrow) {
         hir::Stmt borrowed{};
         borrowed.kind = hir::Stmt::BorrowStart;
@@ -590,7 +749,18 @@ class Resolver {
           H h{};
           h.kind = H::Scope;
           h.loc = arm.loc;
-          auto &pat = arm.pattern;
+          auto pat = arm.pattern;
+          if (pat.kind == ast::Pattern::Binding) {
+            auto found = binding(pat.name, pat.loc);
+            if (found && found->constant) {
+              const auto &value = p.constants[found->id].value;
+              same(tid, value.type, pat.loc);
+              pat.kind = tid == Bool   ? ast::Pattern::Boolean
+                         : tid == Char ? ast::Pattern::Character
+                                       : ast::Pattern::Integer;
+              pat.name = tid == Bool ? (value.text == "0" ? "false" : "true") : value.text;
+            }
+          }
           if (all) {
             if (!a.expressionMatch)
               fail(pat.loc, DiagnosticCode::UnreachableArm, "unreachable match arm");
@@ -628,7 +798,7 @@ class Resolver {
               if (pat.kind != ast::Pattern::Variant)
                 fail(pat.loc, DiagnosticCode::InvalidPattern, "pattern type does not match enum");
               auto found = std::find_if(t.variants.begin(), t.variants.end(), [&](auto &v) {
-                return pat.name == t.name + "::" + v.name;
+                return pat.name == t.name.substr(0, t.name.find('<')) + "::" + v.name;
               });
               if (found == t.variants.end())
                 fail(pat.loc, DiagnosticCode::InvalidVariant,
@@ -827,7 +997,9 @@ class Resolver {
           inc.expr.args = {var, sum};
           s.latch = {inc};
         } else if (!s.unconditional) {
-          s.expr = expr(a.expr);
+          s.expr = expr(a.expr, a.kind == ast::Stmt::Let && a.annotated
+                                    ? getType(a.annotation, a.annotation.reference)
+                                    : None);
           same(Bool, s.expr.type, a.loc);
         }
         loops.push_back(s.loop);
@@ -845,7 +1017,9 @@ class Resolver {
           out.push_back(std::move(s));
         continue;
       }
-      s.expr = expr(a.expr);
+      s.expr = expr(a.expr, a.kind == ast::Stmt::Let && a.annotated
+                                ? getType(a.annotation, a.annotation.reference)
+                                : None);
       if (s.expr.kind == hir::Expr::Borrow)
         fail(a.loc, DiagnosticCode::EscapingView,
              "reference expression currently requires a local let binding; reference calls and "
@@ -928,6 +1102,8 @@ public:
     types = {{"unit", Unit}, {"i32", I32}, {"bool", Bool}, {"usize", USize}, {"RawPtr", RawPtr}};
     for (TypeId t = 0; t < p.types.size(); ++t)
       types[p.types[t].name] = t;
+    for (const auto &constant : ast.constants)
+      declareConstant(constant, true);
     OperationId nextOp = 0;
     for (auto &a : ast.protocols) {
       if (protocols.contains(a.name) || types.contains(a.name))
@@ -984,20 +1160,59 @@ public:
       p.types.push_back({hir::Type::Structure, a.name, None, None, 0, 1, {}});
     }
     for (auto &a : ast.enums) {
-      if (types.contains(a.name) || protocols.contains(a.name))
+      if (!a.parameters.empty()) {
+        if (types.contains(a.name) || protocols.contains(a.name) || genericNames.contains(a.name))
+          duplicate(a.loc, a.name);
+        GenericDeclId id = p.genericEnums.size();
+        genericNames[a.name] = id;
+        hir::GenericEnum decl{id, a.name, {}, {}};
+        std::unordered_map<std::string, TypeParamId> parameters;
+        for (const auto &name : a.parameters) {
+          if (parameters.contains(name))
+            duplicate(a.loc, name);
+          parameters[name] = nextTypeParam++;
+          decl.parameters.push_back(parameters[name]);
+        }
+        std::vector<hir::GenericVariant> variants;
+        std::set<std::string> names;
+        if (a.variants.empty())
+          fail(a.loc, DiagnosticCode::InvalidVariant, "enum must declare at least one variant");
+        for (const auto &variant : a.variants) {
+          if (!names.insert(variant.name).second)
+            duplicate(variant.loc, variant.name);
+          hir::GenericVariant resolved{variant.name, {}};
+          for (const auto &payload : variant.payload) {
+            if (payload.reference || payload.count || !payload.countName.empty() ||
+                !payload.arguments.empty())
+              fail(payload.loc, DiagnosticCode::InvalidPayload,
+                   "compound generic payload types are not implemented yet");
+            if (parameters.contains(payload.name))
+              resolved.payload.push_back({true, parameters.at(payload.name)});
+            else
+              resolved.payload.push_back({false, getType(payload)});
+          }
+          variants.push_back(std::move(resolved));
+        }
+        decl.variants = std::move(variants);
+        p.genericEnums.push_back(std::move(decl));
+        continue;
+      }
+      if (types.contains(a.name) || protocols.contains(a.name) || genericNames.contains(a.name))
         duplicate(a.loc, a.name);
       types[a.name] = p.types.size();
       p.types.push_back({hir::Type::Enum, a.name});
     }
     for (auto &a : ast.enums) {
-      auto &t = p.types[types[a.name]];
+      if (!a.parameters.empty())
+        continue;
+      auto enumId = types[a.name];
       std::set<std::string> names;
       if (a.variants.empty())
         fail(a.loc, DiagnosticCode::InvalidVariant, "enum must declare at least one variant");
       for (auto &v : a.variants) {
         if (!names.insert(v.name).second)
           duplicate(v.loc, v.name);
-        hir::Variant variant{static_cast<VariantId>(t.variants.size()), v.name, {}};
+        hir::Variant variant{static_cast<VariantId>(p.types[enumId].variants.size()), v.name, {}};
         for (auto &ts : v.payload) {
           auto tid = getType(ts);
           if (!scalar(tid))
@@ -1005,6 +1220,7 @@ public:
                  "enum payloads currently require primitive scalar types");
           variant.payload.push_back(tid);
         }
+        auto &t = p.types[enumId];
         t.width = std::max(t.width, static_cast<uint32_t>(1 + variant.payload.size()));
         t.variants.push_back(variant);
       }
@@ -1071,7 +1287,7 @@ public:
     for (const auto &impl : ast.impls)
       if (!types.contains(impl.owner) ||
           (p.types[types.at(impl.owner)].kind != hir::Type::Structure &&
-           types.at(impl.owner) != Str))
+           types.at(impl.owner) != Str && !scalar(types.at(impl.owner))))
         fail(impl.loc, DiagnosticCode::UnknownName, "unknown impl struct `" + impl.owner + "`");
     for (auto &a : ast.functions) {
       privileged = a.trusted;
@@ -1093,8 +1309,8 @@ public:
         duplicate(a.loc, f.name);
       functions[f.name] = f.id;
       if (!a.owner.empty()) {
-        if (!types.contains(a.owner) ||
-            (p.types[types[a.owner]].kind != hir::Type::Structure && types[a.owner] != Str))
+        if (!types.contains(a.owner) || (p.types[types[a.owner]].kind != hir::Type::Structure &&
+                                         types[a.owner] != Str && !scalar(types[a.owner])))
           fail(a.loc, DiagnosticCode::UnknownName, "unknown impl struct");
         f.owner = types[a.owner];
         if ((p.heap(f.owner) || f.owner == Str) && !a.trusted)
@@ -1132,6 +1348,10 @@ public:
         if (self)
           f.access = ap.access;
       }
+      if (f.owner != None && scalar(f.owner) && !f.params.empty() &&
+          p.symbols[f.params[0]].receiver && f.access != Access::Shared)
+        fail(f.loc, DiagnosticCode::InvalidReceiver,
+             "primitive extension methods currently require shared self");
       scopes.pop_back();
       p.functions.push_back(f);
     }
@@ -1317,6 +1537,29 @@ public:
     auto &f = p.functions[main->second];
     if (f.result != I32 || !f.params.empty())
       fail(f.loc, DiagnosticCode::TypeMismatch, "main must have signature fn main() -> i32");
+    ExprId nextExpression = 0;
+    std::function<void(hir::Expr &)> numberExpression;
+    std::function<void(std::vector<hir::Stmt> &)> numberBlock;
+    numberExpression = [&](hir::Expr &expression) {
+      expression.id = nextExpression++;
+      for (auto &argument : expression.args)
+        numberExpression(argument);
+      numberBlock(expression.body);
+    };
+    numberBlock = [&](std::vector<hir::Stmt> &statements) {
+      for (auto &statement : statements) {
+        numberExpression(statement.expr);
+        numberBlock(statement.body);
+        numberBlock(statement.otherwise);
+        numberBlock(statement.latch);
+      }
+    };
+    for (auto &constant : p.constants) {
+      numberExpression(constant.expression);
+      numberExpression(constant.value);
+    }
+    for (auto &function : p.functions)
+      numberBlock(function.body);
     return std::move(p);
   }
 };
@@ -1327,6 +1570,10 @@ void printE(const hir::Expr &e, std::ostream &o) {
       "index",    "array",  "assign",         "move",       "drop",  "construct", "print",
       "unit",     "cast",   "enum.construct", "static_str", "block", "borrow",    "match"};
   o << names[e.kind] << "<T" << e.type << ">";
+  if (e.id != None)
+    o << " expr=#E" << e.id;
+  if (e.constant != None)
+    o << " const=#C" << e.constant;
   if (e.kind == hir::Expr::Borrow)
     o << " region=#R" << e.region
       << " access=" << (e.borrowKind == BorrowKind::Shared ? "Shared" : "Unique");
@@ -1378,6 +1625,30 @@ hir::Program resolve(const ast::Program &a, TargetInfo target) {
   return Resolver(a, std::move(target)).run();
 }
 void printHIR(const hir::Program &p, std::ostream &o) {
+  for (const auto &decl : p.genericEnums) {
+    o << "generic enum #G" << decl.id << " " << decl.name;
+    for (auto parameter : decl.parameters)
+      o << " #TP" << parameter;
+    o << "\n";
+    for (const auto &variant : decl.variants) {
+      o << "  variant " << variant.name;
+      for (auto payload : variant.payload)
+        o << (payload.parameter ? " #TP" : " #T") << payload.id;
+      o << "\n";
+    }
+  }
+  for (const auto &instance : p.instances) {
+    o << "instance #I" << instance.id << " generic=#G" << instance.declaration << " type=#T"
+      << instance.type;
+    for (auto [parameter, type] : instance.substitution.types)
+      o << " #TP" << parameter << "=#T" << type;
+    o << "\n";
+  }
+  for (const auto &constant : p.constants) {
+    o << "const #C" << constant.id << " " << constant.name << " : #T" << constant.type << " = ";
+    printE(constant.value, o);
+    o << "\n";
+  }
   o << "HIR\n";
   for (auto &q : p.protocols) {
     o << "protocol " << q.name << " #P" << q.id << " {\n  initial #S" << q.initial << " "

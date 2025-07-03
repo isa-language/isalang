@@ -77,6 +77,133 @@
   "invalid_match_non_exhaustive": {
     "stdout": "",
     "stdin": "",
-    "code": "E0620"
+    "code": "E0622"
+  },
+  "valid_const_global": {
+    "stdout": "10\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_const_local": {
+    "stdout": "10\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_const_expression": {
+    "stdout": "20\n1\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_const_array_size": {
+    "stdout": "3\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_const_pattern": {
+    "stdout": "20\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_const_scalar_kinds": {
+    "stdout": "Olá\n231\n-10\n0\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_const_wrapping": {
+    "stdout": "0\n-128\n",
+    "stdin": "",
+    "code": null
+  },
+  "invalid_const_assignment": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0631"
+  },
+  "invalid_const_type": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "invalid_const_runtime_expression": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0630"
+  },
+  "invalid_const_division": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0630"
+  },
+  "valid_match_enum_payload_expression": {
+    "stdout": "7\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_match_assignment": {
+    "stdout": "20\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_call_method_chain": {
+    "stdout": "42\n13\n",
+    "stdin": "42\n13\n",
+    "code": null
+  },
+  "valid_match_single_evaluation": {
+    "stdout": "7\n20\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_match_required_example": {
+    "stdout": "",
+    "stdin": "",
+    "code": null,
+    "exit": 20
+  },
+  "warning_match_unreachable_arm": {
+    "stdout": "10\n",
+    "stdin": "",
+    "code": null,
+    "warning": "W0621"
+  },
+  "valid_field_method_chain": {
+    "stdout": "14\n0\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_index_method_chain": {
+    "stdout": "8\n10\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_receiver_single_evaluation": {
+    "stdout": "1\n20\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_primitive_reference_receiver": {
+    "stdout": "20\n",
+    "stdin": "",
+    "code": null
+  },
+  "valid_match_resource_join": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": null
+  },
+  "invalid_match_resource_join": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0420"
+  },
+  "valid_temporary_protocol_release": {
+    "stdout": "",
+    "stdin": "",
+    "code": null
+  },
+  "invalid_temporary_protocol_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0410"
   }
 }

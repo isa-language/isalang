@@ -1,0 +1,8 @@
+const A: i32 = 10;
+const B: i32 = A * 2;
+const OK: bool = B>10;
+fn main() -> i32 {
+  print(B);
+  print(OK);
+  return 0;
+}

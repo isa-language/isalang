@@ -1,0 +1,77 @@
+{
+  "valid_generic_option": {
+    "stdout": "42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_generic_result": {
+    "stdout": "7\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_generic_user_enum": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_generic_inference": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "invalid_generic_arity": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "invalid_generic_payload_type": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "invalid_generic_resource_payload": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0611"
+  },
+  "valid_generic_inferred_once": {
+    "stdout": "99\n12\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_generic_instances": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_generic_duplicate_parameter": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0101"
+  },
+  "invalid_generic_nested_payload": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0611"
+  },
+  "invalid_generic_non_generic_args": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "valid_generic_move": {
+    "stdout": "8\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_generic_use_after_move": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_generic_compound_parameter": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0611"
+  }
+}

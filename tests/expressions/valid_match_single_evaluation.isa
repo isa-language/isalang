@@ -1,0 +1,12 @@
+fn calculate() -> i32 {
+  print(7);
+  return 1;
+}
+fn main() -> i32 {
+    print(match calculate() {
+      0 => 10,
+      1 => 20,
+      _ => 30,
+  });
+  return 0;
+}

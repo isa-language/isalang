@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let x: Result<i32, bool> = Result::Ok(7);
+    print(match x {
+      Result::Ok(v) => v,
+      Result::Err(_) => 0,
+  });
+  return 0;
+}

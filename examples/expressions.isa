@@ -1,0 +1,23 @@
+const ZERO: i32 = 0;
+const ONE: i32 = ZERO + 1;
+const COUNT: usize = 3;
+
+fn normalize(value: i32) -> i32 {
+  return match value {
+    ZERO => 10,
+    ONE => 20,
+    _ => 30,
+  };
+}
+
+fn main() -> i32 {
+  let values: i32[COUNT] = [0, 1, 2];
+  let parsed = String::from("1").as_str().parse_i32().value();
+  let value = match parsed {
+    ZERO => normalize(values[0]),
+    ONE => normalize(values[1]),
+    _ => 30,
+  };
+  @println("value = {}", value);
+  return 0;
+}

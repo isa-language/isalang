@@ -4,7 +4,12 @@
 #include "isac/target.hpp"
 #include <limits>
 namespace isac {
+using GenericDeclId = uint32_t;
+using TypeParamId = uint32_t;
+using InstanceId = uint32_t;
 using RegionId = uint32_t;
+using ConstId = uint32_t;
+using ExprId = uint32_t;
 enum class BorrowKind { Shared, Unique };
 using EnumId = uint32_t;
 using VariantId = uint32_t;
@@ -115,6 +120,7 @@ struct Expr {
   } kind;
   Loc loc;
   bool inferredLiteral = false;
+  ExprId id = None;
   BorrowKind borrowKind = BorrowKind::Shared;
   RegionId region = None;
   enum class OperatorClass {
@@ -126,6 +132,7 @@ struct Expr {
   } operatorClass = OperatorClass::Other;
   TypeId type = Unit;
   uint32_t ref = None;
+  ConstId constant = None;
   std::string text;
   std::vector<Expr> args;
   std::vector<Stmt> body;
@@ -171,8 +178,42 @@ struct Function {
   std::vector<Stmt> body = {};
   Loc loc;
 };
+struct ConstDecl {
+  ConstId id;
+  std::string name;
+  TypeId type;
+  Expr expression;
+  Expr value;
+  Loc loc;
+};
+struct GenericPayload {
+  bool parameter;
+  uint32_t id;
+};
+struct GenericVariant {
+  std::string name;
+  std::vector<GenericPayload> payload;
+};
+struct GenericEnum {
+  GenericDeclId id;
+  std::string name;
+  std::vector<TypeParamId> parameters;
+  std::vector<GenericVariant> variants;
+};
+struct Substitution {
+  std::vector<std::pair<TypeParamId, TypeId>> types;
+};
+struct GenericInstance {
+  InstanceId id;
+  GenericDeclId declaration;
+  Substitution substitution;
+  TypeId type;
+};
 struct Program {
+  std::vector<GenericEnum> genericEnums;
+  std::vector<GenericInstance> instances;
   std::vector<Diagnostic> warnings;
+  std::vector<ConstDecl> constants;
   TargetInfo target;
   std::vector<Type> types;
   std::vector<Protocol> protocols;
@@ -189,4 +230,5 @@ struct Program {
 }
 hir::Program resolve(const ast::Program &, TargetInfo target = {});
 void printHIR(const hir::Program &, std::ostream &);
+hir::Expr evaluateConstant(const hir::Expr &, unsigned pointerWidth);
 }

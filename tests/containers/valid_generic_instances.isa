@@ -1,0 +1,10 @@
+fn main() -> i32 {
+  let a = Option::Some(1);
+  let b: Option<i32> = Option::None;
+  let c = Option::Some(true);
+    print(match c {
+      Option::Some(v) => v,
+      Option::None => false,
+  });
+  return 0;
+}

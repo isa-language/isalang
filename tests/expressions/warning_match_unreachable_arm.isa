@@ -1,0 +1,7 @@
+fn main() -> i32 {
+    print(match 0 {
+      _ => 10,
+      0 => 20,
+  });
+  return 0;
+}

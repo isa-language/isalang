@@ -1,0 +1,4 @@
+const X: i8 = -128i8 / -1i8;
+fn main() -> i32 {
+  return 0;
+}

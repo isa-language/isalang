@@ -20,7 +20,8 @@ add_library(
   src/core_types.cpp
   src/erasure.cpp
   src/runtime.cpp
-  src/liveness.cpp)
+  src/liveness.cpp
+  src/consteval.cpp)
 target_include_directories(isac_frontend PUBLIC include)
 set(ISAC_LIBRARY_ROOT
     "/usr/lib/isac/lib"
@@ -273,7 +274,26 @@ if(BUILD_TESTING)
 endif()
 if(BUILD_TESTING)
   file(GLOB REFERENCE_CASES CONFIGURE_DEPENDS tests/references/*.isa)
+  add_test(NAME containers_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/containers_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  file(GLOB CONTAINER_CASES CONFIGURE_DEPENDS tests/containers/*.isa)
+  foreach(CASE ${CONTAINER_CASES})
+    get_filename_component(NAME ${CASE} NAME_WE)
+    add_test(NAME container_${NAME}
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_test.py
+                     $<TARGET_FILE:isac> ${CASE})
+    if(NAME MATCHES "^valid_")
+      add_test(NAME container_sanitized_${NAME}
+               COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/macro_test.py
+                       $<TARGET_FILE:isac> ${CASE} sanitized)
+      set_tests_properties(container_sanitized_${NAME} PROPERTIES LABELS "sanitizers")
+    endif()
+  endforeach()
   file(GLOB EXPRESSION_CASES CONFIGURE_DEPENDS tests/expressions/*.isa)
+  add_test(NAME expressions_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(CASE IN LISTS EXPRESSION_CASES)
     get_filename_component(NAME ${CASE} NAME_WE)
     add_test(NAME expression_${NAME}

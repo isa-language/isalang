@@ -1,0 +1,16 @@
+@import "std.buffer"
+fn main() -> i32 {
+  let buffer = Buffer::new(1);
+  let value = match true {
+    true => {
+      buffer.release();
+      1
+    },
+    false => {
+      buffer.release();
+      2
+    },
+  };
+  print(value);
+  return 0;
+}

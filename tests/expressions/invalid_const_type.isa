@@ -1,0 +1,4 @@
+const VALUE: i32 = "hello";
+fn main() -> i32 {
+  return 0;
+}

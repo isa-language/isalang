@@ -1,0 +1,4 @@
+fn main() -> i32 {
+  let x: Option<Option<i32 >> = Option::None;
+  return 0;
+}

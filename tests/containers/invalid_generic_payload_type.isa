@@ -1,0 +1,4 @@
+fn main() -> i32 {
+  let x: Option<i32> = Option::Some(true);
+  return 0;
+}

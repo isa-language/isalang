@@ -220,7 +220,7 @@ class Parser {
       fail(peek().loc, DiagnosticCode::RestrictedOperation, "unknown internal annotation");
     return stringLiteral();
   }
-  const std::vector<Token> &ts;
+  std::vector<Token> ts;
   size_t pos = 0;
   const Token &peek() {
     return ts[pos];
@@ -249,6 +249,14 @@ class Parser {
     ++pos;
     return t;
   }
+  void typeClose() {
+
+    if (peek().text == ">>") {
+      ts[pos].text = ">";
+      return;
+    }
+    need(">");
+  }
   TypeSyntax type() {
     bool reference = eat("&");
     bool unique = reference && eat("mut");
@@ -256,10 +264,21 @@ class Parser {
     TypeSyntax t{n.text, 0, n.loc};
     t.reference = reference;
     t.mutableReference = unique;
+    if (eat("<")) {
+      do {
+        t.arguments.push_back(type());
+      } while (eat(","));
+      typeClose();
+    }
     if (eat("[")) {
       auto v = peek();
+      if (v.kind == Token::Identifier) {
+        t.countName = ident().text;
+        need("]");
+        return t;
+      }
       if (v.kind != Token::Number)
-        fail(v.loc, DiagnosticCode::UnexpectedToken, "static array size required");
+        fail(v.loc, DiagnosticCode::UnexpectedToken, "static array size or constant required");
       ++pos;
       try {
         t.count = std::stoi(v.text);
@@ -374,9 +393,10 @@ class Parser {
       e.kind = ast::Expr::Block;
       e.text.clear();
       while (!eat("}")) {
-        if (peek().text == "let" || peek().text == "if" || peek().text == "while" ||
-            peek().text == "loop" || peek().text == "for" || peek().text == "borrow" ||
-            peek().text == "return" || peek().text == "break" || peek().text == "continue") {
+        if (peek().text == "const" || peek().text == "let" || peek().text == "if" ||
+            peek().text == "while" || peek().text == "loop" || peek().text == "for" ||
+            peek().text == "borrow" || peek().text == "return" || peek().text == "break" ||
+            peek().text == "continue") {
           e.body.push_back(stmt());
           continue;
         }
@@ -514,8 +534,10 @@ class Parser {
     if (eat(";")) {
       s.kind = ast::Stmt::Expression;
       s.expr = {ast::Expr::Name, s.loc, "unit", {}};
-    } else if (eat("let")) {
-      s.kind = ast::Stmt::Let;
+    } else if (peek().text == "let" || peek().text == "const") {
+      s.kind = eat("const") ? ast::Stmt::Const : ast::Stmt::Let;
+      if (s.kind == ast::Stmt::Let)
+        need("let");
       {
         auto name = ident();
         s.name = name.text;
@@ -525,6 +547,8 @@ class Parser {
         s.annotated = true;
         s.annotation = type();
       }
+      if (s.kind == ast::Stmt::Const && !s.annotated)
+        fail(s.loc, DiagnosticCode::UnexpectedToken, "const requires a type annotation");
       need("=");
       s.expr = expr();
       need(";");
@@ -690,7 +714,9 @@ public:
       if (peek().text == "async" || peek().text == "await")
         ident();
       auto start = peek().loc;
-      if (eat("extern")) {
+      if (peek().text == "const") {
+        p.constants.push_back(stmt());
+      } else if (eat("extern")) {
         if (!trusted)
           fail(start, DiagnosticCode::RestrictedOperation,
                "extern C is restricted to bundled runtime bindings");
@@ -715,6 +741,12 @@ public:
       } else if (eat("enum")) {
         ast::Enum e;
         e.name = ident().text;
+        if (eat("<")) {
+          do {
+            e.parameters.push_back(ident().text);
+          } while (eat(","));
+          need(">");
+        }
         e.loc = start;
         need("{");
         while (!eat("}")) {
@@ -839,9 +871,9 @@ static void printExpr(const ast::Expr &e, std::ostream &o) {
   o << ")";
 }
 static void printStmts(const std::vector<ast::Stmt> &ss, std::ostream &o, int depth) {
-  static const char *names[] = {"LetStmt",    "ReturnStmt",   "ExprStmt", "IfStmt",
-                                "BorrowStmt", "WhileStmt",    "LoopStmt", "ForStmt",
-                                "BreakStmt",  "ContinueStmt", "MatchStmt"};
+  static const char *names[] = {"LetStmt",    "ReturnStmt",   "ExprStmt",  "IfStmt",
+                                "BorrowStmt", "WhileStmt",    "LoopStmt",  "ForStmt",
+                                "BreakStmt",  "ContinueStmt", "MatchStmt", "ConstDecl"};
   for (auto &s : ss) {
     o << std::string(depth, ' ') << names[s.kind] << " " << s.name << " ";
     printExpr(s.expr, o);
@@ -854,8 +886,19 @@ static void printStmts(const std::vector<ast::Stmt> &ss, std::ostream &o, int de
   }
 }
 void printAST(const ast::Program &p, std::ostream &o) {
+  printStmts(p.constants, o, 0);
   for (auto &e : p.enums) {
-    o << "EnumDecl " << e.name << "\n";
+    o << "EnumDecl " << e.name;
+    if (!e.parameters.empty()) {
+      o << "<";
+      for (size_t i = 0; i < e.parameters.size(); ++i) {
+        if (i)
+          o << ", ";
+        o << e.parameters[i];
+      }
+      o << ">";
+    }
+    o << "\n";
     for (auto &v : e.variants)
       o << "  Variant " << v.name << " payload=" << v.payload.size() << "\n";
   }

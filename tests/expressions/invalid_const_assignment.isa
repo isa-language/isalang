@@ -1,0 +1,5 @@
+const VALUE: i32 = 10;
+fn main() -> i32 {
+  VALUE = 20;
+  return 0;
+}

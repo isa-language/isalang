@@ -13,6 +13,7 @@ ast::Program loadImports(ast::Program source, SourceManager *sources) {
       "std",          "std.prelude", "std.fmt",    "std.macros",      "std.option",   "std.result",
       "std.parse",    "std.math",    "std.random", "std.ui.geometry", "std.ui.color", "std.time"};
   auto append = [&](ast::Program p) {
+    result.constants.insert(result.constants.end(), p.constants.begin(), p.constants.end());
     auto offset = result.functions.size();
     for (auto &impl : p.impls)
       for (auto &method : impl.methods)

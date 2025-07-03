@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let x = Option::Some(42);
+  let n: Option<i32> = Option::None;
+    print(match x {
+      Option::Some(v) => v,
+      Option::None => 0,
+  });
+  return 0;
+}

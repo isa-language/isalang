@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let a = Option::Some(8);
+  let b = a.move();
+  match a {
+    Option::Some(v) => print(v),
+    Option::None => print(0),
+  }
+  return 0;
+}

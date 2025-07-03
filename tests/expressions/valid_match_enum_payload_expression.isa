@@ -1,0 +1,12 @@
+enum Message {
+  Move(i32, i32),
+  Quit,
+}
+fn main() -> i32 {
+  let m = Message::Move(3, 4);
+    print(match m {
+      Message::Move(x, y) => x + y,
+      Message::Quit => 0,
+  });
+  return 0;
+}

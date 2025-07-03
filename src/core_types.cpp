@@ -26,14 +26,20 @@ void checkTypes(const Program &p) {
           return values.at(i.args[n]);
         };
         auto slot = [&]() { return p.semantics.symbols.at(i.slot).type; };
-        auto q = i.kind == Inst::ProtocolTransition && i.type == Unit ? Quantity::Zero
-                 : p.semantics.linear(i.type)                         ? Quantity::One
-                                                                      : Quantity::Omega;
+        auto q = i.kind == Inst::BorrowShared || i.kind == Inst::BorrowUnique ? Quantity::One
+                 : i.kind == Inst::ProtocolTransition && i.type == Unit       ? Quantity::Zero
+                 : p.semantics.linear(i.type)                                 ? Quantity::One
+                                                                              : Quantity::Omega;
         if (i.quantity != q)
           bad();
         if (i.kind == Inst::Loop)
           block(i.condition);
         switch (i.kind) {
+        case Inst::RefineVariant:
+          if (p.semantics.types[slot()].kind != hir::Type::Enum ||
+              i.offset >= p.semantics.types[slot()].variants.size())
+            bad();
+          break;
         case Inst::StaticStr:
           expect(i.type, Str);
           if (!validUtf8(i.text))

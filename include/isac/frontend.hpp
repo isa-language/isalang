@@ -19,6 +19,8 @@ struct TypeSyntax {
   int count = 0;
   Loc loc;
   bool reference = false, mutableReference = false;
+  std::string countName = {};
+  std::vector<TypeSyntax> arguments = {};
 };
 enum class Access { Own, Shared, Unique };
 const char *accessName(Access);
@@ -59,7 +61,20 @@ struct Pattern {
   std::vector<std::string> bindings;
 };
 struct Stmt {
-  enum Kind { Let, Return, Expression, If, Borrow, While, Loop, For, Break, Continue, Match } kind;
+  enum Kind {
+    Let,
+    Return,
+    Expression,
+    If,
+    Borrow,
+    While,
+    Loop,
+    For,
+    Break,
+    Continue,
+    Match,
+    Const
+  } kind;
   Loc loc;
   std::string name;
   TypeSyntax annotation;
@@ -133,11 +148,13 @@ struct EnumVariant {
   std::vector<TypeSyntax> payload;
 };
 struct Enum {
+  std::vector<std::string> parameters;
   std::string name;
   Loc loc;
   std::vector<EnumVariant> variants;
 };
 struct Program {
+  std::vector<Stmt> constants;
   std::vector<Enum> enums;
   std::vector<std::string> imports;
   std::vector<Impl> impls;

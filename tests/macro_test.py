@@ -20,6 +20,8 @@ if expected["code"]:
         assert "in expansion of @" in checked.stderr, checked.stderr
 else:
     assert checked.returncode == 0, checked.stderr
+    if "warning" in expected:
+        assert "warning[" + expected["warning"] + "]" in checked.stderr, checked.stderr
     with tempfile.TemporaryDirectory() as directory:
         executable = Path(directory) / "program"
         command = [compiler, str(source), "-o", str(executable)]
@@ -40,6 +42,6 @@ else:
                 "UBSAN_OPTIONS": "halt_on_error=1",
             },
         )
-        assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+        assert run.returncode == expected.get("exit", 0), (run.returncode, run.stdout, run.stderr)
         assert run.stdout.decode() == expected["stdout"], (run.stdout[:4096], expected["stdout"])
         assert not run.stderr, run.stderr

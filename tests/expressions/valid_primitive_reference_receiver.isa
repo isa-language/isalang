@@ -1,0 +1,10 @@
+impl i32 {
+  pub fn process(shared self) -> i32 {
+    return self * 2;
+  }
+}
+fn main() -> i32 {
+  let value = 10;
+  print((&value).process());
+  return 0;
+}

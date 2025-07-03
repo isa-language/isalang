@@ -1,0 +1,10 @@
+const ZERO: i32 = 0;
+const ONE: i32 = 1;
+fn main() -> i32 {
+    print(match 1 {
+      ZERO => 10,
+      ONE => 20,
+      _ => 30,
+  });
+  return 0;
+}

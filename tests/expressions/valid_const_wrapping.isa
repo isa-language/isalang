@@ -1,0 +1,7 @@
+const A: u8 = 255u8 + 1u8;
+const B: i8 = 127i8 + 1i8;
+fn main() -> i32 {
+  print(A);
+  print(B);
+  return 0;
+}

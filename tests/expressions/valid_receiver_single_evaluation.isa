@@ -1,0 +1,13 @@
+impl i32 {
+  pub fn process(shared self) -> i32 {
+    return self * 2;
+  }
+}
+fn make_value() -> i32 {
+  print(1);
+  return 10;
+}
+fn main() -> i32 {
+  print(make_value().process());
+  return 0;
+}
