@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let a = Option::Some(String::from("unused"));
+  let b = Option::Some(a.move());
+  return 0;
+}

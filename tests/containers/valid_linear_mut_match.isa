@@ -1,0 +1,12 @@
+fn main() -> i32 {
+  let a = Option::Some(String::from("mut"));
+  match &mut a {
+    Option::Some(text) => text.push_str("ated"),
+    Option::None => {},
+  }
+  match &a {
+    Option::Some(text) => print(text),
+    Option::None => {},
+  }
+  return 0;
+}

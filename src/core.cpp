@@ -180,6 +180,11 @@ class Builder {
       emit(i, false);
       return None;
     }
+    case E::PayloadTake:
+      i.kind = Inst::PayloadTake;
+      i.slot = e.args.at(0).ref;
+      i.offset = e.ref;
+      return emit(i);
     case E::EnumConstruct:
       i.kind = Inst::EnumConstruct;
       i.offset = e.ref;
@@ -369,6 +374,7 @@ class Builder {
         break;
       case hir::Stmt::BorrowEnd:
         i.kind = Inst::EndBorrow;
+        i.quantity = p.semantics.linear(i.type) ? Quantity::One : Quantity::Omega;
         i.slot = s.symbol;
         i.unconditional = s.unconditional;
         emit(i, false);
@@ -378,6 +384,7 @@ class Builder {
         i.kind = s.access == Access::Shared ? Inst::BorrowShared : Inst::BorrowUnique;
         i.slot = s.expr.args.at(0).ref;
         i.region = s.expr.region;
+        i.projection = s.expr.ref == None ? 0 : s.expr.ref;
         i.offset = s.symbol;
         i.type = s.expr.type;
         i.quantity = Quantity::One;
@@ -390,6 +397,7 @@ class Builder {
           out->insert(out->end(), b.begin(), b.end());
         }
         i.kind = Inst::EndBorrow;
+        i.quantity = p.semantics.linear(i.type) ? Quantity::One : Quantity::Omega;
         i.slot = s.symbol;
         emit(i, false);
         break;
@@ -440,6 +448,7 @@ struct Resource {
   std::string consumedBy;
   SymbolId movedTo = None;
   Loc consumedAt = {}, borrowAt = {}, stateAt = {};
+  std::set<uint32_t> movedPayloads = {};
   MemoryState memory() const {
     return !live                      ? MemoryState::Dead
            : access == Access::Shared ? MemoryState::Shared
@@ -448,7 +457,8 @@ struct Resource {
   }
   bool operator==(const Resource &other) const {
     return memory() == other.memory() && state == other.state && root == other.root &&
-           shared == other.shared && unique == other.unique && allocation == other.allocation;
+           shared == other.shared && unique == other.unique && allocation == other.allocation &&
+           (!live || movedPayloads == other.movedPayloads);
   }
 };
 struct Temporary {
@@ -501,7 +511,8 @@ class Checker {
       if (it != c.vars.end())
         d.secondary(it->second.consumedAt,
                     moved ? "ownership moved here" : "resource dropped here");
-      if (it != c.vars.end() && it->second.movedTo != None)
+      if (it != c.vars.end() && it->second.movedTo != None &&
+          !symbol(it->second.movedTo).name.starts_with("$"))
         d.help("use `" + symbol(it->second.movedTo).name + "`, or borrow `" + symbol(id).name +
                "` instead of moving it");
       else
@@ -622,8 +633,10 @@ class Checker {
            "method self cannot be dropped or moved; it is returned by the protocol transition");
     }
     final(symbol(id).type, r.state, symbol(id).name, l, r.stateAt);
-    if (r.allocation)
+    if (r.allocation) {
       site.cleanup.push_back(id);
+      site.movedPayloads[id] = {r.movedPayloads.begin(), r.movedPayloads.end()};
+    }
     r.allocation = false;
     c.vars[id].live = false;
     c.vars[id].consumedBy = "drop";
@@ -750,6 +763,7 @@ class Checker {
       if (c.returned)
         break;
       i.cleanup.clear();
+      i.movedPayloads.clear();
       i.freeTemporary = false;
       switch (i.kind) {
       case Inst::RefineVariant:
@@ -800,7 +814,38 @@ class Checker {
         pointerAccess(c, i.args[0], Access::Unique, i.loc);
         pointerAccess(c, i.args[1], Access::Shared, i.loc);
         break;
-      case Inst::EnumConstruct:
+      case Inst::PayloadTake: {
+        auto &owner = access(c, i.slot, Access::Own, i.loc);
+        auto tid = symbol(i.slot).type;
+        if (!c.variants.contains(i.slot))
+          fail(i.loc, DiagnosticCode::InvalidCore, "payload transfer requires a proven variant");
+        auto variant = c.variants.at(i.slot);
+        bool found = false;
+        const auto &payloads = p.semantics.types[tid].variants.at(variant).payload;
+        for (size_t n = 0; n < payloads.size(); ++n)
+          if (p.semantics.payloadOffset(tid, variant, n) == i.offset && payloads[n] == i.type)
+            found = true;
+        if (!found || !owner.movedPayloads.insert(i.offset).second)
+          fail(i.loc, DiagnosticCode::ConsumedResource, "enum payload has already been consumed");
+        c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
+        break;
+      }
+      case Inst::EnumConstruct: {
+        const auto &payloads = p.semantics.types[i.type].variants.at(i.offset).payload;
+        for (size_t n = 0; n < i.args.size(); ++n) {
+          auto tid = payloads[n];
+          if (!p.semantics.linear(tid))
+            continue;
+          auto &payload = take(c, i.args[n], i.loc);
+          final(tid, payload.state, "enum payload", i.loc);
+          if (payload.state != initial(tid) || (p.semantics.heap(tid) && !payload.allocation))
+            fail(i.loc, DiagnosticCode::AllocationContract,
+                 "enum payload must retain its allocation and be in its initial final protocol "
+                 "state");
+        }
+        c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
+        break;
+      }
       case Inst::Create:
       case Inst::Array:
         c.values[i.result] = {i.type, initial(i.type), true};
@@ -870,6 +915,19 @@ class Checker {
         break;
       case Inst::BorrowShared:
       case Inst::BorrowUnique: {
+        if (i.projection) {
+          if (!c.variants.contains(i.slot))
+            fail(i.loc, DiagnosticCode::InvalidCore, "payload borrow requires a proven variant");
+          auto tid = symbol(i.slot).type;
+          auto variant = c.variants.at(i.slot);
+          const auto &payloads = p.semantics.types[tid].variants.at(variant).payload;
+          bool found = false;
+          for (size_t n = 0; n < payloads.size(); ++n)
+            if (p.semantics.payloadOffset(tid, variant, n) == i.projection && payloads[n] == i.type)
+              found = true;
+          if (!found || c.vars.at(i.slot).movedPayloads.contains(i.projection))
+            fail(i.loc, DiagnosticCode::ConsumedResource, "cannot borrow a consumed enum payload");
+        }
         auto &source = live(c, i.slot, i.loc);
         bool shared = i.kind == Inst::BorrowShared;
 
@@ -1025,7 +1083,7 @@ public:
                         0,
                         false,
                         cf.parameters[n],
-                        p.semantics.heap(s.type),
+                        p.semantics.needsDrop(s.type),
                         "",
                         None};
         }
@@ -1042,26 +1100,26 @@ public:
   }
 };
 void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, int d) {
-  static const char *names[] = {"constant",      "copy",
-                                "read",          "write",
-                                "create",        "array",
-                                "move",          "bind",
-                                "drop",          "borrow.shared",
-                                "borrow.unique", "end_borrow",
-                                "call",          "protocol.transition",
-                                "return",        "if",
-                                "scope.end",     "binary",
-                                "unary",         "print",
-                                "discard",       "heap.alloc",
-                                "heap.free",     "heap.load",
-                                "heap.store",    "memcpy",
-                                "memmove",       "cast",
-                                "loop",          "break",
-                                "continue",      "enum.construct",
-                                "inspect",       "static_str",
-                                "string.call",   "print.text",
-                                "end_views",     "input.call",
-                                "refine.variant"};
+  static const char *names[] = {"constant",       "copy",
+                                "read",           "write",
+                                "create",         "array",
+                                "move",           "bind",
+                                "drop",           "borrow.shared",
+                                "borrow.unique",  "end_borrow",
+                                "call",           "protocol.transition",
+                                "return",         "if",
+                                "scope.end",      "binary",
+                                "unary",          "print",
+                                "discard",        "heap.alloc",
+                                "heap.free",      "heap.load",
+                                "heap.store",     "memcpy",
+                                "memmove",        "cast",
+                                "loop",           "break",
+                                "continue",       "enum.construct",
+                                "inspect",        "static_str",
+                                "string.call",    "print.text",
+                                "end_views",      "input.call",
+                                "refine.variant", "payload.take"};
   for (auto &i : ops) {
     if (i.kind == Inst::Loop)
       dump(i.condition, p, o, d + 2);
@@ -1071,6 +1129,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                 ? ") => string.drop (free payload)\n"
             : p.types[p.symbols[id].type].dropGlue == hir::DropGlue::InputAllocation
                 ? ") => input.drop (free successful text payload)\n"
+            : p.types[p.symbols[id].type].kind == hir::Type::Enum
+                ? ") => drop active variant payloads\n"
                 : ") => heap.free\n");
     if (i.freeTemporary)
       o << std::string(d, ' ') << "drop temporary => heap.free\n";
@@ -1078,6 +1138,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
     if (i.result != None)
       o << "%" << i.result << " = ";
     o << names[i.kind];
+    if (i.projection)
+      o << " payload.offset=" << i.projection;
     if (i.kind == Inst::RefineVariant)
       o << " variant=#V" << i.offset;
     if (i.slot != None)

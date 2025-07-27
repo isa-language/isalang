@@ -1,0 +1,5 @@
+@import "std.buffer" fn main() -> i32 {
+  let b = Buffer::new(4);
+  let a = Option::Some(b.move());
+  return 0;
+}

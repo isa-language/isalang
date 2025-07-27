@@ -1,4 +1,4 @@
-import pathlib, subprocess, sys, tempfile
+import pathlib, subprocess, sys, tempfile, re
 
 compiler, root = sys.argv[1:]
 root = pathlib.Path(root)
@@ -23,7 +23,7 @@ for stage in ["ast", "hir", "core", "erased", "lir", "mlir", "llvm"]:
     if stage in ["erased", "lir", "mlir", "llvm"]:
         assert "source=Dead" not in text and "borrow.shared" not in text and "quantity=" not in text
 llvm = emit("llvm")
-main = llvm.split("define i32 @main()", 1)[1]
+main = re.split(r"define i32 @isa_\d+_main\(\)", llvm, maxsplit=1)[1]
 assert main.count("call void @isac_rt_string_from") == 1
 assert main.count("call void @isac_rt_string_drop") == 1
 assert 'private constant [7 x i8] c"Isalang"' in llvm

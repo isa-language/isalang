@@ -1,0 +1,10 @@
+fn main() -> i32 {
+  for i in 0..3 {
+    let a = Option::Some(String::from("loop"));
+    match &a {
+      Option::Some(text) => print(text),
+      Option::None => {},
+    }
+  }
+  return 0;
+}

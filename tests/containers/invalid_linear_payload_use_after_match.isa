@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let a = Option::Some(String::from("hello"));
+  match a {
+    Option::Some(_) => {},
+    Option::None => {},
+  }
+  a.drop();
+  return 0;
+}

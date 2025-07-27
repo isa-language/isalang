@@ -1,0 +1,16 @@
+fn main() -> i32 {
+  let inner = Option::Some(String::from("hello"));
+  let outer = Option::Some(inner.move());
+  match outer {
+    Option::Some(nested) => {
+      match nested {
+        Option::Some(text) => {
+          print(text);
+        },
+        Option::None => {},
+      }
+    },
+    Option::None => {},
+  }
+  return 0;
+}

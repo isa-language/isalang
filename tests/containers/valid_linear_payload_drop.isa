@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let a = Option::Some(String::from("unused"));
+  let b: Result<String, i32> = Result::Ok(String::from("hello"));
+  match b {
+    Result::Ok(text) => print(text),
+    Result::Err(_) => print(0),
+  }
+  return 0;
+}

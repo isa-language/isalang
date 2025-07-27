@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let text = String::from("hello");
+  let a = Option::Some(text);
+  return 0;
+}

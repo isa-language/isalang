@@ -1,0 +1,18 @@
+fn main() {
+  let item = Option::Some(String::from("Isalang"));
+
+  match &mut item {
+    Option::Some(text) => text.push_str(" payload"),
+    Option::None => {},
+  }
+
+  match &item {
+    Option::Some(text) => print(text),
+    Option::None => {},
+  }
+
+  match item {
+    Option::Some(text) => print(text),
+    Option::None => {},
+  }
+}

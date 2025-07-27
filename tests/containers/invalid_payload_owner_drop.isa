@@ -1,0 +1,11 @@
+fn main() -> i32 {
+  let a = Option::Some(String::from("shared"));
+  match &a {
+    Option::Some(text) => {
+      a.drop();
+      print(text);
+    },
+    Option::None => {},
+  }
+  return 0;
+}

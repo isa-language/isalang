@@ -116,7 +116,8 @@ struct Expr {
     StaticStr,
     Block,
     Borrow,
-    Match
+    Match,
+    PayloadTake
   } kind;
   Loc loc;
   bool inferredLiteral = false;
@@ -209,7 +210,13 @@ struct GenericInstance {
   Substitution substitution;
   TypeId type;
 };
+enum class MainSignatureKind { NoArgsI32, NoArgsUnit };
+struct EntryPointInfo {
+  FunctionId function = None;
+  MainSignatureKind signature = MainSignatureKind::NoArgsI32;
+};
 struct Program {
+  EntryPointInfo entryPoint;
   std::vector<GenericEnum> genericEnums;
   std::vector<GenericInstance> instances;
   std::vector<Diagnostic> warnings;
@@ -219,6 +226,25 @@ struct Program {
   std::vector<Protocol> protocols;
   std::vector<Symbol> symbols;
   std::vector<Function> functions;
+  uint32_t storageWidth(TypeId t) const {
+    return heap(t) ? 1 : types[t].width;
+  }
+  uint32_t payloadOffset(TypeId t, VariantId variant, size_t index) const {
+    uint32_t offset = 1;
+    const auto &payload = types[t].variants.at(variant).payload;
+    for (size_t n = 0; n < index; ++n)
+      offset += storageWidth(payload.at(n));
+    return offset;
+  }
+  bool needsDrop(TypeId t) const {
+    if (heap(t))
+      return true;
+    for (const auto &variant : types[t].variants)
+      for (auto payload : variant.payload)
+        if (needsDrop(payload))
+          return true;
+    return false;
+  }
   bool heap(TypeId t) const {
     return types[t].representation != Representation::Stack;
   }

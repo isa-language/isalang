@@ -29,11 +29,6 @@
     "stdin": "",
     "code": "E0200"
   },
-  "invalid_generic_resource_payload": {
-    "stdout": "",
-    "stdin": "",
-    "code": "E0611"
-  },
   "valid_generic_inferred_once": {
     "stdout": "99\n12\n",
     "stdin": "",
@@ -48,11 +43,6 @@
     "stdout": "",
     "stdin": "",
     "code": "E0101"
-  },
-  "invalid_generic_nested_payload": {
-    "stdout": "",
-    "stdin": "",
-    "code": "E0611"
   },
   "invalid_generic_non_generic_args": {
     "stdout": "",
@@ -73,5 +63,140 @@
     "stdout": "",
     "stdin": "",
     "code": "E0611"
+  },
+  "valid_generic_empty_resource_payload": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_generic_empty_nested_payload": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_nested_payload": {
+    "stdout": "hello\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_payload_drop": {
+    "stdout": "hello\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_payload_wildcard": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_payload_box": {
+    "stdout": "42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_payload_function": {
+    "stdout": "function\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_payload_early_return": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_linear_payload_copy": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0302"
+  },
+  "invalid_linear_payload_use_after_match": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_linear_payload_view": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0611"
+  },
+  "valid_linear_shared_match": {
+    "stdout": "shared\nshared\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_mut_match": {
+    "stdout": "mutated\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_scalar_shared_match": {
+    "stdout": "42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_shared_payload_move": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0310"
+  },
+  "invalid_shared_payload_mutation": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0311"
+  },
+  "invalid_payload_owner_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "valid_main_unit": {
+    "stdout": "unit main\n",
+    "stdin": "",
+    "code": "",
+    "exit": 0
+  },
+  "valid_main_i32_exit": {
+    "stdout": "",
+    "stdin": "",
+    "code": "",
+    "exit": 7
+  },
+  "invalid_main_parameter": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200",
+    "exit": 0
+  },
+  "invalid_main_return": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200",
+    "exit": 0
+  },
+  "invalid_multiple_main": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0101",
+    "exit": 0
+  },
+  "valid_linear_multiple_payloads": {
+    "stdout": "first\n7\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_nested_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_linear_loop_drop": {
+    "stdout": "loop\nloop\nloop\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_linear_nonfinal_payload": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0410"
   }
 }

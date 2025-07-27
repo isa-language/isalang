@@ -1,4 +1,5 @@
 #include "isac/erasure.hpp"
+#include <algorithm>
 #include <unordered_map>
 namespace isac {
 namespace {
@@ -29,7 +30,7 @@ class Eraser {
     size_t pos = n.find("::");
     if (pos != std::string::npos)
       n.replace(pos, 2, "__");
-    return n == "main" ? n : "isa_" + std::to_string(id) + "_" + n;
+    return "isa_" + std::to_string(id) + "_" + n;
   }
   runtime::Value emit(std::vector<I> &out, I i, bool result = true) {
     if (result)
@@ -54,6 +55,68 @@ class Eraser {
     i.offset = offset;
     emit(out, i, false);
   }
+  runtime::Value load(std::vector<I> &out, runtime::Value buffer, uint32_t offset, T t) {
+    I i{};
+    i.kind = I::Load;
+    i.type = t;
+    i.args = {buffer};
+    i.offset = offset;
+    return emit(out, i);
+  }
+  runtime::Value project(std::vector<I> &out, runtime::Value buffer, uint32_t offset, TypeId tid) {
+    auto t = type(tid);
+    if (t.kind != T::Buffer)
+      return load(out, buffer, offset, t);
+    I alloc{};
+    alloc.kind = I::Alloc;
+    alloc.type = t;
+    auto result = emit(out, alloc);
+    for (uint32_t n = 0; n < t.width; ++n)
+      store(out, result, load(out, buffer, offset + n, {T::Scalar, 1, 64}), n);
+    return result;
+  }
+  void destroy(std::vector<I> &out, TypeId tid, runtime::Value value,
+               const std::vector<uint32_t> &moved = {}) {
+    const auto &t = core.semantics.types[tid];
+    if (core.semantics.heap(tid)) {
+      I drop{};
+      drop.kind = I::Free;
+      drop.args = {value};
+      if (t.representation == hir::Representation::StringRecord ||
+          t.representation == hir::Representation::InputRecord) {
+        drop.kind = I::Call;
+        drop.callee = t.representation == hir::Representation::StringRecord ? "isac_rt_string_drop"
+                                                                            : "isac_rt_input_drop";
+      }
+      emit(out, drop, false);
+    } else if (t.kind == hir::Type::Enum) {
+      auto tag = load(out, value, 0, {T::Scalar, 1, 32});
+      for (const auto &variant : t.variants) {
+        std::vector<I> body;
+        for (size_t n = 0; n < variant.payload.size(); ++n) {
+          auto offset = core.semantics.payloadOffset(tid, variant.id, n);
+          auto pt = variant.payload[n];
+          if (!core.semantics.needsDrop(pt) ||
+              std::find(moved.begin(), moved.end(), offset) != moved.end())
+            continue;
+          destroy(body, pt, project(body, value, offset, pt));
+        }
+        if (body.empty())
+          continue;
+        I compare{};
+        compare.kind = I::Binary;
+        compare.callee = "==";
+        compare.type = {T::Scalar, 1, 32};
+        compare.args = {tag, constant(out, variant.id)};
+        auto condition = emit(out, compare);
+        I branch{};
+        branch.kind = I::If;
+        branch.args = {condition};
+        branch.body = std::move(body);
+        emit(out, branch, false);
+      }
+    }
+  }
   std::vector<I> block(const std::vector<core::Inst> &ops) {
     std::vector<I> out;
     for (auto &c : ops) {
@@ -66,35 +129,12 @@ class Eraser {
         i.args.push_back(values.at(a));
 
       for (auto sid : c.cleanup) {
-        I free{};
-        free.kind = I::Free;
-        if (core.semantics.types[core.semantics.symbols[sid].type].representation ==
-            hir::Representation::StringRecord) {
-          free.kind = I::Call;
-          free.callee = "isac_rt_string_drop";
-        }
-        if (core.semantics.types[core.semantics.symbols[sid].type].representation ==
-            hir::Representation::InputRecord) {
-          free.kind = I::Call;
-          free.callee = "isac_rt_input_drop";
-        }
-        free.args = {slots.at(sid)};
-        emit(out, free, false);
+        auto found = c.movedPayloads.find(sid);
+        destroy(out, core.semantics.symbols[sid].type, slots.at(sid),
+                found == c.movedPayloads.end() ? std::vector<uint32_t>{} : found->second);
       }
-      if (c.freeTemporary) {
-        I free{};
-        free.kind = I::Free;
-        if (core.semantics.types[c.type].representation == hir::Representation::StringRecord) {
-          free.kind = I::Call;
-          free.callee = "isac_rt_string_drop";
-        }
-        if (core.semantics.types[c.type].representation == hir::Representation::InputRecord) {
-          free.kind = I::Call;
-          free.callee = "isac_rt_input_drop";
-        }
-        free.args = {i.args[0]};
-        emit(out, free, false);
-      }
+      if (c.freeTemporary)
+        destroy(out, c.type, i.args.at(0));
       switch (c.kind) {
       case C::StaticStr:
         i.kind = I::StaticStr;
@@ -211,9 +251,21 @@ class Eraser {
         i.args.clear();
         auto v = emit(out, i);
         values[c.result] = v;
+        auto zero = constant(out, 0);
+        for (uint32_t n = 0; n < i.type.width; ++n)
+          store(out, v, zero, n);
         store(out, v, constant(out, c.offset), 0);
-        for (size_t n = 0; n < c.args.size(); ++n)
-          store(out, v, values.at(c.args[n]), n + 1);
+        const auto &payload = core.semantics.types[c.type].variants.at(c.offset).payload;
+        for (size_t n = 0; n < c.args.size(); ++n) {
+          auto offset = core.semantics.payloadOffset(c.type, c.offset, n);
+          auto value = values.at(c.args[n]);
+          auto pt = type(payload[n]);
+          if (pt.kind == T::Buffer) {
+            for (uint32_t k = 0; k < pt.width; ++k)
+              store(out, v, load(out, value, k, {T::Scalar, 1, 64}), offset + k);
+          } else
+            store(out, v, value, offset);
+        }
         break;
       }
       case C::Create:
@@ -250,6 +302,9 @@ class Eraser {
         i.offset = c.offset;
         values[c.result] = emit(out, i);
         break;
+      case C::PayloadTake:
+        values[c.result] = project(out, slots.at(c.slot), c.offset, c.type);
+        break;
       case C::Move:
         values[c.result] = slots.at(c.slot);
         break;
@@ -258,7 +313,19 @@ class Eraser {
         break;
       case C::BorrowShared:
       case C::BorrowUnique:
-        slots[c.offset] = slots.at(c.slot);
+        if (c.projection) {
+          auto value = project(out, slots.at(c.slot), c.projection, c.type);
+          if (scalar(c.type)) {
+            I alloc{};
+            alloc.kind = I::Alloc;
+            alloc.type = {T::Buffer, 1, 64};
+            auto buffer = emit(out, alloc);
+            store(out, buffer, value);
+            value = buffer;
+          }
+          slots[c.offset] = value;
+        } else
+          slots[c.offset] = slots.at(c.slot);
         break;
       case C::Cast:
       case C::Binary:
@@ -392,6 +459,24 @@ public:
       }
       p.functions.push_back(std::move(f));
     }
+
+    runtime::Function entry;
+    entry.name = "main";
+    entry.result = type(I32);
+    entry.params = {{p.values++, type(I32)}, {p.values++, type(RawPtr)}};
+    I call{};
+    call.kind = I::Call;
+    call.callee = name(core.semantics.entryPoint.function);
+    bool unit = core.semantics.entryPoint.signature == hir::MainSignatureKind::NoArgsUnit;
+    call.type = type(unit ? Unit : I32);
+    auto code = emit(entry.body, call, !unit);
+    if (unit)
+      code = constant(entry.body, 0);
+    I ret{};
+    ret.kind = I::Return;
+    ret.args = {code};
+    emit(entry.body, ret, false);
+    p.functions.push_back(std::move(entry));
     return std::move(p);
   }
 };

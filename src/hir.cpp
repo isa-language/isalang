@@ -43,13 +43,20 @@ class Resolver {
                            [&](auto pair) { return pair.first == payload.id; });
           tid = found->second;
         }
-        if (!scalar(tid))
+        if (!scalar(tid) && !p.linear(tid))
           fail(loc, DiagnosticCode::InvalidPayload,
-               "generic enum payload `" + p.types[tid].name +
-                   "` requires aggregate payload ownership support");
+               "enum payload views require reference region contracts");
         variant.payload.push_back(tid);
       }
-      type.width = std::max(type.width, static_cast<uint32_t>(1 + variant.payload.size()));
+      uint32_t width = 1;
+      for (auto payload : variant.payload) {
+        auto cells = p.storageWidth(payload);
+        if (cells > 65536 || width > 65536 - cells)
+          fail(loc, DiagnosticCode::InvalidPayload,
+               "enum layout exceeds the PoC limit of 65536 storage cells");
+        width += cells;
+      }
+      type.width = std::max(type.width, width);
       type.variants.push_back(std::move(variant));
     }
     auto tid = instance.type;
@@ -718,10 +725,29 @@ class Resolver {
       if (a.kind == A::Match) {
         s.kind = H::Match;
         s.expr = expr(a.expr);
+        Access matchAccess = Access::Own;
+        if (s.expr.kind == hir::Expr::Borrow) {
+          matchAccess = s.expr.borrowKind == BorrowKind::Shared ? Access::Shared : Access::Unique;
+          auto source = s.expr.args.at(0);
+          s.expr = std::move(source);
+        }
         auto tid = s.expr.type;
         auto t = p.types[tid];
         if (t.kind != hir::Type::Enum && tid != Bool && tid != Char && !integer(tid))
           fail(a.loc, DiagnosticCode::InvalidPattern, "match requires enum, bool or integer");
+        bool ownedPayloads = false;
+        for (const auto &variant : t.variants)
+          for (auto payload : variant.payload)
+            ownedPayloads |= p.linear(payload);
+        ownedPayloads = ownedPayloads && matchAccess == Access::Own;
+        if (ownedPayloads && s.expr.kind == hir::Expr::Variable) {
+          hir::Expr moved{};
+          moved.kind = hir::Expr::Move;
+          moved.loc = s.expr.loc;
+          moved.type = tid;
+          moved.args = {s.expr};
+          s.expr = std::move(moved);
+        }
         scopes.emplace_back();
         std::vector<H> prefix;
         TypeId armType = None;
@@ -774,6 +800,7 @@ class Resolver {
           }
           scopes.emplace_back();
           SymbolId alias = None;
+          std::vector<std::pair<SymbolId, uint32_t>> payloadBorrows;
           h.catchall = pat.kind == ast::Pattern::Wildcard || pat.kind == ast::Pattern::Binding;
           if (h.catchall) {
             all = true;
@@ -815,14 +842,28 @@ class Resolver {
               rhs.text = key;
               for (size_t j = 0; j < pat.bindings.size(); ++j)
                 if (pat.bindings[j] != "_") {
+                  if (matchAccess != Access::Own) {
+                    auto pt = found->payload[j];
+                    if (p.types[pt].protocol != None ||
+                        (matchAccess == Access::Unique && !p.heap(pt)))
+                      fail(pat.loc, DiagnosticCode::InvalidReborrow,
+                           "this payload projection requires a shared non-protocol value or a "
+                           "unique heap wrapper");
+                    auto id = add(pat.bindings[j], pt, pat.loc, matchAccess);
+                    p.symbols[id].reference = true;
+                    p.symbols[id].region = nextRegion++;
+                    payloadBorrows.push_back({id, p.payloadOffset(tid, found->id, j)});
+                    continue;
+                  }
                   H let{};
                   let.kind = H::Let;
                   let.loc = pat.loc;
                   let.symbol = add(pat.bindings[j], found->payload[j], pat.loc);
-                  let.expr.kind = hir::Expr::Field;
+                  let.expr.kind =
+                      p.linear(found->payload[j]) ? hir::Expr::PayloadTake : hir::Expr::Field;
                   let.expr.type = found->payload[j];
                   let.expr.loc = pat.loc;
-                  let.expr.ref = j + 1;
+                  let.expr.ref = p.payloadOffset(tid, found->id, j);
                   let.expr.args = {base};
                   h.body.push_back(let);
                 }
@@ -845,6 +886,15 @@ class Resolver {
             h.expr.type = Bool;
             h.expr.text = "==";
             h.expr.args = {lhs, rhs};
+          }
+          if (ownedPayloads && alias == None) {
+            H drop{};
+            drop.kind = H::Expression;
+            drop.loc = arm.loc;
+            drop.expr.kind = hir::Expr::Drop;
+            drop.expr.loc = arm.loc;
+            drop.expr.args = {base};
+            h.body.push_back(std::move(drop));
           }
           auto body = block(arm.body);
           if (a.expressionMatch) {
@@ -875,6 +925,21 @@ class Resolver {
             result.loc = arm.loc;
             assignment.expr.args = {result, value};
             body.push_back(std::move(assignment));
+          }
+          for (auto it = payloadBorrows.rbegin(); it != payloadBorrows.rend(); ++it) {
+            H borrow{};
+            borrow.kind = H::Borrow;
+            borrow.loc = pat.loc;
+            borrow.access = matchAccess;
+            borrow.symbol = it->first;
+            borrow.expr.kind = hir::Expr::Borrow;
+            borrow.expr.loc = pat.loc;
+            borrow.expr.type = p.symbols[it->first].type;
+            borrow.expr.ref = it->second;
+            borrow.expr.region = p.symbols[it->first].region;
+            borrow.expr.args = {base};
+            borrow.body = std::move(body);
+            body = {std::move(borrow)};
           }
           if (alias != None) {
             H borrow{};
@@ -1215,13 +1280,16 @@ public:
         hir::Variant variant{static_cast<VariantId>(p.types[enumId].variants.size()), v.name, {}};
         for (auto &ts : v.payload) {
           auto tid = getType(ts);
-          if (!scalar(tid))
+          if (!scalar(tid) && !p.heap(tid))
             fail(ts.loc, DiagnosticCode::InvalidPayload,
-                 "enum payloads currently require primitive scalar types");
+                 "aggregate payload declarations require completed type layout");
           variant.payload.push_back(tid);
         }
         auto &t = p.types[enumId];
-        t.width = std::max(t.width, static_cast<uint32_t>(1 + variant.payload.size()));
+        uint32_t width = 1;
+        for (auto payload : variant.payload)
+          width += p.storageWidth(payload);
+        t.width = std::max(t.width, width);
         t.variants.push_back(variant);
       }
     }
@@ -1264,7 +1332,8 @@ public:
         if (t == Str)
           fail(f.loc, DiagnosticCode::EscapingView,
                "str fields require lifetime contracts, outside this PoC");
-        if (t == Unit || p.types[t].kind == hir::Type::Structure)
+        if (t == Unit || p.types[t].kind == hir::Type::Structure ||
+            p.types[t].kind == hir::Type::Enum)
           fail(f.loc, DiagnosticCode::InvalidPlace,
                "PoC struct fields require scalars or static scalar arrays");
         p.types[id].fields.push_back({f.name, t, offset});
@@ -1535,8 +1604,14 @@ public:
     if (main == functions.end())
       fail({}, DiagnosticCode::UnknownName, "missing fn main() -> i32");
     auto &f = p.functions[main->second];
-    if (f.result != I32 || !f.params.empty())
-      fail(f.loc, DiagnosticCode::TypeMismatch, "main must have signature fn main() -> i32");
+    if ((f.result != I32 && f.result != Unit) || !f.params.empty())
+      DiagnosticEngine()
+          .error(DiagnosticCode::TypeMismatch, f.loc, "invalid entrypoint signature")
+          .note("supported signatures: fn main() -> i32; fn main()")
+          .help("command-line argument slices require the upcoming region and slice support")
+          .emit();
+    p.entryPoint = {f.id, f.result == Unit ? hir::MainSignatureKind::NoArgsUnit
+                                           : hir::MainSignatureKind::NoArgsI32};
     ExprId nextExpression = 0;
     std::function<void(hir::Expr &)> numberExpression;
     std::function<void(std::vector<hir::Stmt> &)> numberBlock;
@@ -1565,10 +1640,11 @@ public:
 };
 void printS(const std::vector<hir::Stmt> &, std::ostream &, int);
 void printE(const hir::Expr &e, std::ostream &o) {
-  static const char *names[] = {
-      "constant", "symbol", "binary",         "unary",      "call",  "method",    "field",
-      "index",    "array",  "assign",         "move",       "drop",  "construct", "print",
-      "unit",     "cast",   "enum.construct", "static_str", "block", "borrow",    "match"};
+  static const char *names[] = {"constant", "symbol",         "binary",     "unary", "call",
+                                "method",   "field",          "index",      "array", "assign",
+                                "move",     "drop",           "construct",  "print", "unit",
+                                "cast",     "enum.construct", "static_str", "block", "borrow",
+                                "match",    "payload.take"};
   o << names[e.kind] << "<T" << e.type << ">";
   if (e.id != None)
     o << " expr=#E" << e.id;
@@ -1625,6 +1701,9 @@ hir::Program resolve(const ast::Program &a, TargetInfo target) {
   return Resolver(a, std::move(target)).run();
 }
 void printHIR(const hir::Program &p, std::ostream &o) {
+  o << "entrypoint #F" << p.entryPoint.function
+    << (p.entryPoint.signature == hir::MainSignatureKind::NoArgsUnit ? " NoArgsUnit" : " NoArgsI32")
+    << "\n";
   for (const auto &decl : p.genericEnums) {
     o << "generic enum #G" << decl.id << " " << decl.name;
     for (auto parameter : decl.parameters)

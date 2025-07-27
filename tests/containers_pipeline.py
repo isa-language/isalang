@@ -33,3 +33,24 @@ with tempfile.TemporaryDirectory() as directory:
         assert result.returncode == 0, result.stderr
         result = subprocess.run([str(executable)], capture_output=True, text=True)
         assert (result.returncode, result.stdout, result.stderr) == (0, "1\n", ""), result
+
+
+source = Path(root) / "tests/containers/valid_main_unit.isa"
+llvm = emit("llvm")
+assert "define i32 @main(i32" in llvm and "ptr" in llvm
+assert "define void @isa_" in llvm and "_main()" in llvm
+
+source = Path(root) / "tests/containers/valid_linear_nested_payload.isa"
+assert "payload.take" in emit("core")
+assert "payload.take" not in emit("erased")
+for kind in ["ast", "hir", "core", "erased", "lir", "mlir", "llvm"]:
+    assert emit(kind).strip()
+with tempfile.TemporaryDirectory() as directory:
+    for opt in ["-O0", "-O2"]:
+        executable = Path(directory) / ("payload" + opt)
+        result = subprocess.run(
+            [compiler, str(source), opt, "-o", str(executable)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        result = subprocess.run([str(executable)], capture_output=True, text=True)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "hello\n", ""), result

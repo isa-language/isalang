@@ -1,5 +1,6 @@
 #pragma once
 #include "isac/hir.hpp"
+#include <map>
 namespace isac {
 enum class Quantity { Zero, One, Omega };
 enum class MemoryState { Own, Shared, Unique, Dead };
@@ -48,7 +49,8 @@ struct Inst {
     TextPrint,
     EndViews,
     InputCall,
-    RefineVariant
+    RefineVariant,
+    PayloadTake
   } kind;
   Loc loc;
   RegionId region = None;
@@ -56,6 +58,7 @@ struct Inst {
   TypeId type = Unit;
   SymbolId slot = None;
   uint32_t offset = 0;
+  uint32_t projection = 0;
   uint32_t loop = None;
   bool unconditional = false;
   FunctionId function = None;
@@ -68,6 +71,7 @@ struct Inst {
   ValueId resourceInput = None;
   std::vector<Merge> merges;
   std::vector<SymbolId> cleanup;
+  std::map<SymbolId, std::vector<uint32_t>> movedPayloads;
   bool freeTemporary = false;
   Quantity quantity = Quantity::Omega;
   Access access = Access::Own;

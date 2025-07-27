@@ -1,0 +1,9 @@
+@import "std.box"
+fn main() -> i32 {
+  let a = Option::Some(BoxI32::new(42));
+  match a {
+    Option::Some(value) => print(value.get()),
+    Option::None => {},
+  }
+  return 0;
+}

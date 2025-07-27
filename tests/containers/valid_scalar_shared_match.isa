@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let a = Option::Some(42);
+  match &a {
+    Option::Some(value) => print(value),
+    Option::None => {},
+  }
+  a.drop();
+  return 0;
+}

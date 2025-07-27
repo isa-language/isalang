@@ -1,0 +1,4 @@
+fn main() {
+  let a = Option::Some(String::from("cleaned"));
+  @println("unit main");
+}

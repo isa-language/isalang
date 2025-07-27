@@ -29,15 +29,15 @@ for source in (box, buffer):
             text,
         ), (source, mode)
         assert not re.search(r"\b(malloc|calloc|free)\s*\(", text), (mode, "direct libc dependency")
-main_erased = emit(box, "erased").split("fn main\n", 1)[1]
+main_erased = re.split(r"fn isa_\d+_main\n", emit(box, "erased"), maxsplit=1)[1]
 assert main_erased.count("heap.alloc") == 1 and main_erased.count("free ") == 1
 assert "move" not in main_erased and "borrow" not in main_erased
-main_llvm = emit(box, "llvm").split("define i32 @main()", 1)[1]
+main_llvm = re.split(r"define i32 @isa_\d+_main\(\)", emit(box, "llvm"), maxsplit=1)[1]
 assert main_llvm.count("call ptr @isac_rt_alloc(") == 1
 assert main_llvm.count("call void @isac_rt_free(") == 1
 assert "isac_rt_print_i32" in main_llvm
 buffer_llvm = emit(buffer, "llvm")
-main_buffer = buffer_llvm.split("define i32 @main()", 1)[1]
+main_buffer = re.split(r"define i32 @isa_\d+_main\(\)", buffer_llvm, maxsplit=1)[1]
 assert "call void @isac_rt_free(" not in main_buffer, "Released wrapper was freed twice"
 assert "allocation=absent" in emit(buffer, "core")
 assert '"isac.free"' in emit(box, "mlir")

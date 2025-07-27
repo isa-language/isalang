@@ -5,6 +5,13 @@
 namespace isac::core {
 
 void checkTypes(const Program &p) {
+  const auto &entry = p.semantics.entryPoint;
+  if (entry.function >= p.semantics.functions.size())
+    fail({}, DiagnosticCode::InvalidCore, "missing semantic entrypoint");
+  const auto &main = p.semantics.functions[entry.function];
+  auto result = entry.signature == hir::MainSignatureKind::NoArgsUnit ? Unit : I32;
+  if (!main.params.empty() || main.result != result || main.external)
+    fail(main.loc, DiagnosticCode::InvalidCore, "entrypoint contract does not match its function");
   for (const auto &f : p.functions) {
     const auto &signature = p.semantics.functions.at(f.id);
     std::map<ValueId, TypeId> values;
@@ -35,6 +42,29 @@ void checkTypes(const Program &p) {
         if (i.kind == Inst::Loop)
           block(i.condition);
         switch (i.kind) {
+        case Inst::BorrowShared:
+        case Inst::BorrowUnique: {
+          if (i.offset >= p.semantics.symbols.size())
+            bad();
+          expect(p.semantics.symbols.at(i.offset).type, i.type);
+          if (!i.projection)
+            expect(slot(), i.type);
+          else {
+            const auto &t = p.semantics.types[slot()];
+            if (t.kind != hir::Type::Enum)
+              bad();
+            bool found = false;
+            for (const auto &variant : t.variants)
+              for (size_t n = 0; n < variant.payload.size(); ++n)
+                if (p.semantics.payloadOffset(slot(), variant.id, n) == i.projection &&
+                    variant.payload[n] == i.type)
+                  found = true;
+            if (!found || p.semantics.types[i.type].protocol != None ||
+                (i.kind == Inst::BorrowUnique && !p.semantics.heap(i.type)))
+              bad();
+          }
+          break;
+        }
         case Inst::RefineVariant:
           if (p.semantics.types[slot()].kind != hir::Type::Enum ||
               i.offset >= p.semantics.types[slot()].variants.size())
@@ -74,6 +104,20 @@ void checkTypes(const Program &p) {
           for (size_t n = 0; n < i.args.size(); ++n)
             expect(arg(n), p.semantics.types[i.type].element);
           break;
+        case Inst::PayloadTake: {
+          const auto &t = p.semantics.types[slot()];
+          if (t.kind != hir::Type::Enum || !p.semantics.linear(i.type))
+            bad();
+          bool found = false;
+          for (const auto &variant : t.variants)
+            for (size_t n = 0; n < variant.payload.size(); ++n)
+              if (p.semantics.payloadOffset(slot(), variant.id, n) == i.offset &&
+                  variant.payload[n] == i.type)
+                found = true;
+          if (!found)
+            bad();
+          break;
+        }
         case Inst::Read:
         case Inst::Write:
           if (i.offset >= p.semantics.types[slot()].width || (!scalar(i.type) && i.type != RawPtr))

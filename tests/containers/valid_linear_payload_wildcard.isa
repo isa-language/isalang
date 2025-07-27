@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let a = Option::Some(String::from("ignored"));
+  match a {
+    Option::Some(_) => {},
+    Option::None => {},
+  }
+  return 0;
+}

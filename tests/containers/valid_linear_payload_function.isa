@@ -1,0 +1,11 @@
+fn consume(value: Option<String>) {
+  match value {
+    Option::Some(text) => print(text),
+    Option::None => {},
+  }
+}
+fn main() -> i32 {
+  let a = Option::Some(String::from("function"));
+  consume(a.move());
+  return 0;
+}

@@ -1,0 +1,15 @@
+enum Bundle<T, U> {
+  Values(T, i32, U),
+  Empty,
+}
+fn main() -> i32 {
+  let b = Bundle::Values(String::from("first"), 7, String::from("last"));
+  match b {
+    Bundle::Values(first, n, _) => {
+      print(first);
+      print(n);
+    },
+    Bundle::Empty => {},
+  }
+  return 0;
+}

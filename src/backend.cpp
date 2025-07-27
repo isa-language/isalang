@@ -265,12 +265,16 @@ class Emitter {
     return builder.create<arith::ExtSIOp>(loc, to, v);
   }
   Value encode(Value v, Type cell) {
+    if (isa<LLVM::LLVMPointerType>(v.getType()))
+      return builder.create<LLVM::PtrToIntOp>(builder.getUnknownLoc(), cell, v);
     if (isa<FloatType>(v.getType()))
       v = builder.create<arith::BitcastOp>(
           builder.getUnknownLoc(), builder.getIntegerType(v.getType().getIntOrFloatBitWidth()), v);
     return cast(v, cell, true);
   }
   Value decode(Value v, Type to) {
+    if (isa<LLVM::LLVMPointerType>(to))
+      return builder.create<LLVM::IntToPtrOp>(builder.getUnknownLoc(), to, v);
     if (isa<FloatType>(to)) {
       v = cast(v, builder.getIntegerType(to.getIntOrFloatBitWidth()), true);
       return builder.create<arith::BitcastOp>(builder.getUnknownLoc(), to, v);
