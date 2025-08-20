@@ -271,6 +271,10 @@ class Parser {
       typeClose();
     }
     if (eat("[")) {
+      if (eat("]")) {
+        t.count = -1;
+        return t;
+      }
       auto v = peek();
       if (v.kind == Token::Identifier) {
         t.countName = ident().text;
@@ -338,13 +342,14 @@ class Parser {
       if (eat("::")) {
         p.kind = ast::Pattern::Variant;
         p.name += "::" + ident().text;
-        if (eat("(")) {
-          if (!eat(")")) {
-            do {
-              p.bindings.push_back(ident().text);
-            } while (eat(","));
-            need(")");
-          }
+      }
+      if (eat("(")) {
+        p.kind = ast::Pattern::Variant;
+        if (!eat(")")) {
+          do {
+            p.bindings.push_back(ident().text);
+          } while (eat(","));
+          need(")");
         }
       }
     }
@@ -453,6 +458,24 @@ class Parser {
             .help("provide an expression after `=`")
             .emit();
       ident();
+
+      if (peek().text == "<") {
+        auto saved = pos;
+        try {
+          ++pos;
+          std::vector<TypeSyntax> arguments;
+          do {
+            arguments.push_back(type());
+          } while (eat(","));
+          need(">");
+          if (peek().text == "::")
+            e.typeArguments = std::move(arguments);
+          else
+            pos = saved;
+        } catch (const Error &) {
+          pos = saved;
+        }
+      }
       if (eat("::"))
         e.text += "::" + ident().text;
     }
@@ -462,6 +485,7 @@ class Parser {
              "error propagation with ? is not implemented; inspect is_ok() and error() explicitly");
       if (eat("(")) {
         ast::Expr c{ast::Expr::Call, e.loc, e.text, {}};
+        c.typeArguments = e.typeArguments;
         if (e.kind != ast::Expr::Name)
           fail(e.loc, DiagnosticCode::UnexpectedToken, "call target must be a name");
         if (!eat(")")) {
@@ -561,6 +585,11 @@ class Parser {
         s.expr = {ast::Expr::Name, s.loc, "unit", {}};
     } else if (eat("if")) {
       s.kind = ast::Stmt::If;
+      if (eat("let")) {
+        s.conditionalPattern = true;
+        s.pattern = pattern();
+        need("=");
+      }
       s.expr = expr();
       s.body = block();
       if (eat("else")) {
@@ -727,8 +756,16 @@ public:
       } else if (eat("fn"))
         p.functions.push_back(function("", pub, false, attr));
       else if (eat("impl")) {
-        std::string owner = ident().text;
-        ast::Impl impl{owner, start, {}};
+        std::vector<std::string> parameters;
+        if (eat("<")) {
+          do {
+            parameters.push_back(ident().text);
+          } while (eat(","));
+          need(">");
+        }
+        auto target = type();
+        std::string owner = target.name;
+        ast::Impl impl{owner, start, {}, std::move(parameters), target};
         need("{");
         while (!eat("}")) {
           auto ma = attribute();
@@ -779,6 +816,12 @@ public:
           auto name = ident();
           s.name = name.text;
           s.loc.context = name.loc.context;
+        }
+        if (eat("<")) {
+          do {
+            s.parameters.push_back(ident().text);
+          } while (eat(","));
+          need(">");
         }
         if (eat(":"))
           s.protocol = ident().text;
@@ -875,7 +918,14 @@ static void printStmts(const std::vector<ast::Stmt> &ss, std::ostream &o, int de
                                 "BorrowStmt", "WhileStmt",    "LoopStmt",  "ForStmt",
                                 "BreakStmt",  "ContinueStmt", "MatchStmt", "ConstDecl"};
   for (auto &s : ss) {
-    o << std::string(depth, ' ') << names[s.kind] << " " << s.name << " ";
+    o << std::string(depth, ' ') << (s.conditionalPattern ? "IfLetStmt" : names[s.kind]) << " "
+      << s.name << " ";
+    if (s.conditionalPattern) {
+      o << s.pattern.name << "(";
+      for (const auto &binding : s.pattern.bindings)
+        o << binding << " ";
+      o << ") = ";
+    }
     printExpr(s.expr, o);
     o << "\n";
     printStmts(s.body, o, depth + 2);
@@ -916,12 +966,32 @@ void printAST(const ast::Program &p, std::ostream &o) {
     }
   }
   for (auto &s : p.structs) {
-    o << "struct " << s.name << ": " << s.protocol << "\n";
+    o << "struct " << s.name;
+    if (!s.parameters.empty()) {
+      o << "<";
+      for (size_t i = 0; i < s.parameters.size(); ++i) {
+        if (i)
+          o << ",";
+        o << s.parameters[i];
+      }
+      o << ">";
+    }
+    o << ": " << s.protocol << "\n";
     for (auto &f : s.fields)
       o << "  " << f.name << ": " << f.type.name << "[" << f.type.count << "]\n";
   }
   for (auto &impl : p.impls) {
-    o << "impl " << impl.owner << " {";
+    o << "impl";
+    if (!impl.parameters.empty()) {
+      o << "<";
+      for (size_t i = 0; i < impl.parameters.size(); ++i) {
+        if (i)
+          o << ",";
+        o << impl.parameters[i];
+      }
+      o << ">";
+    }
+    o << " " << impl.owner << " {";
     for (auto id : impl.methods)
       o << " fn#" << id;
     o << " }\n";

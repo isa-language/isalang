@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let text = String::from("x");
+  let value = Option::Some(&text);
+  let other = value.move();
+  text.clear();
+  other.drop();
+  return 0;
+}

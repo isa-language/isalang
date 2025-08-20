@@ -1,0 +1,6 @@
+fn edit(a: &mut String, b: &String) {}
+fn main() -> i32 {
+  let value = String::new();
+  edit(&mut value, &value);
+  return 0;
+}

@@ -15,14 +15,145 @@ class Resolver {
   std::unordered_map<std::string, GenericDeclId> genericNames;
   std::map<std::pair<GenericDeclId, std::vector<TypeId>>, TypeId> instanceCache;
   TypeParamId nextTypeParam = 0;
+  std::unordered_map<std::string, GenericDeclId> genericStructNames;
+  std::unordered_map<std::string, TypeParamId> activeTypeParameters;
+  hir::Substitution activeSubstitution;
+  TypeId activeSelf = None;
+  std::string activeOwner;
+  struct FunctionSource {
+    const ast::Function *source;
+    std::unordered_map<std::string, TypeParamId> parameters;
+    hir::Substitution substitution;
+    TypeId owner;
+  };
+  std::vector<FunctionSource> functionSources;
+  std::set<std::pair<TypeId, std::string>> methodsDeclared;
+  TypeId substitute(hir::GenericPayload payload, const hir::Substitution &sub) {
+    if (!payload.parameter)
+      return payload.id;
+    for (auto [parameter, type] : sub.types)
+      if (parameter == payload.id)
+        return type;
+    fail({}, DiagnosticCode::TypeMismatch, "unbound generic type parameter");
+  }
+  TypeId instantiateStruct(GenericDeclId id, const std::vector<TypeId> &arguments, Loc loc) {
+    const auto decl = p.genericStructs.at(id - p.genericEnums.size());
+    if (arguments.size() != decl.parameters.size())
+      fail(loc, DiagnosticCode::TypeMismatch,
+           "wrong number of type arguments for `" + decl.name + "`");
+    auto key = std::make_pair(id, arguments);
+    if (instanceCache.contains(key))
+      return instanceCache.at(key);
+    if (p.instances.size() >= 1024)
+      fail(loc, DiagnosticCode::TypeMismatch, "generic instantiation limit reached (1024)");
+    hir::GenericInstance instance{
+        static_cast<InstanceId>(p.instances.size()), id, {}, static_cast<TypeId>(p.types.size())};
+    std::string name = decl.name + "<";
+    for (size_t i = 0; i < arguments.size(); ++i) {
+      if (i)
+        name += ",";
+      name += p.types.at(arguments[i]).name;
+      instance.substitution.types.push_back({decl.parameters[i], arguments[i]});
+    }
+    hir::Type type{hir::Type::Structure, name + ">"};
+    uint32_t offset = 0;
+    for (const auto &field : decl.fields) {
+      auto tid = substitute(field.type, instance.substitution);
+      if (!scalar(tid) && p.types[tid].kind != hir::Type::Array)
+        fail(loc, DiagnosticCode::InvalidPlace,
+             "generic struct field `" + field.name +
+                 "` requires aggregate element ownership support");
+      if (p.types[tid].width > 65536 - offset)
+        fail(loc, DiagnosticCode::InvalidPlace, "generic struct layout exceeds 65536 cells");
+      type.fields.push_back({field.name, tid, offset});
+      offset += p.types[tid].width;
+    }
+    type.width = std::max(1u, offset);
+    auto tid = instance.type;
+    types[type.name] = tid;
+    p.types.push_back(std::move(type));
+    p.instances.push_back(std::move(instance));
+    instanceCache.emplace(std::move(key), tid);
+    return tid;
+  }
+  void ensureMethods(TypeId owner, const std::string &name) {
+    if (!methodsDeclared.insert({owner, name}).second)
+      return;
+    std::optional<hir::GenericInstance> instance;
+    for (const auto &candidate : p.instances)
+      if (candidate.type == owner)
+        instance = candidate;
+    if (!instance)
+      return;
+    const auto declarationName =
+        instance->declaration < p.genericEnums.size()
+            ? p.genericEnums[instance->declaration].name
+            : p.genericStructs[instance->declaration - p.genericEnums.size()].name;
+    auto savedParameters = activeTypeParameters;
+    auto savedSubstitution = activeSubstitution;
+    auto savedSelf = activeSelf;
+    auto savedOwner = activeOwner;
+    auto savedPrivilege = privileged;
+    for (const auto &impl : ast.impls) {
+      if (impl.parameters.empty() || impl.owner != declarationName)
+        continue;
+      activeTypeParameters.clear();
+      activeSubstitution = instance->substitution;
+      activeSelf = owner;
+      activeOwner = impl.owner;
+      for (size_t n = 0; n < impl.parameters.size(); ++n)
+        activeTypeParameters[impl.parameters[n]] = instance->substitution.types[n].first;
+      for (auto method : impl.methods)
+        if (ast.functions.at(method).name == name)
+          declareFunction(ast.functions.at(method), owner);
+    }
+    activeTypeParameters = std::move(savedParameters);
+    activeSubstitution = std::move(savedSubstitution);
+    activeSelf = savedSelf;
+    activeOwner = std::move(savedOwner);
+    privileged = savedPrivilege;
+  }
+  std::map<TypeId, TypeId> sharedReferenceTypes;
+  TypeId storedReferenceType(TypeId element, Loc loc) {
+    if (!p.heap(element) || p.types[element].protocol != None)
+      fail(loc, DiagnosticCode::EscapingView,
+           "stored references currently require a non-protocol heap wrapper");
+    if (sharedReferenceTypes.contains(element))
+      return sharedReferenceTypes.at(element);
+    auto id = static_cast<TypeId>(p.types.size());
+    hir::Type type{hir::Type::Reference, "&" + p.types[element].name};
+    type.element = element;
+    p.types.push_back(std::move(type));
+    sharedReferenceTypes[element] = id;
+    return id;
+  }
+  void storeReference(hir::Expr &expression) {
+    bool alias = expression.kind == hir::Expr::Variable && p.symbols[expression.ref].reference;
+    if (expression.kind != hir::Expr::Borrow && !alias)
+      return;
+    auto access = alias                                         ? p.symbols[expression.ref].access
+                  : expression.borrowKind == BorrowKind::Shared ? Access::Shared
+                                                                : Access::Unique;
+    if (access != Access::Shared)
+      fail(expression.loc, DiagnosticCode::EscapingView,
+           "storing unique references requires exclusive payload region contracts");
+    hir::Expr stored{};
+    stored.kind = hir::Expr::StoreReference;
+    stored.loc = expression.loc;
+    stored.type = storedReferenceType(expression.type, expression.loc);
+    stored.args.push_back(std::move(expression));
+    expression = std::move(stored);
+  }
   TypeId instantiate(GenericDeclId id, const std::vector<TypeId> &arguments, Loc loc) {
-    const auto &decl = p.genericEnums.at(id);
+    const auto decl = p.genericEnums.at(id);
     if (arguments.size() != decl.parameters.size())
       fail(loc, DiagnosticCode::TypeMismatch,
            "wrong number of type arguments for `" + decl.name + "`");
     auto key = std::make_pair(id, arguments);
     if (auto found = instanceCache.find(key); found != instanceCache.end())
       return found->second;
+    if (p.instances.size() >= 1024)
+      fail(loc, DiagnosticCode::TypeMismatch, "generic instantiation limit reached (1024)");
     hir::GenericInstance instance{
         static_cast<InstanceId>(p.instances.size()), id, {}, static_cast<TypeId>(p.types.size())};
     std::string name = decl.name + "<";
@@ -43,6 +174,9 @@ class Resolver {
                            [&](auto pair) { return pair.first == payload.id; });
           tid = found->second;
         }
+        if (!p.reference(tid) && p.containsReferences(tid))
+          fail(loc, DiagnosticCode::EscapingView,
+               "nested containers with borrowed payloads require recursive region contracts");
         if (!scalar(tid) && !p.linear(tid))
           fail(loc, DiagnosticCode::InvalidPayload,
                "enum payload views require reference region contracts");
@@ -60,6 +194,7 @@ class Resolver {
       type.variants.push_back(std::move(variant));
     }
     auto tid = instance.type;
+    types[type.name] = tid;
     p.types.push_back(std::move(type));
     p.instances.push_back(std::move(instance));
     instanceCache.emplace(std::move(key), tid);
@@ -126,16 +261,30 @@ class Resolver {
     }
     if (s.reference && !allowReference)
       fail(s.loc, DiagnosticCode::EscapingView,
-           "reference types currently require a local borrow binding; aggregate and function "
+           "reference types here require a local borrow binding; aggregate and return "
            "region contracts are not implemented");
-    if (genericNames.contains(s.name)) {
+    if (!s.count && s.arguments.empty() && activeTypeParameters.contains(s.name))
+      return substitute({true, activeTypeParameters.at(s.name)}, activeSubstitution);
+    if (activeSelf != None && !s.count && s.arguments.empty() &&
+        (s.name == "self" || s.name == activeOwner))
+      return activeSelf;
+    if (genericNames.contains(s.name) || genericStructNames.contains(s.name)) {
       std::vector<TypeId> arguments;
-      for (const auto &argument : s.arguments)
-        arguments.push_back(getType(argument));
+      for (const auto &argument : s.arguments) {
+        if (argument.reference) {
+          if (argument.mutableReference)
+            fail(argument.loc, DiagnosticCode::EscapingView,
+                 "stored unique references are not supported yet");
+          arguments.push_back(storedReferenceType(getType(argument, true), argument.loc));
+        } else
+          arguments.push_back(getType(argument));
+      }
       if (s.count)
         fail(s.loc, DiagnosticCode::InvalidPayload,
              "arrays of enum values are not implemented yet");
-      return instantiate(genericNames.at(s.name), arguments, s.loc);
+      return genericNames.contains(s.name)
+                 ? instantiate(genericNames.at(s.name), arguments, s.loc)
+                 : instantiateStruct(genericStructNames.at(s.name), arguments, s.loc);
     }
     if (!s.arguments.empty())
       fail(s.loc, DiagnosticCode::TypeMismatch,
@@ -150,7 +299,19 @@ class Resolver {
     if (!s.count)
       return t;
     if (!scalar(t))
-      fail(s.loc, DiagnosticCode::InvalidReceiver, "PoC arrays require i32 or bool elements");
+      fail(s.loc, DiagnosticCode::InvalidReceiver,
+           "arrays and slices require scalar elements in this increment");
+    if (s.count == -1) {
+      if (!s.reference || !allowReference)
+        fail(s.loc, DiagnosticCode::EscapingView, "slice types require &T[] or &mut T[]");
+      auto key = s.name + "[]";
+      if (types.contains(key))
+        return types.at(key);
+      auto id = static_cast<TypeId>(p.types.size());
+      types[key] = id;
+      p.types.push_back({hir::Type::Slice, key, None, t, 0, 0, {}});
+      return id;
+    }
     std::string key = s.name + "[" + std::to_string(s.count) + "]";
     if (types.contains(key))
       return types[key];
@@ -158,6 +319,99 @@ class Resolver {
     types[key] = id;
     p.types.push_back({hir::Type::Array, key, None, t, (uint32_t)s.count, (uint32_t)s.count, {}});
     return id;
+  }
+  void declareFunction(const ast::Function &a, TypeId ownerOverride = None) {
+    if (ownerOverride != None && (a.external || !a.intrinsic.empty() || a.releases))
+      fail(a.loc, DiagnosticCode::RestrictedOperation,
+           "generic impl methods currently require ordinary checked bodies");
+    privileged = a.trusted;
+    hir::Function f{};
+    f.trusted = a.trusted;
+    f.external = a.external;
+    f.intrinsic = a.intrinsic;
+    f.kind = a.kind;
+    f.intrinsicId = findIntrinsic(a.external ? a.name : a.intrinsic);
+    if (!a.intrinsic.empty() && f.intrinsicId == IntrinsicId::None)
+      fail(a.loc, DiagnosticCode::RestrictedOperation, "unknown intrinsic `" + a.intrinsic + "`");
+    f.effects = intrinsicInfo(f.intrinsicId).effects;
+    f.releases = a.releases;
+    f.pub = a.pub;
+    f.id = p.functions.size();
+    f.loc = a.loc;
+    f.name = ownerOverride != None ? p.types[ownerOverride].name + "::" + a.name
+             : a.owner.empty()     ? a.name
+                                   : a.owner + "::" + a.name;
+    if (functions.contains(f.name) || f.name == "print")
+      duplicate(a.loc, f.name);
+    functions[f.name] = f.id;
+    if (ownerOverride != None)
+      f.owner = ownerOverride;
+    else if (!a.owner.empty()) {
+      if (!types.contains(a.owner) || (p.types[types[a.owner]].kind != hir::Type::Structure &&
+                                       types[a.owner] != Str && !scalar(types[a.owner])))
+        fail(a.loc, DiagnosticCode::UnknownName, "unknown impl struct");
+      f.owner = types[a.owner];
+      if ((p.heap(f.owner) || f.owner == Str) && !a.trusted)
+        fail(a.loc, DiagnosticCode::RestrictedOperation,
+             "bundled heap types cannot be extended by application impls");
+    }
+    if (a.result.reference)
+      fail(a.result.loc, DiagnosticCode::EscapingView,
+           "reference return requires an inferred input-region contract; returning local owners "
+           "is forbidden");
+    f.result = getType(a.result);
+    if (f.result == Str && f.intrinsic.empty())
+      fail(f.loc, DiagnosticCode::EscapingView,
+           "returning str views requires lifetime contracts, outside this PoC");
+    if (p.linear(f.result) && f.intrinsic.empty() &&
+        ((!p.heap(f.result) && p.needsDrop(f.result)) || p.containsReferences(f.result) ||
+         p.types[f.result].protocol != None))
+      fail(a.loc, DiagnosticCode::InvalidPlace,
+           "this resource return requires an allocation or region transfer contract");
+    scopes.emplace_back();
+    for (size_t i = 0; i < a.params.size(); ++i) {
+      auto &ap = a.params[i];
+      bool self = ap.name == "self";
+      if (self && i != 0)
+        fail(ap.loc, DiagnosticCode::TypeMismatch, "self must be first");
+      if (!self && ap.access != Access::Own)
+        fail(ap.loc, DiagnosticCode::InvalidPlace,
+             "shared/unique parameters are supported only for self");
+      auto t = getType(ap.type, ap.type.reference);
+      if (ap.type.reference && (f.external || !f.intrinsic.empty() || p.types[t].protocol != None ||
+                                t == Str || t == RawPtr))
+        fail(ap.loc, DiagnosticCode::EscapingView,
+             "this reference parameter requires an unsupported ABI or protocol contract");
+      if (p.containsReferences(t))
+        fail(ap.loc, DiagnosticCode::EscapingView,
+             "borrowed container parameters require payload origin contracts");
+      if (t == Unit)
+        fail(ap.loc, DiagnosticCode::TypeMismatch, "unit parameter is not supported");
+      auto access = ap.type.reference ? (ap.type.mutableReference ? Access::Unique : Access::Shared)
+                                      : ap.access;
+      auto id = add(ap.name, t, ap.loc, access, true, self);
+      f.params.push_back(id);
+      if (ap.type.reference) {
+        auto &symbol = p.symbols[id];
+        symbol.reference = true;
+        symbol.region = nextRegion++;
+        f.parameterRegions.push_back(
+            {id, symbol.region,
+             access == Access::Shared ? BorrowKind::Shared : BorrowKind::Unique});
+      }
+      if (self)
+        f.access = ap.access;
+    }
+    if (f.owner != None && scalar(f.owner) && !f.params.empty() &&
+        p.symbols[f.params[0]].receiver && f.access != Access::Shared)
+      fail(f.loc, DiagnosticCode::InvalidReceiver,
+           "primitive extension methods currently require shared self");
+    scopes.pop_back();
+    f.consumesSelf = f.owner != None && p.types[f.owner].kind == hir::Type::Enum &&
+                     !f.params.empty() && p.symbols[f.params[0]].receiver &&
+                     f.access == Access::Own;
+    p.functions.push_back(f);
+    functionSources.push_back({&a, activeTypeParameters, activeSubstitution, ownerOverride});
   }
   SymbolId add(std::string n, TypeId t, Loc l, Access a = Access::Own, bool param = false,
                bool self = false) {
@@ -182,6 +436,14 @@ class Resolver {
            "expected `" + p.types[a].name + "`, found `" + p.types[b].name + "`");
   }
   void coerce(TypeId wanted, hir::Expr &e) {
+    if (p.types[wanted].kind == hir::Type::Slice && e.kind == hir::Expr::Borrow &&
+        p.types[e.type].kind == hir::Type::Array &&
+        p.types[wanted].element == p.types[e.type].element) {
+      e.type = wanted;
+      return;
+    }
+    if (p.reference(wanted))
+      storeReference(e);
     if (e.inferredLiteral && numeric(wanted) && numeric(e.type) &&
         floating(wanted) == floating(e.type)) {
       validateLiteral(wanted, e.text, e.loc, p.target.pointerWidth);
@@ -193,8 +455,25 @@ class Resolver {
     if (e.args.size() != f.params.size())
       fail(e.loc, DiagnosticCode::ArgumentMismatch,
            "wrong number of arguments to `" + f.name + "`");
-    for (size_t i = skip; i < e.args.size(); ++i)
-      coerce(p.symbols[f.params[i]].type, e.args[i]);
+    for (size_t i = skip; i < e.args.size(); ++i) {
+      auto &parameter = p.symbols[f.params[i]];
+      auto &argument = e.args[i];
+      bool alias = argument.kind == hir::Expr::Variable && p.symbols[argument.ref].reference;
+      if (parameter.reference) {
+        if (argument.kind != hir::Expr::Borrow && !alias)
+          fail(argument.loc, DiagnosticCode::ArgumentMismatch,
+               "reference parameter requires an explicit borrow or reference binding");
+        Access access = alias                                       ? p.symbols[argument.ref].access
+                        : argument.borrowKind == BorrowKind::Shared ? Access::Shared
+                                                                    : Access::Unique;
+        if (access != parameter.access)
+          fail(argument.loc, DiagnosticCode::ArgumentMismatch,
+               "reference argument capability does not match parameter");
+      } else if (argument.kind == hir::Expr::Borrow && !parameter.receiver)
+        fail(argument.loc, DiagnosticCode::ArgumentMismatch,
+             "borrow cannot be passed to an owned parameter");
+      coerce(parameter.type, argument);
+    }
   }
   bool place(const hir::Expr &e) {
     return e.kind == hir::Expr::Variable || e.kind == hir::Expr::Field ||
@@ -322,6 +601,17 @@ class Resolver {
       e.text = a.text == "true" ? "1" : "0";
       return e;
     }
+    if (!a.typeArguments.empty()) {
+      auto sep = a.text.find("::");
+      TypeSyntax owner{a.text.substr(0, sep), 0, a.loc};
+      owner.arguments = a.typeArguments;
+      auto tid = getType(owner);
+      ensureMethods(tid, a.text.substr(sep + 2));
+      auto concrete = a;
+      concrete.typeArguments.clear();
+      concrete.text = p.types[tid].name + a.text.substr(sep);
+      return expr(concrete, expected);
+    }
     if ((a.kind == A::Name || a.kind == A::Call) && a.text.find("::") != std::string::npos) {
       auto sep = a.text.find("::");
       auto tn = a.text.substr(0, sep);
@@ -346,6 +636,7 @@ class Resolver {
           std::vector<TypeId> arguments(decl.parameters.size(), None);
           for (size_t i = 0; i < a.args.size(); ++i) {
             auto value = expr(a.args[i]);
+            storeReference(value);
             auto payload = variant->payload[i];
             if (payload.parameter) {
               auto index = std::find(decl.parameters.begin(), decl.parameters.end(), payload.id) -
@@ -362,7 +653,8 @@ class Resolver {
           enumType = instantiate(gid, arguments, a.loc);
         }
       }
-      if (enumType != None && p.types[enumType].kind == hir::Type::Enum) {
+      if (enumType != None && p.types[enumType].kind == hir::Type::Enum &&
+          !functions.contains(a.text)) {
         e.type = enumType;
         e.kind = H::EnumConstruct;
         auto &vs = p.types[e.type].variants;
@@ -495,16 +787,21 @@ class Resolver {
     }
     case A::Index: {
       auto &t = p.types[e.args[0].type];
-      if (t.kind != hir::Type::Array)
-        fail(a.loc, DiagnosticCode::TypeMismatch, "indexing requires an array");
-      same(I32, e.args[1].type, a.loc);
-      if (e.args[1].kind != H::Constant)
-        fail(a.loc, DiagnosticCode::InvalidIndex, "PoC array indices must be constant");
-      auto n = std::stoll(e.args[1].text);
-      if (n < 0 || n >= t.count)
-        fail(a.loc, DiagnosticCode::InvalidIndex, "array index out of bounds");
+      if (t.kind != hir::Type::Array && t.kind != hir::Type::Slice)
+        fail(a.loc, DiagnosticCode::TypeMismatch, "indexing requires an array or slice");
+      bool fixed = t.kind == hir::Type::Array && e.args[1].kind == H::Constant;
+      if (fixed) {
+        if (!integer(e.args[1].type))
+          fail(a.loc, DiagnosticCode::TypeMismatch, "array index must be an integer");
+        auto n = std::stoll(e.args[1].text);
+        if (n < 0 || n >= t.count)
+          fail(a.loc, DiagnosticCode::InvalidIndex, "array index out of bounds");
+        e.ref = static_cast<uint32_t>(n);
+      } else {
+        coerce(USize, e.args[1]);
+        e.ref = None;
+      }
       e.kind = H::Index;
-      e.ref = n;
       e.type = t.element;
       break;
     }
@@ -525,6 +822,27 @@ class Resolver {
       break;
     case A::Method: {
       auto &recv = e.args[0];
+      if ((p.types[recv.type].kind == hir::Type::Slice ||
+           p.types[recv.type].kind == hir::Type::Array) &&
+          (a.text == "len" || a.text == "is_empty")) {
+        if (e.args.size() != 1)
+          fail(a.loc, DiagnosticCode::ArgumentMismatch, "length methods take no arguments");
+        e.kind = H::Length;
+        e.type = USize;
+        if (a.text == "is_empty") {
+          auto length = e;
+          hir::Expr zero{};
+          zero.kind = H::Constant;
+          zero.type = USize;
+          zero.text = "0";
+          zero.loc = a.loc;
+          e.kind = H::Binary;
+          e.text = "==";
+          e.type = Bool;
+          e.args = {length, zero};
+        }
+        return e;
+      }
       if (a.text == "move" || a.text == "drop") {
         if (recv.kind != H::Variable)
           fail(a.loc, DiagnosticCode::InvalidPlace, "explicit move/drop requires a named place");
@@ -577,6 +895,7 @@ class Resolver {
                                  : "fmt_") +
                  p.types[value.type].name;
       }
+      ensureMethods(recv.type, method);
       auto key = p.types[recv.type].name + "::" + method;
       if (!functions.contains(key))
         DiagnosticEngine()
@@ -586,6 +905,8 @@ class Resolver {
             .emit();
       e.ref = functions[key];
       auto &f = p.functions[e.ref];
+      if (!privileged && f.trusted && !f.pub)
+        fail(a.loc, DiagnosticCode::RestrictedOperation, "library-internal method is not public");
       if (f.params.empty() || !p.symbols[f.params[0]].receiver)
         fail(a.loc, DiagnosticCode::TypeMismatch, "method needs self");
       e.kind = H::Method;
@@ -679,7 +1000,21 @@ class Resolver {
         if (found != endings.end())
           out.insert(out.end(), found->second.begin(), found->second.end());
       }};
-      auto &a = ss[position];
+
+      auto a = ss[position];
+      if (a.conditionalPattern) {
+        ast::Stmt selected{}, fallback{};
+        selected.kind = fallback.kind = ast::Stmt::Expression;
+        selected.loc = fallback.loc = a.loc;
+        selected.pattern = a.pattern;
+        selected.body = a.body;
+        fallback.pattern.kind = ast::Pattern::Wildcard;
+        fallback.pattern.loc = a.loc;
+        fallback.body = a.otherwise;
+        a.kind = ast::Stmt::Match;
+        a.body = {std::move(selected), std::move(fallback)};
+        a.otherwise.clear();
+      }
       if (a.kind == ast::Stmt::Const) {
         declareConstant(a);
         continue;
@@ -696,7 +1031,7 @@ class Resolver {
           fail(a.loc, DiagnosticCode::TypeMismatch,
                "reference binding requires matching & or &mut annotation");
         if (a.annotated)
-          same(getType(a.annotation, true), borrowed.expr.type, a.annotation.loc);
+          coerce(getType(a.annotation, true), borrowed.expr);
         size_t last = position;
         for (size_t n = position + 1; n < ss.size(); ++n)
           if (uses(ss[n], a.name, a.loc.context))
@@ -785,10 +1120,14 @@ class Resolver {
                          : tid == Char ? ast::Pattern::Character
                                        : ast::Pattern::Integer;
               pat.name = tid == Bool ? (value.text == "0" ? "false" : "true") : value.text;
+            } else if (t.kind == hir::Type::Enum &&
+                       std::any_of(t.variants.begin(), t.variants.end(),
+                                   [&](const auto &v) { return v.name == pat.name; })) {
+              pat.kind = ast::Pattern::Variant;
             }
           }
           if (all) {
-            if (!a.expressionMatch)
+            if (!a.expressionMatch && !a.conditionalPattern)
               fail(pat.loc, DiagnosticCode::UnreachableArm, "unreachable match arm");
             auto warning = DiagnosticEngine()
                                .error(DiagnosticCode::UnreachableMatchArmWarning, pat.loc,
@@ -825,7 +1164,8 @@ class Resolver {
               if (pat.kind != ast::Pattern::Variant)
                 fail(pat.loc, DiagnosticCode::InvalidPattern, "pattern type does not match enum");
               auto found = std::find_if(t.variants.begin(), t.variants.end(), [&](auto &v) {
-                return pat.name == t.name.substr(0, t.name.find('<')) + "::" + v.name;
+                return pat.name == v.name ||
+                       pat.name == t.name.substr(0, t.name.find('<')) + "::" + v.name;
               });
               if (found == t.variants.end())
                 fail(pat.loc, DiagnosticCode::InvalidVariant,
@@ -842,6 +1182,17 @@ class Resolver {
               rhs.text = key;
               for (size_t j = 0; j < pat.bindings.size(); ++j)
                 if (pat.bindings[j] != "_") {
+                  if (p.reference(found->payload[j])) {
+                    if (matchAccess == Access::Unique)
+                      fail(pat.loc, DiagnosticCode::SharedMutation,
+                           "a stored shared reference cannot become unique through match");
+                    auto pt = p.types[found->payload[j]].element;
+                    auto id = add(pat.bindings[j], pt, pat.loc, Access::Shared);
+                    p.symbols[id].reference = true;
+                    p.symbols[id].region = nextRegion++;
+                    payloadBorrows.push_back({id, p.payloadOffset(tid, found->id, j)});
+                    continue;
+                  }
                   if (matchAccess != Access::Own) {
                     auto pt = found->payload[j];
                     if (p.types[pt].protocol != None ||
@@ -897,6 +1248,10 @@ class Resolver {
             h.body.push_back(std::move(drop));
           }
           auto body = block(arm.body);
+          if (ownedPayloads && alias == None && !payloadBorrows.empty()) {
+            body.insert(body.begin(), std::move(h.body.back()));
+            h.body.pop_back();
+          }
           if (a.expressionMatch) {
             auto value = expr(arm.expr);
             if (armType == None) {
@@ -930,7 +1285,7 @@ class Resolver {
             H borrow{};
             borrow.kind = H::Borrow;
             borrow.loc = pat.loc;
-            borrow.access = matchAccess;
+            borrow.access = p.symbols[it->first].access;
             borrow.symbol = it->first;
             borrow.expr.kind = hir::Expr::Borrow;
             borrow.expr.loc = pat.loc;
@@ -1082,7 +1437,8 @@ class Resolver {
           out.push_back(std::move(s));
         continue;
       }
-      s.expr = expr(a.expr, a.kind == ast::Stmt::Let && a.annotated
+      s.expr = expr(a.expr, a.kind == ast::Stmt::Return ? current->result
+                            : a.kind == ast::Stmt::Let && a.annotated
                                 ? getType(a.annotation, a.annotation.reference)
                                 : None);
       if (s.expr.kind == hir::Expr::Borrow)
@@ -1218,6 +1574,8 @@ public:
       p.protocols.push_back(q);
     }
     for (auto &a : ast.structs) {
+      if (!a.parameters.empty())
+        continue;
       if (types.contains(a.name) || protocols.contains(a.name))
         duplicate(a.loc, a.name);
       TypeId id = p.types.size();
@@ -1294,7 +1652,43 @@ public:
       }
     }
 
+    for (const auto &a : ast.structs) {
+      if (a.parameters.empty())
+        continue;
+      if (types.contains(a.name) || genericNames.contains(a.name) ||
+          genericStructNames.contains(a.name) || protocols.contains(a.name))
+        duplicate(a.loc, a.name);
+      if (!a.protocol.empty() || !a.representation.empty())
+        fail(a.loc, DiagnosticCode::InvalidPlace,
+             "generic protocol/heap struct contracts are not implemented yet");
+      GenericDeclId id = p.genericEnums.size() + p.genericStructs.size();
+      genericStructNames[a.name] = id;
+      hir::GenericStruct decl{id, a.name, {}, {}};
+      std::unordered_map<std::string, TypeParamId> parameters;
+      for (const auto &name : a.parameters) {
+        if (parameters.contains(name))
+          duplicate(a.loc, name);
+        parameters[name] = nextTypeParam++;
+        decl.parameters.push_back(parameters[name]);
+      }
+      std::set<std::string> fields;
+      for (const auto &field : a.fields) {
+        if (!fields.insert(field.name).second)
+          duplicate(field.loc, field.name);
+        const auto &type = field.type;
+        if (type.reference || type.count || !type.arguments.empty() || !type.countName.empty())
+          fail(type.loc, DiagnosticCode::InvalidPayload,
+               "compound generic field templates are not implemented yet");
+        decl.fields.push_back({field.name, parameters.contains(type.name)
+                                               ? hir::GenericPayload{true, parameters.at(type.name)}
+                                               : hir::GenericPayload{false, getType(type)}});
+      }
+      p.genericStructs.push_back(std::move(decl));
+    }
+
     for (auto &a : ast.structs) {
+      if (!a.parameters.empty())
+        continue;
       privileged = a.trusted;
       auto id = types[a.name];
       if (!a.representation.empty()) {
@@ -1353,79 +1747,53 @@ public:
         fail(a.loc, DiagnosticCode::RestrictedOperation,
              "heap wrappers require one private RawPtr field");
     }
-    for (const auto &impl : ast.impls)
-      if (!types.contains(impl.owner) ||
-          (p.types[types.at(impl.owner)].kind != hir::Type::Structure &&
-           types.at(impl.owner) != Str && !scalar(types.at(impl.owner))))
+    for (const auto &impl : ast.impls) {
+      if (!impl.parameters.empty()) {
+        size_t arity =
+            genericNames.contains(impl.owner)
+                ? p.genericEnums[genericNames.at(impl.owner)].parameters.size()
+            : genericStructNames.contains(impl.owner)
+                ? p.genericStructs[genericStructNames.at(impl.owner) - p.genericEnums.size()]
+                      .parameters.size()
+                : 0;
+        if (arity != impl.parameters.size() || arity != impl.target.arguments.size())
+          fail(impl.loc, DiagnosticCode::TypeMismatch,
+               "generic impl must bind all owner type parameters");
+        std::set<std::string> names;
+        for (size_t n = 0; n < arity; ++n) {
+          if (!names.insert(impl.parameters[n]).second)
+            duplicate(impl.loc, impl.parameters[n]);
+          const auto &arg = impl.target.arguments[n];
+          if (arg.name != impl.parameters[n] || arg.reference || arg.count ||
+              !arg.arguments.empty())
+            fail(impl.loc, DiagnosticCode::TypeMismatch,
+                 "generic impl requires owner parameters in declaration order");
+        }
+      } else if (!types.contains(impl.owner) || !impl.target.arguments.empty() ||
+                 (p.types[types.at(impl.owner)].kind != hir::Type::Structure &&
+                  types.at(impl.owner) != Str && !scalar(types.at(impl.owner))))
         fail(impl.loc, DiagnosticCode::UnknownName, "unknown impl struct `" + impl.owner + "`");
-    for (auto &a : ast.functions) {
-      privileged = a.trusted;
-      hir::Function f{};
-      f.trusted = a.trusted;
-      f.external = a.external;
-      f.intrinsic = a.intrinsic;
-      f.kind = a.kind;
-      f.intrinsicId = findIntrinsic(a.external ? a.name : a.intrinsic);
-      if (!a.intrinsic.empty() && f.intrinsicId == IntrinsicId::None)
-        fail(a.loc, DiagnosticCode::RestrictedOperation, "unknown intrinsic `" + a.intrinsic + "`");
-      f.effects = intrinsicInfo(f.intrinsicId).effects;
-      f.releases = a.releases;
-      f.pub = a.pub;
-      f.id = p.functions.size();
-      f.loc = a.loc;
-      f.name = a.owner.empty() ? a.name : a.owner + "::" + a.name;
-      if (functions.contains(f.name) || f.name == "print")
-        duplicate(a.loc, f.name);
-      functions[f.name] = f.id;
-      if (!a.owner.empty()) {
-        if (!types.contains(a.owner) || (p.types[types[a.owner]].kind != hir::Type::Structure &&
-                                         types[a.owner] != Str && !scalar(types[a.owner])))
-          fail(a.loc, DiagnosticCode::UnknownName, "unknown impl struct");
-        f.owner = types[a.owner];
-        if ((p.heap(f.owner) || f.owner == Str) && !a.trusted)
-          fail(a.loc, DiagnosticCode::RestrictedOperation,
-               "bundled heap types cannot be extended by application impls");
-      }
-      if (a.result.reference)
-        fail(a.result.loc, DiagnosticCode::EscapingView,
-             "reference return requires an inferred input-region contract; returning local owners "
-             "is forbidden");
-      f.result = getType(a.result);
-      if (f.result == Str && f.intrinsic.empty())
-        fail(f.loc, DiagnosticCode::EscapingView,
-             "returning str views requires lifetime contracts, outside this PoC");
-      if (p.linear(f.result) && f.intrinsic.empty())
-        fail(a.loc, DiagnosticCode::InvalidPlace,
-             "resource returns are outside this PoC; use synthesized Type::new()");
-      scopes.emplace_back();
-      for (size_t i = 0; i < a.params.size(); ++i) {
-        auto &ap = a.params[i];
-        if (ap.type.reference)
-          fail(ap.loc, DiagnosticCode::EscapingView,
-               "reference parameters require function-region contracts, not yet implemented in "
-               "this increment");
-        bool self = ap.name == "self";
-        if (self && i != 0)
-          fail(ap.loc, DiagnosticCode::TypeMismatch, "self must be first");
-        if (!self && ap.access != Access::Own)
-          fail(ap.loc, DiagnosticCode::InvalidPlace,
-               "shared/unique parameters are supported only for self");
-        auto t = getType(ap.type);
-        if (t == Unit)
-          fail(ap.loc, DiagnosticCode::TypeMismatch, "unit parameter is not supported");
-        f.params.push_back(add(ap.name, t, ap.loc, ap.access, true, self));
-        if (self)
-          f.access = ap.access;
-      }
-      if (f.owner != None && scalar(f.owner) && !f.params.empty() &&
-          p.symbols[f.params[0]].receiver && f.access != Access::Shared)
-        fail(f.loc, DiagnosticCode::InvalidReceiver,
-             "primitive extension methods currently require shared self");
-      scopes.pop_back();
-      p.functions.push_back(f);
     }
+    std::set<uint32_t> genericMethods;
+    for (const auto &impl : ast.impls)
+      if (!impl.parameters.empty())
+        genericMethods.insert(impl.methods.begin(), impl.methods.end());
+    for (size_t n = 0; n < ast.functions.size(); ++n)
+      if (!genericMethods.contains(n))
+        declareFunction(ast.functions[n]);
     for (auto &f : p.functions) {
       if (!f.intrinsic.empty()) {
+        if (f.intrinsicId == IntrinsicId::Env_argument ||
+            f.intrinsicId == IntrinsicId::Env_argument_count) {
+          std::vector<TypeId> signature{f.result};
+          for (auto param : f.params)
+            signature.push_back(p.symbols[param].type);
+          if (!f.trusted || f.owner != None ||
+              signature != intrinsicSignature(f.intrinsicId, None, f.result))
+            fail(f.loc, DiagnosticCode::RestrictedOperation,
+                 "invalid environment intrinsic signature");
+          continue;
+        }
         if (intrinsicInfo(f.intrinsicId).lowering == IntrinsicLowering::InputRecord) {
           if (!f.trusted)
             fail(f.loc, DiagnosticCode::RestrictedOperation,
@@ -1550,8 +1918,13 @@ public:
             fail({}, DiagnosticCode::InvalidImplementation,
                  "missing implementation `" + t.name + "::" + op.name + "`");
     DiagnosticEngine bodyDiagnostics;
-    for (size_t i = 0; i < ast.functions.size(); ++i) {
-      auto &f = p.functions[i];
+    for (size_t i = 0; i < functionSources.size(); ++i) {
+      auto source = functionSources[i];
+      auto f = p.functions[i];
+      activeTypeParameters = source.parameters;
+      activeSubstitution = source.substitution;
+      activeSelf = source.owner;
+      activeOwner = source.source->owner;
       current = &f;
       privileged = f.trusted;
       if (f.external || !f.intrinsic.empty())
@@ -1560,7 +1933,8 @@ public:
       for (auto id : f.params)
         scopes.back()[p.symbols[id].name + "#" + std::to_string(p.symbols[id].loc.context)] = id;
       try {
-        f.body = block(ast.functions[i].body);
+        f.body = block(source.source->body);
+        p.functions[i] = std::move(f);
       } catch (const Error &e) {
         bodyDiagnostics.report(e.diagnostic);
         scopes.resize(1);
@@ -1608,7 +1982,8 @@ public:
       DiagnosticEngine()
           .error(DiagnosticCode::TypeMismatch, f.loc, "invalid entrypoint signature")
           .note("supported signatures: fn main() -> i32; fn main()")
-          .help("command-line argument slices require the upcoming region and slice support")
+          .help(
+              "use std.env.argument_count() and std.env.argument(index) for command-line arguments")
           .emit();
     p.entryPoint = {f.id, f.result == Unit ? hir::MainSignatureKind::NoArgsUnit
                                            : hir::MainSignatureKind::NoArgsI32};
@@ -1640,11 +2015,11 @@ public:
 };
 void printS(const std::vector<hir::Stmt> &, std::ostream &, int);
 void printE(const hir::Expr &e, std::ostream &o) {
-  static const char *names[] = {"constant", "symbol",         "binary",     "unary", "call",
-                                "method",   "field",          "index",      "array", "assign",
-                                "move",     "drop",           "construct",  "print", "unit",
-                                "cast",     "enum.construct", "static_str", "block", "borrow",
-                                "match",    "payload.take"};
+  static const char *names[] = {"constant", "symbol",         "binary",          "unary", "call",
+                                "method",   "field",          "index",           "array", "assign",
+                                "move",     "drop",           "construct",       "print", "unit",
+                                "cast",     "enum.construct", "static_str",      "block", "borrow",
+                                "match",    "payload.take",   "reference.store", "length"};
   o << names[e.kind] << "<T" << e.type << ">";
   if (e.id != None)
     o << " expr=#E" << e.id;
@@ -1704,6 +2079,12 @@ void printHIR(const hir::Program &p, std::ostream &o) {
   o << "entrypoint #F" << p.entryPoint.function
     << (p.entryPoint.signature == hir::MainSignatureKind::NoArgsUnit ? " NoArgsUnit" : " NoArgsI32")
     << "\n";
+  for (const auto &decl : p.genericStructs) {
+    o << "generic struct #G" << decl.id << " " << decl.name;
+    for (auto parameter : decl.parameters)
+      o << " #TP" << parameter;
+    o << "\n";
+  }
   for (const auto &decl : p.genericEnums) {
     o << "generic enum #G" << decl.id << " " << decl.name;
     for (auto parameter : decl.parameters)
@@ -1768,11 +2149,16 @@ void printHIR(const hir::Program &p, std::ostream &o) {
       o << " intrinsic=#" << static_cast<unsigned>(f.intrinsicId) << ":" << f.intrinsic;
     if (f.releases)
       o << " allocation-effect=release";
+    if (f.consumesSelf)
+      o << " receiver-effect=consume";
     if (f.owner != None)
       o << " impl=#T" << f.owner;
     for (auto op : f.operations)
       o << " operation=#O" << op;
     o << "\n";
+    for (const auto &region : f.parameterRegions)
+      o << "  region.contract #v" << region.parameter << " #R" << region.region << " "
+        << (region.kind == BorrowKind::Shared ? "Shared" : "Unique") << " caller-owned noescape\n";
     printS(f.body, o, 2);
   }
 }

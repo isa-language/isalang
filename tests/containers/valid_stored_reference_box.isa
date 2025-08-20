@@ -1,0 +1,12 @@
+@import "std.box"
+fn main() -> i32 {
+  let data = BoxI32::new(42);
+  let item = Option::Some(&data);
+  match item {
+    Option::Some(view) => print(view.get()),
+    Option::None => {},
+  }
+  data.set(7);
+  print(data.get());
+  return 0;
+}

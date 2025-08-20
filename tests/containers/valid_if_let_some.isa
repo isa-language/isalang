@@ -1,0 +1,14 @@
+fn main() -> i32 {
+  let valor: Option<i32> = Option::Some(42);
+  if let Some(v) = valor {
+    @println("{}", v);
+  }
+  let empty: Option<i32> = Option::None;
+  if let Some(v) = empty {
+    @println("{}", v);
+  }
+  else {
+    @println("empty");
+  }
+  return 0;
+}

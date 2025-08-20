@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let text = String::new();
+  text.char_at(true);
+  return 0;
+}

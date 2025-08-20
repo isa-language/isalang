@@ -1,0 +1,29 @@
+fn main() -> i32 {
+  let text = String::from("aá😀aá");
+  match text.find_from('á', 0) {
+    Option::Some(i) => print(i),
+    Option::None => print(99),
+  }
+  match text.find_from('á', 2) {
+    Option::Some(i) => print(i),
+    Option::None => print(99),
+  }
+  match text.find_from('😀', 2) {
+    Option::Some(i) => print(i),
+    Option::None => print(99),
+  }
+  match text.find_from('x', 0) {
+    Option::Some(i) => print(i),
+    Option::None => print(99),
+  }
+  match text.find_from('a', 999) {
+    Option::Some(i) => print(i),
+    Option::None => print(99),
+  }
+  text.clear();
+  match text.find_from('a', 0) {
+    Option::Some(i) => print(i),
+    Option::None => print(99),
+  }
+  return 0;
+}

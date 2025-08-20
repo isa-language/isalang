@@ -37,7 +37,10 @@ struct Instruction {
     Break,
     Continue,
     StaticStr,
-    RecordAlloc
+    RecordAlloc,
+    View,
+    Length,
+    IndexCheck
   } kind;
   Value result = NoValue;
   Type type;

@@ -1,3 +1,4 @@
+ISAC_INTRINSIC(String_char_at, "string.char_at", Memory, StringRecord, false, false)
 ISAC_INTRINSIC(String_new, "string.new", Memory, StringRecord, false, false)
 ISAC_INTRINSIC(String_from, "string.from", Memory, StringRecord, false, true)
 ISAC_INTRINSIC(String_len, "string.len", Memory, StringRecord, false, false)
@@ -85,3 +86,9 @@ ISAC_INTRINSIC(Parse_view_u64, "io.parse_view_u64", IO, InputRecord, false, true
 ISAC_INTRINSIC(Parse_view_f32, "io.parse_view_f32", IO, InputRecord, false, true)
 ISAC_INTRINSIC(Parse_view_f64, "io.parse_view_f64", IO, InputRecord, false, true)
 ISAC_INTRINSIC(Parse_view_bool, "io.parse_view_bool", IO, InputRecord, false, true)
+ISAC_INTRINSIC(Env_argument_count, "isac_rt_env_argument_count", Platform, ExternalCall, true,
+               false)
+ISAC_INTRINSIC(Env_argument, "isac_rt_env_argument", Platform, ExternalCall, true, false)
+
+ISAC_INTRINSIC(String_is_char_boundary, "string.is_char_boundary", Memory, StringRecord, false,
+               false)

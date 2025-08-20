@@ -1,0 +1,14 @@
+fn main() -> i32 {
+  let text = String::from("shared");
+  let option = Option::Some(&text);
+  match &option {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+  match option {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+  text.clear();
+  return 0;
+}

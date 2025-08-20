@@ -1,0 +1,12 @@
+fn main() -> i32 {
+  let text = String::from("aá😀a");
+  match text.char_at(1) {
+    Option::Some(value) => @println("char = {}", value),
+    Option::None => @println("invalid character index"),
+  }
+  match text.find_from('a', 1) {
+    Option::Some(index) => @println("byte offset = {}", index),
+    Option::None => @println("not found"),
+  }
+  return 0;
+}

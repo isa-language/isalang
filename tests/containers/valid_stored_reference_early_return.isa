@@ -1,0 +1,17 @@
+fn inspect(text: &String) -> i32 {
+  let option = Option::Some(text);
+  match option {
+    Option::Some(view) => {
+      print(view);
+      return 0;
+    },
+    Option::None => {},
+  }
+  return 1;
+}
+fn main() -> i32 {
+  let text = String::from("early");
+  print(inspect(&text));
+  text.clear();
+  return 0;
+}

@@ -175,8 +175,29 @@ void isac_rt_string_from(IsacString *out, const IsacStr *text) {
     out->len = out->capacity = text->len;
   }
 }
+void isac_rt_index_check(size_t index, size_t length) {
+  if (index >= length)
+    isac_rt_panic("index out of bounds");
+}
 size_t isac_rt_string_len(const IsacString *text) {
   return text->len;
+}
+
+int32_t isac_rt_string_is_char_boundary(const IsacString *text, size_t index) {
+  return index <= text->len && (index == text->len || (text->ptr[index] & 0xc0) != 0x80);
+}
+uint32_t isac_rt_string_char_at(const IsacString *text, size_t index) {
+  if (index >= text->len || !isac_rt_string_is_char_boundary(text, index))
+    isac_rt_panic("invalid UTF-8 character index");
+
+  uint8_t first = text->ptr[index];
+  if (first < 0x80)
+    return first;
+  unsigned length = first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+  uint32_t value = first & (length == 2 ? 0x1f : length == 3 ? 0x0f : 0x07);
+  for (unsigned n = 1; n < length; ++n)
+    value = (value << 6) | (text->ptr[index + n] & 0x3f);
+  return value;
 }
 size_t isac_rt_string_capacity(const IsacString *text) {
   return text->capacity;
@@ -710,4 +731,47 @@ void isac_rt_input_parse_view_f64(IsacInputResult *out, const IsacStr *source) {
 void isac_rt_input_parse_view_bool(IsacInputResult *out, const IsacStr *source) {
   IsacString view = {(uint8_t *)source->ptr, source->len, 0};
   isac_rt_input_parse_bool(out, &view);
+}
+
+static IsacStr *env_arguments;
+static size_t env_argument_count;
+static int env_initialized;
+void isac_rt_env_init(int32_t argc, char **argv) {
+  if (env_initialized || argc < 0 || (argc && !argv))
+    isac_rt_panic("invalid environment initialization");
+  if ((size_t)argc > SIZE_MAX / sizeof(IsacStr))
+    isac_rt_panic("argument list is too large");
+  for (int32_t i = 0; i < argc; ++i) {
+    if (!argv[i] || !input_utf8((const uint8_t *)argv[i], strlen(argv[i])))
+      isac_rt_panic("command-line argument is not valid UTF-8");
+  }
+  env_argument_count = (size_t)argc;
+  if (argc)
+    env_arguments = isac_rt_alloc_zeroed((size_t)argc * sizeof(IsacStr));
+  for (int32_t i = 0; i < argc; ++i) {
+    size_t len = strlen(argv[i]);
+    uint8_t *copy = isac_rt_alloc(len);
+    isac_rt_memcpy(copy, argv[i], len);
+    env_arguments[i].ptr = copy;
+    env_arguments[i].len = len;
+  }
+  env_initialized = 1;
+}
+void isac_rt_env_destroy(void) {
+  for (size_t i = 0; i < env_argument_count; ++i)
+    isac_rt_free((void *)env_arguments[i].ptr);
+  isac_rt_free(env_arguments);
+  env_arguments = NULL;
+  env_argument_count = 0;
+  env_initialized = 0;
+}
+size_t isac_rt_env_argument_count(void) {
+  if (!env_initialized)
+    isac_rt_panic("environment was not initialized");
+  return env_argument_count;
+}
+const IsacStr *isac_rt_env_argument(size_t index) {
+  if (!env_initialized || index >= env_argument_count)
+    isac_rt_panic("command-line argument index out of bounds");
+  return &env_arguments[index];
 }

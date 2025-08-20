@@ -5,6 +5,26 @@
 namespace isac::core {
 
 void checkTypes(const Program &p) {
+  for (const auto &type : p.semantics.types)
+    if (type.kind == hir::Type::Reference &&
+        (type.element >= p.semantics.types.size() || !p.semantics.heap(type.element) ||
+         p.semantics.types[type.element].protocol != None || type.width != 1 ||
+         type.dropGlue != hir::DropGlue::Trivial ||
+         type.representation != hir::Representation::Stack))
+      fail({}, DiagnosticCode::InvalidCore, "invalid stored-reference representation");
+  for (const auto &function : p.semantics.functions) {
+    bool consuming =
+        function.owner != None && p.semantics.types.at(function.owner).kind == hir::Type::Enum &&
+        !function.params.empty() && p.semantics.symbols.at(function.params[0]).receiver &&
+        function.access == Access::Own;
+    if (function.consumesSelf != consuming)
+      fail(function.loc, DiagnosticCode::InvalidCore, "invalid consuming receiver contract");
+    if (!function.external && function.intrinsic.empty() &&
+        (p.semantics.containsReferences(function.result) ||
+         p.semantics.types.at(function.result).protocol != None ||
+         (!p.semantics.heap(function.result) && p.semantics.needsDrop(function.result))))
+      fail(function.loc, DiagnosticCode::InvalidCore, "unsupported result transfer contract");
+  }
   const auto &entry = p.semantics.entryPoint;
   if (entry.function >= p.semantics.functions.size())
     fail({}, DiagnosticCode::InvalidCore, "missing semantic entrypoint");
@@ -15,6 +35,22 @@ void checkTypes(const Program &p) {
   for (const auto &f : p.functions) {
     const auto &signature = p.semantics.functions.at(f.id);
     std::map<ValueId, TypeId> values;
+    std::map<ValueId, Access> references;
+    for (const auto &region : signature.parameterRegions) {
+      const auto &symbol = p.semantics.symbols.at(region.parameter);
+      if (!symbol.parameter || !symbol.reference || symbol.region != region.region ||
+          (region.kind == BorrowKind::Shared) != (symbol.access == Access::Shared))
+        fail(symbol.loc, DiagnosticCode::InvalidCore, "invalid parameter-region contract");
+    }
+    for (auto id : signature.params) {
+      const auto &symbol = p.semantics.symbols.at(id);
+      size_t contracts = 0;
+      for (const auto &region : signature.parameterRegions)
+        contracts += region.parameter == id;
+      if (contracts != (symbol.reference ? 1u : 0u))
+        fail(symbol.loc, DiagnosticCode::InvalidCore,
+             "missing or duplicate parameter-region contract");
+    }
     for (size_t n = 0; n < f.parameters.size(); ++n)
       values.emplace(f.parameters[n], p.semantics.symbols.at(signature.params.at(n)).type);
     std::function<void(const std::vector<Inst> &)> block;
@@ -23,6 +59,10 @@ void checkTypes(const Program &p) {
         auto bad = [&]() {
           fail(i.loc, DiagnosticCode::InvalidCore, "invalid typed Core instruction");
         };
+        for (auto value : i.args)
+          if (references.contains(value) && i.kind != Inst::Call &&
+              i.kind != Inst::ProtocolTransition)
+            bad();
         auto expect = [&](TypeId got, TypeId wanted) {
           if (got != wanted)
             bad();
@@ -42,14 +82,31 @@ void checkTypes(const Program &p) {
         if (i.kind == Inst::Loop)
           block(i.condition);
         switch (i.kind) {
+        case Inst::StoreReference:
+          if (!p.semantics.reference(i.type) || p.semantics.types[i.type].element != slot() ||
+              !p.semantics.symbols.at(i.slot).reference ||
+              p.semantics.symbols.at(i.slot).access != Access::Shared)
+            bad();
+          break;
+        case Inst::ReferenceArgument:
+          expect(slot(), i.type);
+          references[i.result] = i.access;
+          if (!p.semantics.symbols.at(i.slot).reference ||
+              p.semantics.symbols.at(i.slot).access != i.access)
+            bad();
+          break;
         case Inst::BorrowShared:
         case Inst::BorrowUnique: {
           if (i.offset >= p.semantics.symbols.size())
             bad();
           expect(p.semantics.symbols.at(i.offset).type, i.type);
-          if (!i.projection)
-            expect(slot(), i.type);
-          else {
+          if (!i.projection) {
+            const auto &from = p.semantics.types[slot()];
+            const auto &to = p.semantics.types[i.type];
+            if (!(from.kind == hir::Type::Array && to.kind == hir::Type::Slice &&
+                  from.element == to.element))
+              expect(slot(), i.type);
+          } else {
             const auto &t = p.semantics.types[slot()];
             if (t.kind != hir::Type::Enum)
               bad();
@@ -57,7 +114,9 @@ void checkTypes(const Program &p) {
             for (const auto &variant : t.variants)
               for (size_t n = 0; n < variant.payload.size(); ++n)
                 if (p.semantics.payloadOffset(slot(), variant.id, n) == i.projection &&
-                    variant.payload[n] == i.type)
+                    (variant.payload[n] == i.type ||
+                     (i.kind == Inst::BorrowShared && p.semantics.reference(variant.payload[n]) &&
+                      p.semantics.types[variant.payload[n]].element == i.type)))
                   found = true;
             if (!found || p.semantics.types[i.type].protocol != None ||
                 (i.kind == Inst::BorrowUnique && !p.semantics.heap(i.type)))
@@ -73,6 +132,12 @@ void checkTypes(const Program &p) {
         case Inst::StaticStr:
           expect(i.type, Str);
           if (!validUtf8(i.text))
+            bad();
+          break;
+        case Inst::Length:
+          expect(i.type, USize);
+          if (p.semantics.types[slot()].kind != hir::Type::Array &&
+              p.semantics.types[slot()].kind != hir::Type::Slice)
             bad();
           break;
         case Inst::TextPrint:
@@ -106,7 +171,8 @@ void checkTypes(const Program &p) {
           break;
         case Inst::PayloadTake: {
           const auto &t = p.semantics.types[slot()];
-          if (t.kind != hir::Type::Enum || !p.semantics.linear(i.type))
+          if (t.kind != hir::Type::Enum || !p.semantics.linear(i.type) ||
+              p.semantics.reference(i.type))
             bad();
           bool found = false;
           for (const auto &variant : t.variants)
@@ -120,10 +186,23 @@ void checkTypes(const Program &p) {
         }
         case Inst::Read:
         case Inst::Write:
+          if (i.args.size() == (i.kind == Inst::Read ? 1u : 2u)) {
+            const auto &container = p.semantics.types[slot()];
+            if (container.kind != hir::Type::Array && container.kind != hir::Type::Slice)
+              bad();
+            expect(i.type, container.element);
+            expect(arg(i.kind == Inst::Read ? 0 : 1), USize);
+            if (i.kind == Inst::Write)
+              expect(arg(0), i.type);
+            break;
+          }
           if (i.offset >= p.semantics.types[slot()].width || (!scalar(i.type) && i.type != RawPtr))
             bad();
-          if (i.kind == Inst::Write)
+          if (i.kind == Inst::Write) {
+            if (p.semantics.types[slot()].kind == hir::Type::Enum)
+              bad();
             expect(arg(0), i.type);
+          }
           break;
         case Inst::EnumConstruct: {
           auto &t = p.semantics.types[i.type];
@@ -219,8 +298,14 @@ void checkTypes(const Program &p) {
           if (i.kind == Inst::StringCall &&
               (!target.intrinsic.starts_with("string.") || i.text != target.intrinsic))
             bad();
-          for (size_t n = 0; n < i.args.size(); ++n)
-            expect(arg(n), p.semantics.symbols.at(target.params[n + skip]).type);
+          for (size_t n = 0; n < i.args.size(); ++n) {
+            const auto &parameter = p.semantics.symbols.at(target.params[n + skip]);
+            expect(arg(n), parameter.type);
+            if (parameter.reference != references.contains(i.args[n]))
+              bad();
+            if (parameter.reference && references.at(i.args[n]) != parameter.access)
+              bad();
+          }
           break;
         }
         case Inst::Print:

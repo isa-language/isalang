@@ -36,6 +36,10 @@ std::vector<uint32_t> intrinsicSignature(IntrinsicId id, uint32_t owner, uint32_
   auto name = std::string(info.name);
   if (info.lowering == IntrinsicLowering::StringRecord) {
     switch (id) {
+    case IntrinsicId::String_char_at:
+      return {Char, owner, USize};
+    case IntrinsicId::String_is_char_boundary:
+      return {Bool, owner, USize};
     case IntrinsicId::String_new:
       return {owner};
     case IntrinsicId::String_from:
@@ -72,6 +76,8 @@ std::vector<uint32_t> intrinsicSignature(IntrinsicId id, uint32_t owner, uint32_
   static const std::unordered_map<std::string, std::vector<TypeId>> abi = {
       {"isac_rt_panic_str", {Unit, Str}},
       {"isac_rt_monotonic_ns", {U64}},
+      {"isac_rt_env_argument_count", {USize}},
+      {"isac_rt_env_argument", {Str, USize}},
       {"isac_rt_stdout_write", {Unit, Str}},
       {"isac_rt_stderr_write", {Unit, Str}},
       {"isac_rt_alloc", {RawPtr, USize}},

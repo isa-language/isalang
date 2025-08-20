@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let value = Option::Some(42);
+  print(value.unwrap());
+  print(value.is_some());
+  return 0;
+}

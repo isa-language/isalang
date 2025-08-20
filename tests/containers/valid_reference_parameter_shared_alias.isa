@@ -1,0 +1,9 @@
+fn both(a: &String, b: &String) {
+  print(a);
+  print(b);
+}
+fn main() -> i32 {
+  let value = String::from("a");
+  both(&value, &value);
+  return 0;
+}

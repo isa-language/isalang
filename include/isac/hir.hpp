@@ -56,7 +56,9 @@ struct Type {
     Pointer,
     Float,
     Character,
-    Enum
+    Enum,
+    Reference,
+    Slice
   } kind;
   std::string name;
   ProtocolId protocol = None;
@@ -117,7 +119,9 @@ struct Expr {
     Block,
     Borrow,
     Match,
-    PayloadTake
+    PayloadTake,
+    StoreReference,
+    Length
   } kind;
   Loc loc;
   bool inferredLiteral = false;
@@ -164,17 +168,25 @@ struct Stmt {
   Expr expr;
   std::vector<Stmt> body, otherwise, latch;
 };
+
+struct ParameterRegion {
+  SymbolId parameter;
+  RegionId region;
+  BorrowKind kind;
+};
 struct Function {
   FunctionKind kind = FunctionKind::Normal;
   FunctionEffects effects;
   IntrinsicId intrinsicId = IntrinsicId::None;
   bool trusted = false, external = false, releases = false, pub = false;
+  bool consumesSelf = false;
   std::string intrinsic;
   FunctionId id;
   std::string name;
   TypeId owner = None, result = Unit;
   Access access = Access::Own;
   std::vector<SymbolId> params;
+  std::vector<ParameterRegion> parameterRegions;
   std::vector<OperationId> operations;
   std::vector<Stmt> body = {};
   Loc loc;
@@ -201,6 +213,16 @@ struct GenericEnum {
   std::vector<TypeParamId> parameters;
   std::vector<GenericVariant> variants;
 };
+struct GenericField {
+  std::string name;
+  GenericPayload type;
+};
+struct GenericStruct {
+  GenericDeclId id;
+  std::string name;
+  std::vector<TypeParamId> parameters;
+  std::vector<GenericField> fields;
+};
 struct Substitution {
   std::vector<std::pair<TypeParamId, TypeId>> types;
 };
@@ -218,6 +240,7 @@ struct EntryPointInfo {
 struct Program {
   EntryPointInfo entryPoint;
   std::vector<GenericEnum> genericEnums;
+  std::vector<GenericStruct> genericStructs;
   std::vector<GenericInstance> instances;
   std::vector<Diagnostic> warnings;
   std::vector<ConstDecl> constants;
@@ -236,6 +259,18 @@ struct Program {
       offset += storageWidth(payload.at(n));
     return offset;
   }
+  bool reference(TypeId t) const {
+    return types[t].kind == Type::Reference;
+  }
+  bool containsReferences(TypeId t) const {
+    if (reference(t))
+      return true;
+    for (const auto &variant : types[t].variants)
+      for (auto payload : variant.payload)
+        if (containsReferences(payload))
+          return true;
+    return false;
+  }
   bool needsDrop(TypeId t) const {
     if (heap(t))
       return true;
@@ -250,7 +285,7 @@ struct Program {
   }
   bool linear(TypeId t) const {
     return types[t].kind == Type::Structure || types[t].kind == Type::Array ||
-           types[t].kind == Type::Enum;
+           types[t].kind == Type::Enum || reference(t) || types[t].kind == Type::Slice;
   }
 };
 }

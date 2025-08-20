@@ -1,0 +1,12 @@
+fn set(values: &mut i32[], index: usize) {
+  values[index] = 42;
+}
+fn main() -> i32 {
+  let a = [1, 2, 3];
+  set(&mut a, 1);
+  let s: &mut i32[] = &mut a;
+  s[0] = 7;
+  print(s[0]);
+  print(a[1]);
+  return 0;
+}

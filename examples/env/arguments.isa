@@ -1,0 +1,13 @@
+@import "std.env"
+
+fn main() -> i32 {
+  if argument_count() < 2 {
+    @println("missing argument");
+    return 1;
+  }
+  let text = argument(1);
+  @println("argument = {}", text);
+  let owned = String::from(text);
+  @println("owned = {}", owned);
+  return 0;
+}

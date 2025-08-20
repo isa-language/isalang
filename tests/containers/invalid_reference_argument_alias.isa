@@ -1,0 +1,10 @@
+fn both(a: &mut String, b: &mut String) {
+  a.clear();
+  b.clear();
+}
+fn relay(value: &mut String) {
+  both(value, value);
+}
+fn main() -> i32 {
+  return 0;
+}

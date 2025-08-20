@@ -1,0 +1,12 @@
+@import "std.box"
+fn main() -> i32 {
+  let value = Option::Some(42);
+  print(value.is_some());
+  print(value.unwrap());
+  let text = Option::Some(String::from("hello"));
+  let extracted = text.unwrap();
+  print(extracted);
+  let box = Option::Some(BoxI32::new(17));
+  print(box.unwrap().get());
+  return 0;
+}

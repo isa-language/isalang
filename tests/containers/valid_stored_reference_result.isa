@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let text = String::from("result");
+  let result: Result<&String, i32> = Result::Ok(&text);
+  match result {
+    Result::Ok(view) => print(view),
+    Result::Err(code) => print(code),
+  }
+  return 0;
+}

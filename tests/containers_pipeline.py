@@ -18,7 +18,8 @@ def emit(kind):
 assert "EnumDecl Option<T>" in emit("ast")
 hir = emit("hir")
 instances = [line for line in hir.splitlines() if line.startswith("instance #I")]
-assert len(instances) == 2, instances
+fixture_instances = [line for line in instances if line.endswith("=#T1") or line.endswith("=#T2")]
+assert len(fixture_instances) == 2, instances
 assert all("#TP" in line and "type=#T" in line for line in instances), instances
 assert "generic enum #G" in hir
 for kind in ["core", "erased", "lir", "mlir", "llvm"]:
@@ -54,3 +55,42 @@ with tempfile.TemporaryDirectory() as directory:
         assert result.returncode == 0, result.stderr
         result = subprocess.run([str(executable)], capture_output=True, text=True)
         assert (result.returncode, result.stdout, result.stderr) == (0, "hello\n", ""), result
+
+
+source = Path(root) / "tests/containers/valid_reference_parameter.isa"
+assert "caller-owned noescape" in emit("hir")
+assert "region.contract" in emit("core")
+assert "reference.argument" in emit("core")
+for kind in ["erased", "lir", "mlir", "llvm"]:
+    lowered = emit(kind)
+    assert "region.contract" not in lowered and "reference.argument" not in lowered
+with tempfile.TemporaryDirectory() as directory:
+    for opt in ["-O0", "-O2"]:
+        executable = Path(directory) / ("references" + opt)
+        result = subprocess.run(
+            [compiler, str(source), opt, "-o", str(executable)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        result = subprocess.run([str(executable)], capture_output=True, text=True)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "5\n5\nhello!\n", ""), (
+            result
+        )
+
+
+source = Path(root) / "tests/containers/valid_stored_reference_move.isa"
+assert "reference.store" in emit("core")
+assert "&String" in emit("hir")
+for kind in ["erased", "lir", "mlir", "llvm"]:
+    assert "reference.store" not in emit(kind)
+with tempfile.TemporaryDirectory() as directory:
+    for opt in ["-O0", "-O2"]:
+        executable = Path(directory) / ("stored" + opt)
+        result = subprocess.run(
+            [compiler, str(source), opt, "--runtime-test-counters", "-o", str(executable)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        result = subprocess.run([str(executable)], capture_output=True, text=True)
+        assert result.returncode == 0 and result.stdout == "moved\n0\n", result
+        assert "allocations=1 frees=1" in result.stderr, result.stderr

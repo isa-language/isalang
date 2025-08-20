@@ -1,0 +1,6 @@
+fn inspect(value: &String) {}
+fn main() -> i32 {
+  let value = String::new();
+  inspect(value);
+  return 0;
+}

@@ -24,6 +24,11 @@ typedef struct {
   uint8_t *ptr;
   size_t len, capacity;
 } IsacString;
+
+void isac_rt_env_init(int32_t argc, char **argv);
+void isac_rt_env_destroy(void);
+size_t isac_rt_env_argument_count(void);
+const IsacStr *isac_rt_env_argument(size_t index);
 void isac_rt_stdout_write(const IsacStr *);
 void isac_rt_stderr_write(const IsacStr *);
 void isac_rt_string_fmt_i8(IsacString *, int8_t);
@@ -88,9 +93,12 @@ double isac_rt_input_result_f64(const IsacInputResult *);
 void isac_rt_input_read_bool(IsacInputResult *);
 int32_t isac_rt_input_result_bool(const IsacInputResult *);
 void *isac_rt_realloc(void *ptr, size_t size);
+void isac_rt_index_check(size_t index, size_t length);
 void isac_rt_string_new(IsacString *out);
 void isac_rt_string_from(IsacString *out, const IsacStr *text);
 size_t isac_rt_string_len(const IsacString *text);
+int32_t isac_rt_string_is_char_boundary(const IsacString *text, size_t index);
+uint32_t isac_rt_string_char_at(const IsacString *text, size_t index);
 size_t isac_rt_string_capacity(const IsacString *text);
 int32_t isac_rt_string_is_empty(const IsacString *text);
 void isac_rt_string_as_str(IsacStr *out, const IsacString *text);

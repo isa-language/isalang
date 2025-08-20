@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let value = Option::Some(String::from("owned"));
+  if let Some(v) = value {
+    print(v);
+  }
+  value.drop();
+  return 0;
+}

@@ -9,6 +9,8 @@ class Eraser {
   std::unordered_map<ValueId, runtime::Value> values;
   std::unordered_map<SymbolId, runtime::Value> slots;
   std::unordered_map<runtime::Value, runtime::Type> runtimeTypes;
+  runtime::Value returnStorage = runtime::NoValue;
+  TypeId returnType = Unit;
   using I = runtime::Instruction;
   using T = runtime::Type;
   T type(TypeId t) {
@@ -16,12 +18,18 @@ class Eraser {
       return {T::Void, 0};
     if (t == USize)
       return {T::Size, 1, core.semantics.target.pointerWidth, false};
-    if (t == RawPtr || t == Str || core.semantics.heap(t))
+    if (t == RawPtr || t == Str || core.semantics.heap(t) || core.semantics.reference(t))
       return {T::Pointer, 1};
     return core.semantics.linear(t)
                ? T{T::Buffer, core.semantics.types[t].width, 64}
                : T{floating(t) ? T::Float : T::Scalar, 1,
                    bitWidth(t, core.semantics.target.pointerWidth), signedType(t)};
+  }
+  unsigned recordWords(TypeId tid) const {
+    auto representation = core.semantics.types[tid].representation;
+    return representation == hir::Representation::StringRecord  ? 3
+           : representation == hir::Representation::InputRecord ? 6
+                                                                : 0;
   }
   std::string name(FunctionId id) {
     auto n = core.semantics.functions[id].name;
@@ -136,9 +144,18 @@ class Eraser {
       if (c.freeTemporary)
         destroy(out, c.type, i.args.at(0));
       switch (c.kind) {
+      case C::StoreReference:
+      case C::ReferenceArgument:
+        values[c.result] = slots.at(c.slot);
+        break;
       case C::StaticStr:
         i.kind = I::StaticStr;
         i.callee = c.text;
+        values[c.result] = emit(out, i);
+        break;
+      case C::Length:
+        i.kind = I::Length;
+        i.args = {slots.at(c.slot)};
         values[c.result] = emit(out, i);
         break;
       case C::TextPrint:
@@ -298,7 +315,13 @@ class Eraser {
           break;
         }
         i.kind = I::Load;
-        i.args = {slots.at(c.slot)};
+        i.args.insert(i.args.begin(), slots.at(c.slot));
+        if (c.kind == C::Read && !c.args.empty()) {
+          I check{};
+          check.kind = I::IndexCheck;
+          check.args = i.args;
+          emit(out, check, false);
+        }
         i.offset = c.offset;
         values[c.result] = emit(out, i);
         break;
@@ -309,7 +332,16 @@ class Eraser {
         values[c.result] = slots.at(c.slot);
         break;
       case C::Write:
-        store(out, slots.at(c.slot), i.args[0], c.offset);
+        if (c.args.size() == 2) {
+          I check{};
+          check.kind = I::IndexCheck;
+          check.args = {slots.at(c.slot), i.args[1]};
+          emit(out, check, false);
+          i.kind = I::Store;
+          i.args.insert(i.args.begin(), slots.at(c.slot));
+          emit(out, i, false);
+        } else
+          store(out, slots.at(c.slot), i.args[0], c.offset);
         break;
       case C::BorrowShared:
       case C::BorrowUnique:
@@ -324,6 +356,12 @@ class Eraser {
             value = buffer;
           }
           slots[c.offset] = value;
+        } else if (core.semantics.types[c.type].kind == hir::Type::Slice &&
+                   core.semantics.types[core.semantics.symbols[c.slot].type].kind ==
+                       hir::Type::Array) {
+          i.kind = I::View;
+          i.args = {slots.at(c.slot)};
+          slots[c.offset] = emit(out, i);
         } else
           slots[c.offset] = slots.at(c.slot);
         break;
@@ -365,10 +403,22 @@ class Eraser {
       case C::Call:
       case C::ProtocolTransition:
         i.kind = I::Call;
-        i.callee = name(c.function);
+        i.callee = core.semantics.functions[c.function].intrinsic.empty()
+                       ? name(c.function)
+                       : intrinsicRuntimeSymbol(core.semantics.functions[c.function].intrinsicId);
         if (c.slot != None)
           i.args.insert(i.args.begin(), slots.at(c.slot));
-        if (c.type == Unit)
+        if (i.type.kind == T::Buffer || recordWords(c.type)) {
+          I alloc{};
+          alloc.kind = recordWords(c.type) ? I::RecordAlloc : I::Alloc;
+          alloc.literal = recordWords(c.type);
+          alloc.type = i.type;
+          auto destination = emit(out, alloc);
+          values[c.result] = destination;
+          i.args.insert(i.args.begin(), destination);
+          i.type = {T::Void, 0};
+          emit(out, i, false);
+        } else if (c.type == Unit)
           emit(out, i, false);
         else
           values[c.result] = emit(out, i);
@@ -394,6 +444,21 @@ class Eraser {
         emit(out, i, false);
         break;
       case C::Return:
+        if (returnStorage != runtime::NoValue) {
+          auto source = i.args.at(0);
+          if (auto words = recordWords(returnType)) {
+            I copy{};
+            copy.kind = I::MemCopy;
+            copy.type = {T::Pointer, 1};
+            copy.args = {returnStorage, source,
+                         constant(out, words * (core.semantics.target.pointerWidth / 8), true)};
+            emit(out, copy);
+          } else {
+            for (uint32_t n = 0; n < type(returnType).width; ++n)
+              store(out, returnStorage, load(out, source, n, {T::Scalar, 1, 64}), n);
+          }
+          i.args.clear();
+        }
         i.kind = I::Return;
         emit(out, i, false);
         return out;
@@ -431,10 +496,19 @@ public:
       runtime::Function f;
       f.name = name(cf.id);
       f.result = type(hf.result);
+      returnStorage = runtime::NoValue;
+      returnType = hf.result;
+      if (f.result.kind == T::Buffer || recordWords(hf.result)) {
+        returnStorage = p.values++;
+        runtimeTypes[returnStorage] = f.result;
+        f.params.push_back({returnStorage, f.result});
+        f.result = {T::Void, 0};
+      }
       std::vector<I> prefix;
       for (auto sid : hf.params) {
         auto t = type(core.semantics.symbols[sid].type);
-        if (core.semantics.symbols[sid].receiver && scalar(core.semantics.symbols[sid].type))
+        if ((core.semantics.symbols[sid].receiver || core.semantics.symbols[sid].reference) &&
+            scalar(core.semantics.symbols[sid].type))
           t = {T::Buffer, 1, 64};
         auto v = p.values++;
         f.params.push_back({v, t});
@@ -464,6 +538,18 @@ public:
     entry.name = "main";
     entry.result = type(I32);
     entry.params = {{p.values++, type(I32)}, {p.values++, type(RawPtr)}};
+    bool environment = std::any_of(core.semantics.functions.begin(), core.semantics.functions.end(),
+                                   [](const auto &f) {
+                                     return f.intrinsicId == IntrinsicId::Env_argument ||
+                                            f.intrinsicId == IntrinsicId::Env_argument_count;
+                                   });
+    if (environment) {
+      I initialize{};
+      initialize.kind = I::Call;
+      initialize.callee = "isac_rt_env_init";
+      initialize.args = {entry.params[0].value, entry.params[1].value};
+      emit(entry.body, initialize, false);
+    }
     I call{};
     call.kind = I::Call;
     call.callee = name(core.semantics.entryPoint.function);
@@ -472,6 +558,12 @@ public:
     auto code = emit(entry.body, call, !unit);
     if (unit)
       code = constant(entry.body, 0);
+    if (environment) {
+      I cleanup{};
+      cleanup.kind = I::Call;
+      cleanup.callee = "isac_rt_env_destroy";
+      emit(entry.body, cleanup, false);
+    }
     I ret{};
     ret.kind = I::Return;
     ret.args = {code};

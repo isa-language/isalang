@@ -1,0 +1,12 @@
+fn set(value: &mut i32) {
+  value = 42;
+}
+fn get(value: &i32) -> i32 {
+  return value;
+}
+fn main() -> i32 {
+  let value = 1;
+  set(&mut value);
+  print(get(&value));
+  return 0;
+}

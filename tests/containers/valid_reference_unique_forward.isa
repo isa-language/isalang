@@ -1,0 +1,12 @@
+fn append(value: &mut String) {
+  value.push_str("!");
+}
+fn relay(value: &mut String) {
+  append(value);
+}
+fn main() -> i32 {
+  let value = String::from("hello");
+  relay(&mut value);
+  print(value);
+  return 0;
+}

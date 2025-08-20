@@ -1,0 +1,11 @@
+fn main() -> i32 {
+  let text = String::from("hello");
+  let option: Option<&String> = Option::Some(&text);
+  match option {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+  text.push_str("!");
+  print(text);
+  return 0;
+}

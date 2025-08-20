@@ -1,0 +1,7 @@
+struct Holder<T> {
+  value: T,
+}
+fn main() -> i32 {
+  let value = Holder<String>::new();
+  return 0;
+}

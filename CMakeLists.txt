@@ -274,6 +274,24 @@ if(BUILD_TESTING)
 endif()
 if(BUILD_TESTING)
   file(GLOB REFERENCE_CASES CONFIGURE_DEPENDS tests/references/*.isa)
+  add_test(NAME env_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/env_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME env_sanitized_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/env_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+  set_tests_properties(env_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+  add_test(
+    NAME std_refinement_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/std_refinement_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME std_refinement_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/std_refinement_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(std_refinement_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+  endif()
   add_test(NAME containers_pipeline
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/containers_pipeline.py
                    $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})

@@ -51,6 +51,7 @@ struct Expr {
   std::string text;
   std::vector<Expr> args;
   std::vector<Stmt> body;
+  std::vector<TypeSyntax> typeArguments;
   Expr();
   Expr(Kind, Loc, std::string, std::vector<Expr>);
 };
@@ -80,6 +81,7 @@ struct Stmt {
   TypeSyntax annotation;
   bool annotated = false;
   bool expressionMatch = false;
+  bool conditionalPattern = false;
   Access access = Access::Own;
   Expr expr, limit;
   Pattern pattern;
@@ -113,6 +115,7 @@ struct Field {
   bool pub = false;
 };
 struct Struct {
+  std::vector<std::string> parameters;
   bool trusted = false;
   std::string representation;
   std::string name, protocol;
@@ -141,6 +144,8 @@ struct Impl {
   std::string owner;
   Loc loc;
   std::vector<uint32_t> methods;
+  std::vector<std::string> parameters;
+  TypeSyntax target;
 };
 struct EnumVariant {
   std::string name;

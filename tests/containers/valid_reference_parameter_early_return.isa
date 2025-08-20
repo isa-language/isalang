@@ -1,0 +1,12 @@
+fn inspect(value: &String, stop: bool) -> usize {
+  if stop {
+    return value.len();
+  }
+  return 0;
+}
+fn main() -> i32 {
+  let value = String::from("abc");
+  print(inspect(&value, true));
+  print(value);
+  return 0;
+}

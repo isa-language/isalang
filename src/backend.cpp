@@ -32,7 +32,7 @@ namespace dialect {
 using namespace mlir;
 static bool buffer(Type t) {
   auto m = dyn_cast<MemRefType>(t);
-  return m && m.getRank() == 1 && m.hasStaticShape() &&
+  return m && m.getRank() == 1 &&
          (m.getElementType().isInteger(32) || m.getElementType().isInteger(64));
 }
 #define ISAC_OP(CLASS, NAME, ...)                                                                  \
@@ -48,8 +48,11 @@ static bool buffer(Type t) {
     LogicalResult verify();                                                                        \
   };
 ISAC_OP(AllocOp, "isac.alloc", OpTrait::VariadicOperands, OpTrait::OneResult)
-ISAC_OP(LoadOp, "isac.load", OpTrait::OneOperand, OpTrait::OneResult)
-ISAC_OP(StoreOp, "isac.store", OpTrait::NOperands<2>::Impl, OpTrait::ZeroResults)
+ISAC_OP(LoadOp, "isac.load", OpTrait::VariadicOperands, OpTrait::OneResult)
+ISAC_OP(StoreOp, "isac.store", OpTrait::VariadicOperands, OpTrait::ZeroResults)
+ISAC_OP(ViewOp, "isac.view", OpTrait::OneOperand, OpTrait::OneResult)
+ISAC_OP(LengthOp, "isac.length", OpTrait::OneOperand, OpTrait::OneResult)
+ISAC_OP(IndexCheckOp, "isac.index_check", OpTrait::NOperands<2>::Impl, OpTrait::ZeroResults)
 ISAC_OP(CallOp, "isac.call", OpTrait::VariadicOperands, OpTrait::VariadicResults)
 ISAC_OP(MemcpyOp, "isac.memcpy", OpTrait::NOperands<3>::Impl, OpTrait::OneResult)
 ISAC_OP(MemmoveOp, "isac.memmove", OpTrait::NOperands<3>::Impl, OpTrait::OneResult)
@@ -72,24 +75,52 @@ LogicalResult AllocOp::verify() {
                    (getOperand(0).getType().isInteger(32) || getOperand(0).getType().isInteger(64))
                ? success()
                : emitOpError("heap allocation needs a usize byte count");
-  return buffer(t) && getNumOperands() == 0 ? success() : emitOpError("invalid stack allocation");
+  return buffer(t) && cast<MemRefType>(t).hasStaticShape() && getNumOperands() == 0
+             ? success()
+             : emitOpError("invalid stack allocation");
+}
+LogicalResult ViewOp::verify() {
+  auto from = getOperand().getType(), to = (*this)->getResult(0).getType();
+  return buffer(from) && buffer(to) &&
+                 cast<MemRefType>(from).getElementType() == cast<MemRefType>(to).getElementType() &&
+                 cast<MemRefType>(to).isDynamicDim(0)
+             ? success()
+             : emitOpError("invalid slice view");
+}
+LogicalResult LengthOp::verify() {
+  return buffer(getOperand().getType()) && isa<IntegerType>((*this)->getResult(0).getType())
+             ? success()
+             : emitOpError("invalid length operation");
+}
+LogicalResult IndexCheckOp::verify() {
+  return buffer(getOperand(0).getType()) && isa<IntegerType>(getOperand(1).getType())
+             ? success()
+             : emitOpError("invalid index check");
 }
 LogicalResult LoadOp::verify() {
-  auto t = getOperand().getType();
+  if (getNumOperands() != 1 && getNumOperands() != 2)
+    return emitOpError("invalid load arity");
+  auto t = getOperand(0).getType();
   auto result = (*this)->getResult(0).getType();
   if (isa<LLVM::LLVMPointerType>(t))
     return result.isInteger(32) ? success() : emitOpError("raw load needs i32 result");
   if (!buffer(t) || cast<MemRefType>(t).getElementType() != result)
     return emitOpError("load element type mismatch");
+  if (getNumOperands() == 2)
+    return isa<IntegerType>(getOperand(1).getType()) ? success() : emitOpError("invalid index");
   return offset(*this, t);
 }
 LogicalResult StoreOp::verify() {
+  if (getNumOperands() != 2 && getNumOperands() != 3)
+    return emitOpError("invalid store arity");
   auto t = getOperand(0).getType();
   auto value = getOperand(1).getType();
   if (isa<LLVM::LLVMPointerType>(t))
     return value.isInteger(32) ? success() : emitOpError("raw store needs i32 value");
   if (!buffer(t) || cast<MemRefType>(t).getElementType() != value)
     return emitOpError("store element type mismatch");
+  if (getNumOperands() == 3)
+    return isa<IntegerType>(getOperand(2).getType()) ? success() : emitOpError("invalid index");
   return offset(*this, t);
 }
 LogicalResult FreeOp::verify() {
@@ -131,7 +162,8 @@ class IsacDialect : public Dialect {
 public:
   explicit IsacDialect(MLIRContext *c)
       : Dialect(getDialectNamespace(), c, TypeID::get<IsacDialect>()) {
-    addOperations<AllocOp, LoadOp, StoreOp, CallOp, FreeOp, ReturnOp, MemcpyOp, MemmoveOp>();
+    addOperations<AllocOp, LoadOp, StoreOp, CallOp, FreeOp, ReturnOp, MemcpyOp, MemmoveOp, ViewOp,
+                  LengthOp, IndexCheckOp>();
   }
   static StringRef getDialectNamespace() {
     return "isac";
@@ -177,9 +209,27 @@ public:
           b.create<LLVM::StoreOp>(loc, op->getOperand(1), op->getOperand(0));
       } else if (isa<AllocOp>(op))
         replacement = b.create<memref::AllocaOp>(loc, cast<MemRefType>(op->getResult(0).getType()));
-      else if (isa<LoadOp, StoreOp>(op)) {
-        auto index = b.create<arith::ConstantIndexOp>(
-            loc, op->getAttrOfType<IntegerAttr>("offset").getInt());
+      else if (isa<ViewOp>(op))
+        replacement = b.create<memref::CastOp>(loc, op->getResult(0).getType(), op->getOperand(0));
+      else if (isa<LengthOp, IndexCheckOp>(op)) {
+        auto zero = b.create<arith::ConstantIndexOp>(loc, 0);
+        auto length = b.create<memref::DimOp>(loc, op->getOperand(0), zero);
+        auto integerType =
+            isa<LengthOp>(op) ? op->getResult(0).getType() : op->getOperand(1).getType();
+        auto size = b.create<arith::IndexCastOp>(loc, integerType, length);
+        if (isa<LengthOp>(op))
+          replacement = size;
+        else
+          b.create<func::CallOp>(loc, "isac_rt_index_check", TypeRange{},
+                                 ValueRange{op->getOperand(1), size});
+      } else if (isa<LoadOp, StoreOp>(op)) {
+        unsigned position = isa<LoadOp>(op) ? 1 : 2;
+        Value index;
+        if (op->getNumOperands() > position)
+          index = b.create<arith::IndexCastOp>(loc, b.getIndexType(), op->getOperand(position));
+        else
+          index = b.create<arith::ConstantIndexOp>(
+              loc, op->getAttrOfType<IntegerAttr>("offset").getInt());
         if (isa<LoadOp>(op))
           replacement = b.create<memref::LoadOp>(loc, op->getOperand(0), ValueRange{index});
         else
@@ -220,7 +270,9 @@ class Emitter {
     if (t.kind == runtime::Type::Size)
       return builder.getIntegerType(t.elementBits);
     return t.kind == runtime::Type::Buffer
-               ? Type(MemRefType::get({t.width}, builder.getIntegerType(t.elementBits)))
+               ? Type(MemRefType::get(
+                     {t.width == 0 ? ShapedType::kDynamic : static_cast<int64_t>(t.width)},
+                     builder.getIntegerType(t.elementBits)))
                : Type(builder.getIntegerType(t.elementBits));
   }
   Operation *op(StringRef name, TypeRange types, ValueRange operands,
@@ -436,6 +488,15 @@ class Emitter {
           op(i.kind == I::MemCopy ? "isac.memcpy" : "isac.memmove", TypeRange{type(i.type)}, args)
               ->getResult(0);
       break;
+    case I::View:
+      result = op("isac.view", TypeRange{type(i.type)}, args)->getResult(0);
+      break;
+    case I::Length:
+      result = op("isac.length", TypeRange{type(i.type)}, args)->getResult(0);
+      break;
+    case I::IndexCheck:
+      op("isac.index_check", {}, args);
+      break;
     case I::Alloc:
       result = op("isac.alloc", TypeRange{type(i.type)}, {})->getResult(0);
       break;
@@ -567,9 +628,16 @@ public:
     declare("isac_rt_input_result_f64", {ptr}, {builder.getF64Type()});
     declare("isac_rt_input_read_bool", {ptr}, {});
     declare("isac_rt_input_result_bool", {ptr}, {i32});
+    declare("isac_rt_env_init", {i32, ptr}, {});
+    declare("isac_rt_env_destroy", {}, {});
+    declare("isac_rt_env_argument_count", {}, {size});
+    declare("isac_rt_env_argument", {size}, {ptr});
     declare("isac_rt_string_new", {ptr}, {});
     declare("isac_rt_string_from", {ptr, ptr}, {});
+    declare("isac_rt_index_check", {size, size}, {});
     declare("isac_rt_string_len", {ptr}, {size});
+    declare("isac_rt_string_char_at", {ptr, size}, {i32});
+    declare("isac_rt_string_is_char_boundary", {ptr, size}, {i32});
     declare("isac_rt_string_capacity", {ptr}, {size});
     declare("isac_rt_string_is_empty", {ptr}, {i32});
     declare("isac_rt_string_as_str", {ptr, ptr}, {});

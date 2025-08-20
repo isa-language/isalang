@@ -50,7 +50,10 @@ struct Inst {
     EndViews,
     InputCall,
     RefineVariant,
-    PayloadTake
+    PayloadTake,
+    ReferenceArgument,
+    StoreReference,
+    Length
   } kind;
   Loc loc;
   RegionId region = None;

@@ -1,0 +1,7 @@
+fn main() -> i32 {
+  let value = Option::Some(42);
+  borrow shared value as view {
+    print(view.unwrap());
+  }
+  return 0;
+}

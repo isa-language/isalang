@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let text = String::new();
+  text.find_from(1, 0);
+  return 0;
+}

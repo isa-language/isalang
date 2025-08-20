@@ -8,6 +8,12 @@ int main(void) {
   IsacStr literal = {(const uint8_t *)"Ol\xc3\xa1", 4};
   isac_rt_string_push_str(&s, &literal);
   assert(s.len == 4 && s.capacity >= 4);
+  assert(isac_rt_string_char_at(&s, 0) == 'O');
+  assert(isac_rt_string_char_at(&s, 2) == 0xe1);
+  assert(isac_rt_string_is_char_boundary(&s, 2));
+  assert(!isac_rt_string_is_char_boundary(&s, 3));
+  assert(isac_rt_string_is_char_boundary(&s, 4));
+  assert(!isac_rt_string_is_char_boundary(&s, SIZE_MAX));
   IsacStr view;
   isac_rt_string_as_str(&view, &s);
   assert(view.ptr == s.ptr && view.len == 4);

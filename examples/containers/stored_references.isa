@@ -1,0 +1,14 @@
+fn main() -> i32 {
+  let text = String::from("Isalang");
+  let first: Option<&String> = Option::Some(&text);
+  let second = first.move();
+
+  match second {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+
+  text.push_str("!");
+  print(text);
+  return 0;
+}

@@ -1,0 +1,33 @@
+fn main() -> i32 {
+  let text = String::from("aá😀z");
+  match text.char_at(0) {
+    Option::Some(c) => @println("{}", c),
+    Option::None => {},
+  }
+  match text.char_at(1) {
+    Option::Some(c) => @println("{}", c),
+    Option::None => {},
+  }
+  match text.char_at(3) {
+    Option::Some(c) => @println("{}", c),
+    Option::None => {},
+  }
+  match text.char_at(2) {
+    Option::Some(c) => @println("{}", c),
+    Option::None => @println("middle"),
+  }
+  match text.char_at(text.len()) {
+    Option::Some(c) => @println("{}", c),
+    Option::None => @println("end"),
+  }
+  match text.char_at(999) {
+    Option::Some(c) => @println("{}", c),
+    Option::None => @println("outside"),
+  }
+  let empty = String::new();
+  match empty.char_at(0) {
+    Option::Some(c) => print(c),
+    Option::None => @println("empty"),
+  }
+  return 0;
+}

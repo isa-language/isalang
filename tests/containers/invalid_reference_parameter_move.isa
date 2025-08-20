@@ -1,0 +1,6 @@
+fn bad(value: &mut String) {
+  let other = value.move();
+}
+fn main() -> i32 {
+  return 0;
+}

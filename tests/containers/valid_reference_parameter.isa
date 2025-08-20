@@ -1,0 +1,19 @@
+fn inspect(value: &String) -> usize {
+  return value.len();
+}
+fn append(value: &mut String) {
+  value.push_str("!");
+}
+fn relay(value: &String) -> usize {
+  return inspect(value);
+}
+fn main() -> i32 {
+  let value = String::from("hello");
+  print(inspect(&value));
+  borrow shared value as view {
+    print(relay(view));
+  }
+  append(&mut value);
+  print(value);
+  return 0;
+}

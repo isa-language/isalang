@@ -1,0 +1,21 @@
+fn main() -> i32 {
+  let value: Option<i32> = Option::None;
+  if let None = value {
+    print(1);
+  } else {
+    print(0);
+  }
+  if let Some(v) = value {
+    print(v);
+  }
+  else if let None = value {
+    print(2);
+  }
+  let r: Result<i32, bool> = Result::Err(true);
+  if let Ok(v) = r {
+    print(v);
+  } else {
+    print(3);
+  }
+  return 0;
+}

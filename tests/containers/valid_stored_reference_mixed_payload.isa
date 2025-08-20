@@ -1,0 +1,18 @@
+enum Pair<T> {
+  Both(T, String),
+  Empty,
+}
+fn main() -> i32 {
+  let text = String::from("borrowed");
+  let owned = String::from("owned");
+  let pair = Pair::Both(&text, owned.move());
+  match pair {
+    Pair::Both(view, data) => {
+      print(view);
+      print(data);
+    },
+    Pair::Empty => {},
+  }
+  text.clear();
+  return 0;
+}

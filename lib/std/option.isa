@@ -10,3 +10,31 @@ pub enum OptionBool {
   Some(bool),
   None,
 }
+
+impl<T> Option<T> {
+  pub fn is_some(shared self) -> bool {
+    match &self {
+      Some(_) => {
+        return true;
+      },
+      None => {
+        return false;
+      },
+    }
+  }
+  pub fn is_none(shared self) -> bool {
+    return !self.is_some();
+  }
+  pub fn unwrap(self) -> T {
+    match self.move() {
+      Some(value) => {
+        return value.move();
+      },
+      None => {
+        loop {
+          panic("called Option::unwrap() on None");
+        }
+      },
+    }
+  }
+}

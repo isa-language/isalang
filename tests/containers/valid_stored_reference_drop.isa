@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let text = String::from("drop");
+  let option = Option::Some(&text);
+  option.drop();
+  text.push_str("!");
+  print(text);
+  return 0;
+}

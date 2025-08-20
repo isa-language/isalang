@@ -1,0 +1,23 @@
+fn choose(flag: bool) -> Result<i32, bool> {
+  if flag {
+    return Result::Ok(12);
+  }
+  return Result::Err(false);
+}
+fn relay(flag: bool) -> Result<i32, bool> {
+  let r = choose(flag);
+  return r.move();
+}
+fn main() -> i32 {
+  let a = relay(true);
+  match a {
+    Result::Ok(v) => print(v),
+    Result::Err(e) => print(e),
+  }
+  let b = relay(false);
+  match b {
+    Result::Ok(v) => print(v),
+    Result::Err(e) => print(e),
+  }
+  return 0;
+}

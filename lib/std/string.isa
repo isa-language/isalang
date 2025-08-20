@@ -22,3 +22,30 @@ impl String {
   @intrinsic "string.clear"
   pub fn clear(unique self);
 }
+
+impl String {
+  @intrinsic "string.char_at"
+  fn char_at_scalar(shared self, index: usize) -> char;
+  @intrinsic "string.is_char_boundary"
+  pub fn is_char_boundary(shared self, index: usize) -> bool;
+
+  pub fn char_at(shared self, index: usize) -> Option<char> {
+    if index >= self.len() || !self.is_char_boundary(index) {
+      return Option::None;
+    }
+    return Option::Some(self.char_at_scalar(index));
+  }
+
+  pub fn find_from(shared self, needle: char, start: usize) -> Option<usize> {
+    let index = start;
+    while index < self.len() {
+      if self.is_char_boundary(index) {
+        if self.char_at_scalar(index) == needle {
+          return Option::Some(index);
+        }
+      }
+      index = index + 1;
+    }
+    return Option::None;
+  }
+}

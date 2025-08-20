@@ -1,0 +1,13 @@
+fn inspect(text: &String) {
+  let option = Option::Some(text);
+  match option {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+}
+fn main() -> i32 {
+  let text = String::from("parameter");
+  inspect(&text);
+  text.clear();
+  return 0;
+}

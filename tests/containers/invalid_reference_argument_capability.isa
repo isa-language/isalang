@@ -1,0 +1,8 @@
+fn edit(value: &mut String) {
+  value.clear();
+}
+fn main() -> i32 {
+  let value = String::new();
+  edit(&value);
+  return 0;
+}

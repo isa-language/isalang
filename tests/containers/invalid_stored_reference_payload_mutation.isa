@@ -1,0 +1,9 @@
+fn main() -> i32 {
+  let text = String::from("x");
+  let value = Option::Some(&text);
+  match value {
+    Option::Some(view) => view.clear(),
+    Option::None => {},
+  }
+  return 0;
+}

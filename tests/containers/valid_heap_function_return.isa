@@ -1,0 +1,14 @@
+fn make(value: bool) -> String {
+  let text = String::from("returned");
+  if value {
+    return text.move();
+  }
+  return String::from("other");
+}
+fn main() -> i32 {
+  let a = make(true);
+  let b = make(false);
+  print(a);
+  print(b);
+  return 0;
+}

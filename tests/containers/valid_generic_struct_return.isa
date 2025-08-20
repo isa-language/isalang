@@ -1,0 +1,24 @@
+struct Pair<A, B> {
+  first: A,
+  second: B,
+}
+impl<A, B> Pair<A, B> {
+  pub fn make(a: A, b: B) -> Pair<A, B> {
+    let pair = Pair<A, B>::new();
+    pair.first = a;
+    pair.second = b;
+    return pair.move();
+  }
+  pub fn first(shared self) -> A {
+    return self.first;
+  }
+  pub fn second(shared self) -> B {
+    return self.second;
+  }
+}
+fn main() -> i32 {
+  let pair = Pair<i32, bool>::make(31, true);
+  print(pair.first());
+  print(pair.second());
+  return 0;
+}

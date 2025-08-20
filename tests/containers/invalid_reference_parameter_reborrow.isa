@@ -1,0 +1,9 @@
+fn bad(value: &mut String) {
+  borrow unique value as view {
+    value.clear();
+    print(view);
+  }
+}
+fn main() -> i32 {
+  return 0;
+}

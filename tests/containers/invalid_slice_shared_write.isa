@@ -1,0 +1,6 @@
+fn main() -> i32 {
+  let a = [1, 2];
+  let s: &i32[] = &a;
+  s[0] = 3;
+  return 0;
+}

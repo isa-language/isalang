@@ -1,0 +1,20 @@
+struct Holder<T> {
+  value: T,
+}
+impl<T> Holder<T> {
+  fn set(unique self, value: T) {
+    self.value = value;
+  }
+  fn get(shared self) -> T {
+    return self.value;
+  }
+}
+fn main() -> i32 {
+  let value = Holder<i32>::new();
+  value.set(42);
+  print(value.get());
+  let flag = Holder<bool>::new();
+  flag.set(true);
+  print(flag.get());
+  return 0;
+}

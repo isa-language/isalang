@@ -1,0 +1,8 @@
+fn main() -> i32 {
+  let option: Option<&String> = Option::None;
+  match option {
+    Option::Some(view) => print(view),
+    Option::None => print(0),
+  }
+  return 0;
+}

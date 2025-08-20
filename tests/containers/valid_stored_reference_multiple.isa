@@ -1,0 +1,17 @@
+enum Pair<T> {
+  Both(T, T),
+  Empty,
+}
+fn main() -> i32 {
+  let text = String::from("two");
+  let pair = Pair::Both(&text, &text);
+  match pair {
+    Pair::Both(a, b) => {
+      print(a);
+      print(b);
+    },
+    Pair::Empty => {},
+  }
+  text.clear();
+  return 0;
+}

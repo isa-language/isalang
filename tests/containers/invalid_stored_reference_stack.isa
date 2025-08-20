@@ -1,0 +1,5 @@
+fn main() -> i32 {
+  let data = 42;
+  let item = Option::Some(&data);
+  return 0;
+}

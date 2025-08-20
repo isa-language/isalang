@@ -1,0 +1,34 @@
+enum Choice<T> {
+  Value(T),
+  Empty,
+}
+impl<T> Choice<T> {
+  fn present(shared self) -> bool {
+    match &self {
+      Value(_) => {
+        return true;
+      },
+      Empty => {
+        return false;
+      },
+    }
+  }
+  fn take(self) -> T {
+    match self.move() {
+      Value(value) => {
+        return value.move();
+      },
+      Empty => {
+        loop {
+          panic("empty Choice");
+        }
+      },
+    }
+  }
+}
+fn main() -> i32 {
+  let c = Choice::Value(String::from("generic enum"));
+  print(c.present());
+  print(c.take());
+  return 0;
+}

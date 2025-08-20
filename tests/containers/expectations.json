@@ -198,5 +198,345 @@
     "stdout": "",
     "stdin": "",
     "code": "E0410"
+  },
+  "valid_env_count": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_env_index_type": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "valid_reference_parameter": {
+    "code": null,
+    "stdin": "",
+    "stdout": "5\n5\nhello!\n"
+  },
+  "valid_reference_scalar_parameter": {
+    "code": null,
+    "stdin": "",
+    "stdout": "42\n"
+  },
+  "valid_reference_unique_forward": {
+    "code": null,
+    "stdin": "",
+    "stdout": "hello!\n"
+  },
+  "invalid_reference_parameter_mutation": {
+    "code": "E0311",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_reference_parameter_drop": {
+    "code": "E0310",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_reference_parameter_move": {
+    "code": "E0310",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_reference_argument_alias": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_reference_argument_capability": {
+    "code": "E0201",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_reference_parameter_escape": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_reference_parameter_early_return": {
+    "code": null,
+    "stdin": "",
+    "stdout": "3\nabc\n"
+  },
+  "valid_reference_parameter_shared_alias": {
+    "code": null,
+    "stdin": "",
+    "stdout": "a\na\n"
+  },
+  "invalid_reference_parameter_reborrow": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_reference_parameter_owned_argument": {
+    "code": "E0201",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_reference_parameter_argument_conflict": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_stored_reference": {
+    "code": null,
+    "stdin": "",
+    "stdout": "hello\nhello!\n"
+  },
+  "valid_stored_reference_none": {
+    "code": null,
+    "stdin": "",
+    "stdout": "0\n"
+  },
+  "valid_stored_reference_move": {
+    "code": null,
+    "stdin": "",
+    "stdout": "moved\n0\n"
+  },
+  "valid_stored_reference_shared_match": {
+    "code": null,
+    "stdin": "",
+    "stdout": "shared\nshared\n"
+  },
+  "valid_stored_reference_from_alias": {
+    "code": null,
+    "stdin": "",
+    "stdout": "alias\n"
+  },
+  "valid_stored_reference_result": {
+    "code": null,
+    "stdin": "",
+    "stdout": "result\n"
+  },
+  "valid_stored_reference_mixed_payload": {
+    "code": null,
+    "stdin": "",
+    "stdout": "borrowed\nowned\n"
+  },
+  "valid_stored_reference_drop": {
+    "code": null,
+    "stdin": "",
+    "stdout": "drop!\n"
+  },
+  "valid_stored_reference_parameter_local": {
+    "code": null,
+    "stdin": "",
+    "stdout": "parameter\n"
+  },
+  "valid_stored_reference_early_return": {
+    "code": null,
+    "stdin": "",
+    "stdout": "early\n0\n"
+  },
+  "valid_stored_reference_multiple": {
+    "code": null,
+    "stdin": "",
+    "stdout": "two\ntwo\n"
+  },
+  "invalid_stored_reference_mutation": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_stored_reference_owner_drop": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_stored_reference_owner_move": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_stored_reference_after_container_move": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_stored_reference_payload_mutation": {
+    "code": "E0311",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_stored_reference_unique": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_stored_reference_nested": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_stored_reference_escape": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_stored_reference_box": {
+    "code": null,
+    "stdin": "",
+    "stdout": "42\n7\n"
+  },
+  "invalid_stored_reference_stack": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_option_function_return": {
+    "code": null,
+    "stdin": "",
+    "stdout": "42\n1\n"
+  },
+  "valid_result_function_return": {
+    "code": null,
+    "stdin": "",
+    "stdout": "12\n0\n"
+  },
+  "valid_string_char_at": {
+    "code": null,
+    "stdin": "",
+    "stdout": "a\ná\n😀\nmiddle\nend\noutside\nempty\n"
+  },
+  "valid_string_find_from": {
+    "code": null,
+    "stdin": "",
+    "stdout": "1\n8\n3\n99\n99\n99\n"
+  },
+  "valid_shared_slice": {
+    "code": null,
+    "stdin": "",
+    "stdout": "6\n9\n3\n0\n2\n"
+  },
+  "valid_mut_slice": {
+    "code": null,
+    "stdin": "",
+    "stdout": "7\n42\n"
+  },
+  "valid_array_dynamic_index": {
+    "code": null,
+    "stdin": "",
+    "stdout": "42\n"
+  },
+  "valid_array_function_return": {
+    "code": null,
+    "stdin": "",
+    "stdout": "2\n"
+  },
+  "invalid_slice_shared_write": {
+    "code": "E0311",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_slice_mut_conflict": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_slice_escape": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_slice_index_type": {
+    "code": "E0200",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_string_char_at_index": {
+    "code": "E0200",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_string_find_from_char": {
+    "code": "E0200",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_string_private_char": {
+    "code": "E0500",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_if_let_some": {
+    "stdout": "42\nempty\n",
+    "stdin": "",
+    "code": 0
+  },
+  "valid_if_let_linear": {
+    "code": 0,
+    "stdin": "",
+    "stdout": "42\nborrowed\nborrowed\n"
+  },
+  "valid_if_let_else": {
+    "code": 0,
+    "stdin": "",
+    "stdout": "1\n2\n3\n"
+  },
+  "invalid_if_let_consumed": {
+    "code": "E0301",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_generic_struct_impl": {
+    "code": 0,
+    "stdin": "",
+    "stdout": "42\n1\n"
+  },
+  "valid_option_unwrap": {
+    "code": 0,
+    "stdin": "",
+    "stdout": "1\n42\nhello\n17\n"
+  },
+  "valid_generic_struct_return": {
+    "code": 0,
+    "stdin": "",
+    "stdout": "31\n1\n"
+  },
+  "valid_generic_enum_impl": {
+    "code": 0,
+    "stdin": "",
+    "stdout": "1\ngeneric enum\n"
+  },
+  "valid_option_unwrap_nested": {
+    "code": 0,
+    "stdin": "",
+    "stdout": "19\n1\n"
+  },
+  "valid_heap_function_return": {
+    "code": 0,
+    "stdin": "",
+    "stdout": "returned\nother\n"
+  },
+  "invalid_option_after_unwrap": {
+    "code": "E0301",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_option_unwrap_shared": {
+    "code": "E0310",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_generic_struct_linear_field": {
+    "code": "E0204",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_generic_impl_arity": {
+    "code": "E0200",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_generic_struct_arity": {
+    "code": "E0200",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_generic_impl_type": {
+    "code": "E0200",
+    "stdin": "",
+    "stdout": ""
   }
 }

@@ -1,0 +1,15 @@
+@import "std.box"
+fn main() -> i32 {
+  let value = Option::Some(BoxI32::new(42));
+  if let Some(v) = value {
+    print(v.get());
+  }
+  let text = Option::Some(String::from("borrowed"));
+  if let Some(v) = &text {
+    print(v);
+  }
+  if let Some(v) = text {
+    print(v);
+  }
+  return 0;
+}

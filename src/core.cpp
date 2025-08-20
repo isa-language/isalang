@@ -99,6 +99,15 @@ class Builder {
       emit(cleanup, false);
       return value;
     }
+    case E::Length:
+      i.kind = Inst::Length;
+      i.slot = receiver(e.args.at(0));
+      return emit(i);
+    case E::StoreReference:
+      i.kind = Inst::StoreReference;
+      i.slot = receiver(e.args.at(0));
+      i.access = Access::Shared;
+      return emit(i);
     case E::Borrow:
       fail(e.loc, DiagnosticCode::InvalidCore, "unbound BorrowExpr in Core elaboration");
     case E::Cast:
@@ -124,6 +133,12 @@ class Builder {
       if (p.semantics.linear(e.type))
         fail(e.loc, DiagnosticCode::ImplicitCopy,
              "partial resource moves/copies are outside this PoC");
+      if (e.kind == E::Index && e.ref == None) {
+        i.kind = Inst::Read;
+        i.slot = receiver(e.args.at(0));
+        i.args = {expr(e.args.at(1))};
+        return emit(i);
+      }
       auto [id, off] = place(e);
       i.kind = Inst::Read;
       i.slot = id;
@@ -171,6 +186,16 @@ class Builder {
         i.args.push_back(expr(a));
       return emit(i);
     case E::Assign: {
+      const auto &target = e.args.at(0);
+      if (target.kind == E::Index && target.ref == None) {
+        i.kind = Inst::Write;
+        i.slot = receiver(target.args.at(0));
+        auto index = expr(target.args.at(1));
+        i.type = target.type;
+        i.args = {expr(e.args.at(1)), index};
+        emit(i, false);
+        return None;
+      }
       auto [id, off] = place(e.args[0]);
       i.kind = Inst::Write;
       i.slot = id;
@@ -237,13 +262,22 @@ class Builder {
           i.quantity = e.type == Unit ? Quantity::Zero : Quantity::Omega;
         }
       }
-      for (size_t n = start; n < e.args.size(); ++n)
-        i.args.push_back(expr(e.args[n]));
+      for (size_t n = start; n < e.args.size(); ++n) {
+        if (p.semantics.symbols[f.params[n]].reference) {
+          auto argument = make(Inst::ReferenceArgument, e.args[n].loc, e.args[n].type);
+          argument.slot = receiver(e.args[n]);
+          argument.access = p.semantics.symbols[f.params[n]].access;
+          i.args.push_back(emit(argument));
+        } else
+          i.args.push_back(expr(e.args[n]));
+      }
       if (!f.intrinsic.empty()) {
         i.kind = intrinsicInfo(f.intrinsicId).lowering == IntrinsicLowering::StringRecord
                      ? Inst::StringCall
                  : intrinsicInfo(f.intrinsicId).lowering == IntrinsicLowering::InputRecord
                      ? Inst::InputCall
+                 : intrinsicInfo(f.intrinsicId).lowering == IntrinsicLowering::ExternalCall
+                     ? Inst::Call
                      : Inst::HeapAlloc;
         i.text = f.intrinsic;
       }
@@ -449,6 +483,9 @@ struct Resource {
   SymbolId movedTo = None;
   Loc consumedAt = {}, borrowAt = {}, stateAt = {};
   std::set<uint32_t> movedPayloads = {};
+  std::map<uint32_t, SymbolId> loans = {};
+
+  VariantId knownVariant = None;
   MemoryState memory() const {
     return !live                      ? MemoryState::Dead
            : access == Access::Shared ? MemoryState::Shared
@@ -458,7 +495,8 @@ struct Resource {
   bool operator==(const Resource &other) const {
     return memory() == other.memory() && state == other.state && root == other.root &&
            shared == other.shared && unique == other.unique && allocation == other.allocation &&
-           (!live || movedPayloads == other.movedPayloads);
+           (!live || (movedPayloads == other.movedPayloads && loans == other.loans &&
+                      knownVariant == other.knownVariant));
   }
 };
 struct Temporary {
@@ -467,14 +505,19 @@ struct Temporary {
   bool available = true;
   bool allocation = false;
   SymbolId movedFrom = None;
+  std::map<uint32_t, SymbolId> loans = {};
 };
 struct Context {
+  std::map<ValueId, VariantId> constructedVariants;
+  std::map<ValueId, int64_t> constants, tags;
+  std::map<ValueId, bool> conditions;
 
   std::map<SymbolId, VariantId> variants;
   std::map<SymbolId, Resource> vars;
   std::map<ValueId, Temporary> values;
   std::map<ValueId, SymbolId> pointers;
   std::map<SymbolId, SymbolId> pointerSlots;
+  std::map<ValueId, SymbolId> references;
   std::map<ValueId, SymbolId> views;
   bool returned = false;
 };
@@ -524,7 +567,10 @@ class Checker {
   Resource &access(Context &c, SymbolId id, Access requested, Loc l) {
     auto &r = live(c, id, l);
     auto &root = r.root == None ? r : live(c, r.root, l);
-    if (r.root != None) {
+    if (r.root != None || symbol(id).reference) {
+      if (r.root == None && (r.unique || (requested != Access::Shared && r.shared)))
+        fail(l, DiagnosticCode::InvalidReborrow,
+             "reference parameter is unavailable while a derived borrow is active");
       if (requested == Access::Own)
         fail(l, DiagnosticCode::BorrowConflict,
              "cannot move, drop or transition borrowed resource `" + symbol(id).name + "`");
@@ -563,6 +609,14 @@ class Checker {
                 .secondary(activeOrigin, "active borrow starts here")
                 .note("unique access requires exclusive access to the resource")
                 .help("end the active borrow before moving, dropping or mutating this resource");
+        for (const auto &[container, state] : c.vars)
+          if (state.live && state.root == None)
+            for (const auto &[offset, owner] : state.loans) {
+              (void)offset;
+              if (owner == id)
+                diagnostic.secondary(symbol(container).loc,
+                                     "this container retains a shared reference to the resource");
+            }
         if (lastUse.span.file != NoFile)
           diagnostic.secondary(lastUse, "reference last used in this statement");
         diagnostic.emit();
@@ -626,7 +680,7 @@ class Checker {
           .help("bind the owner to a local variable before borrowing it")
           .emit();
     auto &r = access(c, id, Access::Own, l);
-    if (symbol(id).receiver) {
+    if (symbol(id).receiver && !function->consumesSelf) {
       if (implicit)
         return;
       fail(l, DiagnosticCode::BorrowConflict,
@@ -637,6 +691,11 @@ class Checker {
       site.cleanup.push_back(id);
       site.movedPayloads[id] = {r.movedPayloads.begin(), r.movedPayloads.end()};
     }
+    for (auto [offset, owner] : r.loans) {
+      (void)offset;
+      --live(c, owner, l).shared;
+    }
+    r.loans.clear();
     r.allocation = false;
     c.vars[id].live = false;
     c.vars[id].consumedBy = "drop";
@@ -675,7 +734,8 @@ class Checker {
     for (auto it = c.vars.rbegin(); it != c.vars.rend(); ++it) {
       auto id = it->first;
       auto &r = it->second;
-      if (r.live && r.root == None && !symbol(id).receiver)
+      if (r.live && r.root == None && (!symbol(id).receiver || function->consumesSelf) &&
+          !symbol(id).reference)
         drop(c, id, l, true, site);
       if (r.live && symbol(id).receiver && p.semantics.heap(symbol(id).type) &&
           r.allocation == function->releases)
@@ -734,14 +794,43 @@ class Checker {
           r.allocation = false;
       }
     }
+    std::map<SymbolId, Access> argumentRoots;
+    if (i.slot != None) {
+      const auto &receiver = c.vars.at(i.slot);
+      argumentRoots[receiver.root == None ? i.slot : receiver.root] = i.access;
+    }
     for (size_t n = 0; n < i.args.size(); ++n) {
-      auto t = symbol(f.params[n + skip]).type;
-      if (p.semantics.linear(t)) {
+      const auto &parameter = symbol(f.params[n + skip]);
+      auto t = parameter.type;
+      if (parameter.reference) {
+        auto found = c.references.find(i.args[n]);
+        if (found == c.references.end())
+          fail(i.loc, DiagnosticCode::InvalidCore, "missing reference argument region");
+        access(c, found->second, parameter.access, i.loc);
+        const auto &reference = c.vars.at(found->second);
+        auto root = reference.root == None ? found->second : reference.root;
+        if (argumentRoots.contains(root) &&
+            (parameter.access == Access::Unique || argumentRoots.at(root) == Access::Unique))
+          fail(i.loc, DiagnosticCode::InvalidReborrow,
+               "overlapping mutable reference arguments in the same call");
+        argumentRoots[root] = parameter.access;
+      } else if (p.semantics.linear(t)) {
         auto &v = take(c, i.args[n], i.loc);
         if (v.state != initial(t))
           fail(i.loc, DiagnosticCode::ProtocolReturn,
                "owned resource arguments must be in their initial protocol state");
       }
+    }
+    if (f.consumesSelf && i.slot != None) {
+      auto &owner = access(c, i.slot, Access::Own, i.loc);
+      if (!owner.loans.empty())
+        fail(i.loc, DiagnosticCode::EscapingView,
+             "consuming reference payloads requires a return-region contract");
+      owner.live = false;
+      owner.allocation = false;
+      owner.consumedBy = "move";
+      owner.consumedAt = i.loc;
+      c.variants.erase(i.slot);
     }
   }
   void pointerAccess(Context &c, ValueId value, Access requested, Loc loc, bool free = false) {
@@ -766,13 +855,39 @@ class Checker {
       i.movedPayloads.clear();
       i.freeTemporary = false;
       switch (i.kind) {
+      case Inst::Constant:
+        if (i.type == I64)
+          c.constants[i.result] = std::stoll(i.text);
+        break;
+      case Inst::Binary:
+        if (i.text == "==" && c.tags.contains(i.args[0]) && c.constants.contains(i.args[1]))
+          c.conditions[i.result] = c.tags.at(i.args[0]) == c.constants.at(i.args[1]);
+        break;
+      case Inst::StoreReference: {
+        auto &alias = live(c, i.slot, i.loc);
+        auto &root = access(c, i.slot, Access::Shared, i.loc);
+        auto owner = alias.root == None ? i.slot : alias.root;
+        ++root.shared;
+        root.borrowAt = i.loc;
+        c.values[i.result] = {i.type, None, true, false, None, {{0, owner}}};
+        break;
+      }
+      case Inst::ReferenceArgument:
+        if (!symbol(i.slot).reference)
+          fail(i.loc, DiagnosticCode::InvalidCore, "argument must refer to an active borrow");
+        access(c, i.slot, i.access, i.loc);
+        c.references[i.result] = i.slot;
+        break;
       case Inst::RefineVariant:
-        access(c, i.slot, Access::Shared, i.loc);
+        if (auto &resource = access(c, i.slot, Access::Shared, i.loc);
+            resource.knownVariant != None && resource.knownVariant != i.offset)
+          fail(i.loc, DiagnosticCode::InvalidCore, "variant refinement contradicts constructor");
         c.variants[i.slot] = i.offset;
         break;
       case Inst::EndViews:
         endViews(c);
         break;
+      case Inst::Length:
       case Inst::TextPrint:
         access(c, i.slot, Access::Shared, i.loc);
         break;
@@ -832,18 +947,27 @@ class Checker {
       }
       case Inst::EnumConstruct: {
         const auto &payloads = p.semantics.types[i.type].variants.at(i.offset).payload;
+        std::map<uint32_t, SymbolId> loans;
+        if (p.semantics.containsReferences(i.type))
+          c.constructedVariants[i.result] = i.offset;
         for (size_t n = 0; n < i.args.size(); ++n) {
           auto tid = payloads[n];
           if (!p.semantics.linear(tid))
             continue;
           auto &payload = take(c, i.args[n], i.loc);
+          if (p.semantics.reference(tid)) {
+            if (payload.loans.size() != 1 || !payload.loans.contains(0))
+              fail(i.loc, DiagnosticCode::InvalidCore, "stored reference has no origin");
+            loans[p.semantics.payloadOffset(i.type, i.offset, n)] = payload.loans.at(0);
+          }
           final(tid, payload.state, "enum payload", i.loc);
           if (payload.state != initial(tid) || (p.semantics.heap(tid) && !payload.allocation))
             fail(i.loc, DiagnosticCode::AllocationContract,
                  "enum payload must retain its allocation and be in its initial final protocol "
                  "state");
         }
-        c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
+        c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type),
+                              None,   std::move(loans)};
         break;
       }
       case Inst::Create:
@@ -853,10 +977,13 @@ class Checker {
       case Inst::Move: {
         c.variants.erase(i.slot);
         auto &r = access(c, i.slot, Access::Own, i.loc);
-        if (symbol(i.slot).receiver)
+        if (symbol(i.slot).receiver && !function->consumesSelf)
           fail(i.loc, DiagnosticCode::BorrowConflict, "method self cannot be moved");
         i.resourceInput = r.version;
-        c.values[i.result] = {i.type, r.state, true, r.allocation, i.slot};
+        if (r.knownVariant != None)
+          c.constructedVariants[i.result] = r.knownVariant;
+        c.values[i.result] = {i.type, r.state, true, r.allocation, i.slot, std::move(r.loans)};
+        r.loans.clear();
         c.vars[i.slot].allocation = false;
         c.vars[i.slot].live = false;
         c.vars[i.slot].consumedBy = "move";
@@ -864,8 +991,12 @@ class Checker {
         break;
       }
       case Inst::Copy:
-      case Inst::Read:
-        access(c, i.slot, Access::Shared, i.loc);
+      case Inst::Read: {
+        auto &resource = access(c, i.slot, Access::Shared, i.loc);
+        if (i.kind == Inst::Read && i.offset == 0 && i.type == I64 &&
+            p.semantics.types[symbol(i.slot).type].kind == hir::Type::Enum &&
+            resource.knownVariant != None)
+          c.tags[i.result] = resource.knownVariant;
         if (i.type == Str && c.vars.at(i.slot).root != None) {
           auto root = c.vars.at(i.slot).root;
           ++c.vars.at(root).shared;
@@ -878,6 +1009,7 @@ class Checker {
             c.pointers[i.result] = c.pointerSlots.at(i.slot);
         }
         break;
+      }
       case Inst::Write:
         access(c, i.slot, Access::Unique, i.loc);
         break;
@@ -893,6 +1025,10 @@ class Checker {
         }
         c.vars[i.slot] = {true,  state,     Access::Own, None, 0,
                           false, i.args[0], allocation,  "",   None};
+        if (c.constructedVariants.contains(i.args[0]))
+          c.vars[i.slot].knownVariant = c.constructedVariants.at(i.args[0]);
+        if (p.semantics.linear(i.type))
+          c.vars[i.slot].loans = c.values.at(i.args[0]).loans;
         if (i.type == Str && c.views.contains(i.args[0])) {
           c.vars[i.slot].root = c.views.at(i.args[0]);
           c.vars[i.slot].access = Access::Shared;
@@ -911,6 +1047,11 @@ class Checker {
           auto &t = take(c, i.args[0], i.loc);
           final(t.type, t.state, "temporary", i.loc);
           i.freeTemporary = t.allocation;
+          for (auto [offset, owner] : t.loans) {
+            (void)offset;
+            --live(c, owner, i.loc).shared;
+          }
+          t.loans.clear();
         }
         break;
       case Inst::BorrowShared:
@@ -921,10 +1062,29 @@ class Checker {
           auto tid = symbol(i.slot).type;
           auto variant = c.variants.at(i.slot);
           const auto &payloads = p.semantics.types[tid].variants.at(variant).payload;
-          bool found = false;
+          bool found = false, stored = false;
           for (size_t n = 0; n < payloads.size(); ++n)
-            if (p.semantics.payloadOffset(tid, variant, n) == i.projection && payloads[n] == i.type)
-              found = true;
+            if (p.semantics.payloadOffset(tid, variant, n) == i.projection) {
+              stored = p.semantics.reference(payloads[n]) &&
+                       p.semantics.types[payloads[n]].element == i.type;
+              found = stored || payloads[n] == i.type;
+            }
+          if (stored) {
+            access(c, i.slot, Access::Shared, i.loc);
+            const auto &container = c.vars.at(i.slot);
+            const auto &loans =
+                container.root == None ? container.loans : c.vars.at(container.root).loans;
+            if (i.kind != Inst::BorrowShared || !loans.contains(i.projection))
+              fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
+            auto owner = loans.at(i.projection);
+            auto &root = live(c, owner, i.loc);
+            ++root.shared;
+            root.borrowAt = i.loc;
+            c.vars[i.offset] = {true,  root.state,   Access::Shared, owner, 0,
+                                false, root.version, false,          "",    None};
+            c.vars[i.offset].borrowAt = i.loc;
+            break;
+          }
           if (!found || c.vars.at(i.slot).movedPayloads.contains(i.projection))
             fail(i.loc, DiagnosticCode::ConsumedResource, "cannot borrow a consumed enum payload");
         }
@@ -953,6 +1113,8 @@ class Checker {
       case Inst::Call:
       case Inst::ProtocolTransition:
         call(i, c);
+        if (i.kind == Inst::Call && p.semantics.linear(i.type))
+          c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
         break;
       case Inst::ScopeEnd:
         for (auto it = i.locals.rbegin(); it != i.locals.rend(); ++it)
@@ -961,6 +1123,12 @@ class Checker {
           c.vars.erase(id);
         break;
       case Inst::Return:
+        if (p.semantics.linear(function->result)) {
+          auto &result = take(c, i.args.at(0), i.loc);
+          if (!result.loans.empty() || result.state != None ||
+              result.allocation != p.semantics.needsDrop(function->result))
+            fail(i.loc, DiagnosticCode::InvalidCore, "unsupported resource return contract");
+        }
         finish(c, i.loc, i);
         c.returned = true;
         break;
@@ -1011,6 +1179,13 @@ class Checker {
         break;
       }
       case Inst::If: {
+        if (c.conditions.contains(i.args[0])) {
+
+          bool selected = c.conditions.at(i.args[0]);
+          block(selected ? i.body : i.otherwise, c);
+          (selected ? i.otherwise : i.body).clear();
+          break;
+        }
         Context then = c, other = c;
         block(i.body, then);
         block(i.otherwise, other);
@@ -1100,26 +1275,49 @@ public:
   }
 };
 void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, int d) {
-  static const char *names[] = {"constant",       "copy",
-                                "read",           "write",
-                                "create",         "array",
-                                "move",           "bind",
-                                "drop",           "borrow.shared",
-                                "borrow.unique",  "end_borrow",
-                                "call",           "protocol.transition",
-                                "return",         "if",
-                                "scope.end",      "binary",
-                                "unary",          "print",
-                                "discard",        "heap.alloc",
-                                "heap.free",      "heap.load",
-                                "heap.store",     "memcpy",
-                                "memmove",        "cast",
-                                "loop",           "break",
-                                "continue",       "enum.construct",
-                                "inspect",        "static_str",
-                                "string.call",    "print.text",
-                                "end_views",      "input.call",
-                                "refine.variant", "payload.take"};
+  static const char *names[] = {"constant",
+                                "copy",
+                                "read",
+                                "write",
+                                "create",
+                                "array",
+                                "move",
+                                "bind",
+                                "drop",
+                                "borrow.shared",
+                                "borrow.unique",
+                                "end_borrow",
+                                "call",
+                                "protocol.transition",
+                                "return",
+                                "if",
+                                "scope.end",
+                                "binary",
+                                "unary",
+                                "print",
+                                "discard",
+                                "heap.alloc",
+                                "heap.free",
+                                "heap.load",
+                                "heap.store",
+                                "memcpy",
+                                "memmove",
+                                "cast",
+                                "loop",
+                                "break",
+                                "continue",
+                                "enum.construct",
+                                "inspect",
+                                "static_str",
+                                "string.call",
+                                "print.text",
+                                "end_views",
+                                "input.call",
+                                "refine.variant",
+                                "payload.take",
+                                "reference.argument",
+                                "reference.store",
+                                "length"};
   for (auto &i : ops) {
     if (i.kind == Inst::Loop)
       dump(i.condition, p, o, d + 2);
@@ -1225,6 +1423,9 @@ void print(const Program &p, std::ostream &o) {
         << (p.semantics.linear(s.type) ? "1" : "omega") << " " << p.semantics.types[s.type].name
         << "<" << accessName(s.access) << ">\n";
     }
+    for (const auto &region : hf.parameterRegions)
+      o << "  region.contract #v" << region.parameter << " #R" << region.region
+        << " caller-owned noescape\n";
     if (!hf.operations.empty()) {
       const auto &protocol = p.semantics.protocols[p.semantics.types[hf.owner].protocol];
       for (auto id : hf.operations)

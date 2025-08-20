@@ -1,0 +1,21 @@
+fn sum(values: &i32[]) -> i32 {
+  let total = 0;
+  let index: usize = 0;
+  while index < values.len() {
+    total = total + values[index];
+    index = index + 1;
+  }
+  return total;
+}
+fn set(values: &mut i32[], index: usize) {
+  values[index] = 42;
+}
+fn main() -> i32 {
+  let values = [1, 2, 3];
+  print(sum(&values));
+  set(&mut values, 1);
+  let view: &i32[] = &values;
+  print(view.len());
+  print(view[1]);
+  return 0;
+}
