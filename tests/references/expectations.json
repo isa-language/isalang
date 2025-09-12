@@ -98,5 +98,30 @@
     "stdout": "alive\nalive\nalive!\n",
     "code": null,
     "stdin": ""
+  },
+  "valid_cfg_branch_last_use": {
+    "code": null,
+    "stdin": "",
+    "stdout": "10\n20\n10\n30\n"
+  },
+  "valid_cfg_shadowing": {
+    "code": null,
+    "stdin": "",
+    "stdout": "1\n9\n"
+  },
+  "valid_cfg_loop_last_use": {
+    "code": null,
+    "stdin": "",
+    "stdout": "0\n1\n2\n2\n"
+  },
+  "invalid_cfg_argument_overlap": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_cfg_branch_overlap": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
   }
 }

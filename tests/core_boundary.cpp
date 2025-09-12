@@ -59,5 +59,14 @@ int main() {
     if (e.code != "E9001")
       return 1;
   }
+  auto forgedReceiver = make();
+  forgedReceiver.semantics.functions[0].consumesSelf = true;
+  try {
+    (void)core::verify(std::move(forgedReceiver));
+    return 1;
+  } catch (const Error &e) {
+    if (e.code != "E9001")
+      return 1;
+  }
   std::cout << "Core gate rejects forged quantity, type and reference contracts\n";
 }

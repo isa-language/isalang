@@ -9,7 +9,8 @@
 int main(int argc, char **argv) {
   const char *usage =
       "usage: isac file.isa [--check | --emit-tokens | --emit-ast | --emit-hir | "
-      "--emit-expanded | --emit-core | --emit-erased | --emit-lir | --emit-liveness | --emit-mlir "
+      "--emit-expanded | --emit-regions | --emit-core | --emit-erased | --emit-lir | "
+      "--emit-liveness | --emit-mlir "
       "| --emit-std-mlir | "
       "--emit-llvm-dialect | --emit-llvm | --emit-asm | --emit-obj | -o executable "
       "[--sanitize] [--runtime-test-counters]]\nOptions: --target=TRIPLE --cpu=CPU "
@@ -26,10 +27,23 @@ int main(int argc, char **argv) {
   isac::SourceManager sources;
   isac::ColorMode color = isac::ColorMode::Auto;
   try {
-    std::set<std::string> modes = {
-        "--check",         "--emit-expanded",     "--emit-liveness", "--emit-tokens", "--emit-ast",
-        "--emit-hir",      "--emit-core",         "--emit-erased",   "--emit-lir",    "--emit-mlir",
-        "--emit-std-mlir", "--emit-llvm-dialect", "--emit-llvm",     "--emit-asm",    "--emit-obj"};
+    std::set<std::string> modes = {"--emit-region-constraints",
+                                   "--emit-regions",
+                                   "--check",
+                                   "--emit-expanded",
+                                   "--emit-liveness",
+                                   "--emit-tokens",
+                                   "--emit-ast",
+                                   "--emit-hir",
+                                   "--emit-core",
+                                   "--emit-erased",
+                                   "--emit-lir",
+                                   "--emit-mlir",
+                                   "--emit-std-mlir",
+                                   "--emit-llvm-dialect",
+                                   "--emit-llvm",
+                                   "--emit-asm",
+                                   "--emit-obj"};
     for (int n = 1; n < argc; ++n) {
       std::string arg = argv[n];
       if (arg.starts_with("--color=")) {
@@ -141,6 +155,14 @@ int main(int argc, char **argv) {
     auto verified = isac::core::verify(isac::core::elaborate(std::move(h)));
     if (mode == "--check")
       return 0;
+    if (mode == "--emit-region-constraints") {
+      isac::regions::printConstraints(verified.get(), std::cout);
+      return 0;
+    }
+    if (mode == "--emit-regions") {
+      isac::regions::print(verified.get(), std::cout);
+      return 0;
+    }
     if (mode == "--emit-core") {
       isac::core::print(verified.get(), std::cout);
       return 0;

@@ -9,6 +9,7 @@ fn main() -> i32 {
     @assert(v >= -10 && v < 10);
     @assert(rng.range(7, 8) == 7);
     let wide = rng.range(-2147483648, 2147483647);
+    @println("{}", wide);
     @assert(wide < 2147483647);
   }
   print(1);

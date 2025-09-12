@@ -1,0 +1,18 @@
+@import "std.box"
+fn main() {
+  let data = BoxI32::new(0);
+  let i = 0;
+  while i < 3 {
+    let r = &data;
+    if i == 0 {
+      print(r.get());
+      data.set(1);
+    }
+    else {
+      print(r.get());
+      data.set(2);
+    }
+    i = i + 1;
+  }
+  print(data.get());
+}

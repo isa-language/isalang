@@ -91,6 +91,7 @@ struct Symbol {
   bool parameter = false, receiver = false;
   Loc loc;
   bool reference = false;
+  bool inferredRegion = false;
   RegionId region = None;
   Loc lastUse = {};
   bool temporary = false;

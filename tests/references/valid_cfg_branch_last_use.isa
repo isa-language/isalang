@@ -1,0 +1,20 @@
+@import "std.box"
+fn inspect(value: &BoxI32) {
+  print(value.get());
+}
+fn test(cond: bool) {
+  let data = BoxI32::new(10);
+  let r = &data;
+  if cond {
+    inspect(r);
+    data.set(20);
+  } else {
+    inspect(r);
+    data.set(30);
+  }
+  print(data.get());
+}
+fn main() {
+  test(true);
+  test(false);
+}

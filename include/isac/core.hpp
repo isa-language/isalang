@@ -1,5 +1,6 @@
 #pragma once
 #include "isac/hir.hpp"
+#include "isac/regions.hpp"
 #include <map>
 namespace isac {
 enum class Quantity { Zero, One, Omega };
@@ -56,6 +57,9 @@ struct Inst {
     Length
   } kind;
   Loc loc;
+  uint32_t semanticPoint = None;
+  std::vector<SymbolId> inferredEnds;
+  std::vector<SymbolId> exitEnds;
   RegionId region = None;
   ValueId result = None;
   TypeId type = Unit;
@@ -91,6 +95,7 @@ struct Program {
   hir::Program semantics;
   std::vector<Function> functions;
   uint32_t values = 0;
+  std::vector<regions::FunctionGraph> regionGraphs;
 };
 class Verified {
   Program program;

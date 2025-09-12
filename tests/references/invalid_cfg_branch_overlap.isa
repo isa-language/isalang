@@ -1,0 +1,15 @@
+@import "std.box"
+fn test(condition: bool) {
+  let data = BoxI32::new(0);
+  let r = &data;
+  if condition {
+    data.set(1);
+    print(r.get());
+  }
+  else {
+    print(r.get());
+  }
+}
+fn main() {
+  test(true);
+}

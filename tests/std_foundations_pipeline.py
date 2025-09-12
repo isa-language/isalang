@@ -8,7 +8,7 @@ compiler, root = sys.argv[1:3]
 root = Path(root)
 with tempfile.TemporaryDirectory() as temporary:
     tmp = Path(temporary)
-    for name in ("valid_random", "valid_geometry", "valid_assert_lazy", "valid_time"):
+    for name in ("valid_random_contract", "valid_geometry", "valid_assert_lazy", "valid_time"):
         source = root / "tests/std_foundations" / (name + ".isa")
         for opt in ("-O0", "-O2"):
             executable = tmp / (name + opt)

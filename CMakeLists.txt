@@ -21,6 +21,7 @@ add_library(
   src/erasure.cpp
   src/runtime.cpp
   src/liveness.cpp
+  src/regions.cpp
   src/consteval.cpp)
 target_include_directories(isac_frontend PUBLIC include)
 set(ISAC_LIBRARY_ROOT
@@ -77,6 +78,8 @@ include(CTest)
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   file(GLOB STD_FOUNDATION_CASES CONFIGURE_DEPENDS tests/std_foundations/*.isa)
+
+  list(FILTER STD_FOUNDATION_CASES EXCLUDE REGEX "/valid_random\\.isa$")
   foreach(CASE IN LISTS STD_FOUNDATION_CASES)
     get_filename_component(NAME ${CASE} NAME_WE)
     add_test(NAME std_foundation_${NAME}
@@ -291,6 +294,25 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/std_refinement_pipeline.py
               $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
     set_tests_properties(std_refinement_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+  endif()
+  add_test(NAME semantic_regions_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/regions_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(NAME semantic_regions_sanitized_pipeline
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/regions_pipeline.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(semantic_regions_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+  endif()
+  add_test(NAME generic_impl_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/generic_impl_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME generic_impl_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/generic_impl_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(generic_impl_sanitized_pipeline PROPERTIES LABELS "sanitizers")
   endif()
   add_test(NAME containers_pipeline
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/containers_pipeline.py

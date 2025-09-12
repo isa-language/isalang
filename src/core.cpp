@@ -851,6 +851,15 @@ class Checker {
     for (auto &i : ops) {
       if (c.returned)
         break;
+      auto inferredEnds = std::move(i.inferredEnds);
+      i.inferredEnds.clear();
+      for (auto alias : inferredEnds) {
+        auto found = c.vars.find(alias);
+        if (found != c.vars.end() && found->second.live && found->second.root != None) {
+          endBorrow(c, alias);
+          i.inferredEnds.push_back(alias);
+        }
+      }
       i.cleanup.clear();
       i.movedPayloads.clear();
       i.freeTemporary = false;
@@ -1172,6 +1181,13 @@ class Checker {
         if (exits.empty())
           c.returned = true;
         else {
+
+          for (auto &edge : exits)
+            for (auto alias : i.exitEnds) {
+              auto found = edge.vars.find(alias);
+              if (found != edge.vars.end() && found->second.live && found->second.root != None)
+                endBorrow(edge, alias);
+            }
           for (auto &edge : exits)
             compatible(exits[0], edge, i.loc, "loop exit");
           c = std::move(exits[0]);
@@ -1332,6 +1348,14 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                 : ") => heap.free\n");
     if (i.freeTemporary)
       o << std::string(d, ' ') << "drop temporary => heap.free\n";
+    for (auto alias : i.inferredEnds)
+      o << std::string(d, ' ') << "end_borrow #v" << alias << " [CFG last-use]\n";
+    if (!i.exitEnds.empty()) {
+      o << std::string(d, ' ') << "loop.exit ends={";
+      for (auto alias : i.exitEnds)
+        o << " #v" << alias;
+      o << " } [CFG edge]\n";
+    }
     o << std::string(d, ' ');
     if (i.result != None)
       o << "%" << i.result << " = ";
@@ -1408,10 +1432,13 @@ Program elaborate(hir::Program h) {
 void checkTypes(const Program &);
 Verified verify(Program p) {
   checkTypes(p);
+  regions::infer(p);
   return Verified(Checker(std::move(p)).run());
 }
 void print(const Program &p, std::ostream &o) {
   o << "Verified Core (0 / 1 / omega; MemoryState independent of ProtocolState)\n";
+  regions::print(p, o);
+  regions::printConstraints(p, o);
   for (auto &f : p.functions) {
     auto &hf = p.semantics.functions[f.id];
     o << "fn #F" << f.id << " " << hf.name << " kind=Normal effects={" << hf.effects.describe()

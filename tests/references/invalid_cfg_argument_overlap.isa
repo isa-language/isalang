@@ -1,0 +1,10 @@
+@import "std.box"
+fn both(a: &BoxI32, b: &mut BoxI32) {
+  print(a.get());
+  b.set(2);
+}
+fn main() {
+  let value = BoxI32::new(1);
+  let r = &value;
+  both(r, &mut value);
+}

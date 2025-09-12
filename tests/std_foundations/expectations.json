@@ -33,5 +33,10 @@
     "stdout": "",
     "stdin": "",
     "code": "E0311"
+  },
+  "valid_random_contract": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": null
   }
 }

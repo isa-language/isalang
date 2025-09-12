@@ -963,43 +963,31 @@ class Resolver {
     }
     return e;
   }
-  bool uses(const ast::Expr &e, const std::string &name, SyntaxContext context) {
-    if (e.kind == ast::Expr::Name && e.text == name && e.loc.context == context)
+  bool uses(const hir::Expr &e, SymbolId symbol) {
+    if (e.kind == hir::Expr::Variable && e.ref == symbol)
       return true;
-    for (auto &a : e.args)
-      if (uses(a, name, context))
+    for (const auto &arg : e.args)
+      if (uses(arg, symbol))
         return true;
-    for (auto &s : e.body)
-      if (uses(s, name, context))
+    for (const auto &statement : e.body)
+      if (uses(statement, symbol))
         return true;
     return false;
   }
-  bool uses(const ast::Stmt &s, const std::string &name, SyntaxContext context) {
-    if (uses(s.expr, name, context) || uses(s.limit, name, context))
+  bool uses(const hir::Stmt &s, SymbolId symbol) {
+    if (uses(s.expr, symbol))
       return true;
-    for (auto &b : s.body)
-      if (uses(b, name, context))
-        return true;
-    for (auto &b : s.otherwise)
-      if (uses(b, name, context))
-        return true;
+    for (const auto *body : {&s.body, &s.otherwise, &s.latch})
+      for (const auto &statement : *body)
+        if (uses(statement, symbol))
+          return true;
     return false;
   }
   std::vector<hir::Stmt> block(const std::vector<ast::Stmt> &ss, bool keepScope = false) {
     scopes.emplace_back();
     std::vector<hir::Stmt> out;
-    std::map<size_t, std::vector<hir::Stmt>> endings;
+    std::vector<SymbolId> localReferences;
     for (size_t position = 0; position < ss.size(); ++position) {
-      struct EndRegions {
-        std::function<void()> action;
-        ~EndRegions() {
-          action();
-        }
-      } endRegions{[&] {
-        auto found = endings.find(position);
-        if (found != endings.end())
-          out.insert(out.end(), found->second.begin(), found->second.end());
-      }};
 
       auto a = ss[position];
       if (a.conditionalPattern) {
@@ -1032,22 +1020,11 @@ class Resolver {
                "reference binding requires matching & or &mut annotation");
         if (a.annotated)
           coerce(getType(a.annotation, true), borrowed.expr);
-        size_t last = position;
-        for (size_t n = position + 1; n < ss.size(); ++n)
-          if (uses(ss[n], a.name, a.loc.context))
-            last = n;
         borrowed.symbol = add(a.name, borrowed.expr.type, a.loc, borrowed.access);
         p.symbols[borrowed.symbol].reference = true;
+        p.symbols[borrowed.symbol].inferredRegion = !keepScope;
         p.symbols[borrowed.symbol].region = borrowed.expr.region;
-        p.symbols[borrowed.symbol].lastUse = ss[last].loc;
-        if (keepScope)
-          last = ss.size() - 1;
-        hir::Stmt end{};
-        end.unconditional = keepScope;
-        end.kind = hir::Stmt::BorrowEnd;
-        end.symbol = borrowed.symbol;
-        end.loc = ss[last].loc;
-        endings[last].push_back(end);
+        localReferences.push_back(borrowed.symbol);
         out.push_back(std::move(borrowed));
         continue;
       }
@@ -1488,6 +1465,25 @@ class Resolver {
       s.otherwise = blockNested(a.otherwise);
       out.push_back(std::move(s));
     }
+
+    std::map<size_t, std::vector<hir::Stmt>> endings;
+    for (auto symbol : localReferences) {
+      size_t last = 0;
+      for (size_t n = 0; n < out.size(); ++n)
+        if (out[n].symbol == symbol || uses(out[n], symbol))
+          last = n;
+      if (keepScope)
+        last = out.size() - 1;
+      p.symbols[symbol].lastUse = out[last].loc;
+      hir::Stmt end{};
+      end.kind = hir::Stmt::BorrowEnd;
+      end.unconditional = keepScope;
+      end.symbol = symbol;
+      end.loc = out[last].loc;
+      endings[last].push_back(end);
+    }
+    for (auto it = endings.rbegin(); it != endings.rend(); ++it)
+      out.insert(out.begin() + it->first + 1, it->second.begin(), it->second.end());
     if (!keepScope)
       scopes.pop_back();
     return out;
