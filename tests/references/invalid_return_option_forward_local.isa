@@ -1,0 +1,8 @@
+fn wrap(input: &String) -> Option<&String> {
+  return Option::Some(input);
+}
+fn bad(input: &String) -> Option<&String> {
+  let local = String::from("local");
+  return wrap(&local);
+}
+fn main() {}

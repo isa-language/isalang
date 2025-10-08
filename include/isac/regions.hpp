@@ -15,7 +15,7 @@ struct ProgramPoint {
 };
 enum class RegionKind { Local, Parameter, Return, Static };
 enum class ConstraintKind { ContainsPoint, Subregion };
-enum class ConstraintReason { BorrowCreation, LiveCarrier, Reborrow };
+enum class ConstraintReason { BorrowCreation, LiveCarrier, Reborrow, FunctionResult };
 struct Region {
   RegionId id;
   RegionKind kind;

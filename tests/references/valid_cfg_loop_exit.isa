@@ -1,0 +1,20 @@
+@import "std.box"
+fn run(stop: bool) {
+  let data = BoxI32::new(10);
+  let r = &data;
+  let i = 0;
+  while i < 2 {
+    if stop {
+      data.set(20);
+      break;
+    }
+    print(r.get());
+    i = i + 1;
+  }
+  data.set(30);
+  print(data.get());
+}
+fn main() {
+  run(true);
+  run(false);
+}

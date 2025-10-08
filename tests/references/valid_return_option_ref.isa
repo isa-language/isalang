@@ -1,0 +1,23 @@
+fn wrap(value: &String, present: bool) -> Option<&String> {
+  if present {
+    return Option::Some(value);
+  }
+  return Option::None;
+}
+fn main() {
+  let value = String::from("hello");
+  let result = wrap(&value, true);
+  match result {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+  value.push_str("!");
+  print(value);
+  let empty = wrap(&value, false);
+  match empty {
+    Option::Some(view) => print(view),
+    Option::None => print(0),
+  }
+  value.clear();
+  print(value.len());
+}

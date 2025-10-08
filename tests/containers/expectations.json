@@ -249,11 +249,6 @@
     "stdin": "",
     "stdout": ""
   },
-  "invalid_reference_parameter_escape": {
-    "code": "E6003",
-    "stdin": "",
-    "stdout": ""
-  },
   "valid_reference_parameter_early_return": {
     "code": null,
     "stdin": "",
@@ -536,6 +531,11 @@
   },
   "invalid_generic_impl_type": {
     "code": "E0200",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_reference_parameter_return": {
+    "code": null,
     "stdin": "",
     "stdout": ""
   }

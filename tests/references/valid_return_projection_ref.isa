@@ -1,0 +1,25 @@
+struct Data {
+  first: i32,
+  value: i32,
+}
+fn field(data: &Data) -> &i32 {
+  return &data.value;
+}
+fn first(values: &i32[]) -> &i32 {
+  return &values[0];
+}
+fn at(values: &i32[], index: usize) -> &i32 {
+  return &values[index];
+}
+fn main() {
+  let data = Data::new();
+  data.value = 42;
+  let r = field(&data);
+  print(r);
+  data.value = 99;
+  let values: i32[3] = [10, 20, 30];
+  let s = first(&values);
+  print(s);
+  let t = at(&values, 2);
+  print(t);
+}

@@ -355,17 +355,16 @@ class Resolver {
         fail(a.loc, DiagnosticCode::RestrictedOperation,
              "bundled heap types cannot be extended by application impls");
     }
-    if (a.result.reference)
+    if (a.result.mutableReference)
       fail(a.result.loc, DiagnosticCode::EscapingView,
-           "reference return requires an inferred input-region contract; returning local owners "
-           "is forbidden");
-    f.result = getType(a.result);
+           "unique reference returns require exclusive result-region contracts");
+    f.result = getType(a.result, a.result.reference);
     if (f.result == Str && f.intrinsic.empty())
       fail(f.loc, DiagnosticCode::EscapingView,
            "returning str views requires lifetime contracts, outside this PoC");
-    if (p.linear(f.result) && f.intrinsic.empty() &&
-        ((!p.heap(f.result) && p.needsDrop(f.result)) || p.containsReferences(f.result) ||
-         p.types[f.result].protocol != None))
+    f.resultBorrowedContainer = !a.result.reference && p.containsReferences(f.result);
+    if (!a.result.reference && p.linear(f.result) && f.intrinsic.empty() &&
+        ((!p.heap(f.result) && p.needsDrop(f.result)) || p.types[f.result].protocol != None))
       fail(a.loc, DiagnosticCode::InvalidPlace,
            "this resource return requires an allocation or region transfer contract");
     scopes.emplace_back();
@@ -406,6 +405,24 @@ class Resolver {
         p.symbols[f.params[0]].receiver && f.access != Access::Shared)
       fail(f.loc, DiagnosticCode::InvalidReceiver,
            "primitive extension methods currently require shared self");
+    if (a.result.reference || f.resultBorrowedContainer) {
+      for (const auto &region : f.parameterRegions) {
+        const auto &parameter = p.symbols[region.parameter];
+        if (parameter.access == Access::Shared &&
+            (f.resultBorrowedContainer ? p.borrowedPayloadResultCompatible(parameter.type, f.result)
+                                       : p.borrowResultCompatible(parameter.type, f.result))) {
+          if (f.resultOrigin != None)
+            fail(a.result.loc, DiagnosticCode::EscapingView,
+                 "reference return has multiple possible input origins; this subset requires one");
+          f.resultOrigin = parameter.id;
+        }
+      }
+      if (f.resultOrigin == None || f.external || !f.intrinsic.empty() || f.owner != None)
+        fail(a.result.loc, DiagnosticCode::EscapingView,
+             "reference return requires one compatible shared input-region contract; local owners "
+             "cannot escape");
+      f.resultRegion = nextRegion++;
+    }
     scopes.pop_back();
     f.consumesSelf = f.owner != None && p.types[f.owner].kind == hir::Type::Enum &&
                      !f.params.empty() && p.symbols[f.params[0]].receiver &&
@@ -531,9 +548,15 @@ class Resolver {
     if (a.kind == A::Borrow) {
       e.kind = H::Borrow;
       e.args.push_back(expr(a.args.at(0)));
-      if (e.args[0].kind != H::Variable)
+      const auto &source = e.args[0];
+      bool projection = (source.kind == H::Field || source.kind == H::Index) &&
+                        source.args[0].kind == H::Variable && scalar(source.type);
+      if (source.kind != H::Variable && !projection)
         fail(a.loc, DiagnosticCode::InvalidPlace,
-             "this reference increment requires a named owner or borrow");
+             "borrow requires a named owner or a direct scalar field/element projection");
+      if (projection && a.text == "unique")
+        fail(a.loc, DiagnosticCode::InvalidPlace,
+             "unique projection borrows require exclusive place contracts");
       e.type = e.args[0].type;
       e.borrowKind = a.text == "unique" ? BorrowKind::Unique : BorrowKind::Shared;
       e.region = nextRegion++;
@@ -961,6 +984,16 @@ class Resolver {
     default:
       fail(a.loc, DiagnosticCode::TypeMismatch, "unsupported expression");
     }
+    if (e.kind == H::Call && p.functions[e.ref].returnsReference()) {
+      hir::Expr borrowed{};
+      borrowed.kind = H::Borrow;
+      borrowed.loc = e.loc;
+      borrowed.type = e.type;
+      borrowed.borrowKind = BorrowKind::Shared;
+      borrowed.region = nextRegion++;
+      borrowed.args.push_back(std::move(e));
+      return borrowed;
+    }
     return e;
   }
   bool uses(const hir::Expr &e, SymbolId symbol) {
@@ -1007,11 +1040,15 @@ class Resolver {
         declareConstant(a);
         continue;
       }
-      if (a.kind == ast::Stmt::Let && a.expr.kind == ast::Expr::Borrow) {
+      std::optional<hir::Expr> initializer;
+      if (a.kind == ast::Stmt::Let)
+        initializer =
+            expr(a.expr, a.annotated ? getType(a.annotation, a.annotation.reference) : None);
+      if (initializer && initializer->kind == hir::Expr::Borrow) {
         hir::Stmt borrowed{};
         borrowed.kind = hir::Stmt::BorrowStart;
         borrowed.loc = a.loc;
-        borrowed.expr = expr(a.expr);
+        borrowed.expr = std::move(*initializer);
         borrowed.access =
             borrowed.expr.borrowKind == BorrowKind::Unique ? Access::Unique : Access::Shared;
         if (a.annotated && (!a.annotation.reference ||
@@ -1414,11 +1451,13 @@ class Resolver {
           out.push_back(std::move(s));
         continue;
       }
-      s.expr = expr(a.expr, a.kind == ast::Stmt::Return ? current->result
-                            : a.kind == ast::Stmt::Let && a.annotated
-                                ? getType(a.annotation, a.annotation.reference)
-                                : None);
-      if (s.expr.kind == hir::Expr::Borrow)
+      s.expr = initializer ? std::move(*initializer)
+                           : expr(a.expr, a.kind == ast::Stmt::Return ? current->result
+                                          : a.kind == ast::Stmt::Let && a.annotated
+                                              ? getType(a.annotation, a.annotation.reference)
+                                              : None);
+      if (s.expr.kind == hir::Expr::Borrow &&
+          !(a.kind == ast::Stmt::Return && current->returnsReference()))
         fail(a.loc, DiagnosticCode::EscapingView,
              "reference expression currently requires a local let binding; reference calls and "
              "returns need region contracts");
@@ -1439,8 +1478,15 @@ class Resolver {
         }
         s.symbol = add(a.name, s.expr.type, a.loc);
       }
-      if (a.kind == ast::Stmt::Return)
+      if (a.kind == ast::Stmt::Return) {
+        if (current->returnsReference() &&
+            !((s.expr.kind == hir::Expr::Variable && p.symbols[s.expr.ref].reference &&
+               p.symbols[s.expr.ref].access == Access::Shared) ||
+              (s.expr.kind == hir::Expr::Borrow && s.expr.borrowKind == BorrowKind::Shared)))
+          fail(s.expr.loc, DiagnosticCode::EscapingView,
+               "shared reference return requires a shared reference binding with an input origin");
         coerce(current->result, s.expr);
+      }
       if (a.kind == ast::Stmt::If)
         same(Bool, s.expr.type, a.loc);
       if (a.kind == ast::Stmt::Borrow) {
@@ -2154,7 +2200,13 @@ void printHIR(const hir::Program &p, std::ostream &o) {
     o << "\n";
     for (const auto &region : f.parameterRegions)
       o << "  region.contract #v" << region.parameter << " #R" << region.region << " "
-        << (region.kind == BorrowKind::Shared ? "Shared" : "Unique") << " caller-owned noescape\n";
+        << (region.kind == BorrowKind::Shared ? "Shared" : "Unique") << " caller-owned"
+        << (region.parameter == f.resultOrigin ? " result-bound\n" : " noescape\n");
+    if (f.resultBorrowedContainer)
+      o << "  result.payload-regions: Shared borrowed container\n";
+    if (f.resultOrigin != None)
+      o << "  return.region #R" << f.resultRegion << " <= #R" << p.symbols[f.resultOrigin].region
+        << " origin=#v" << f.resultOrigin << "\n";
     printS(f.body, o, 2);
   }
 }

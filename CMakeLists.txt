@@ -59,6 +59,8 @@ target_link_libraries(
           MLIRFuncDialect
           MLIRMemRefDialect
           MLIRLLVMDialect
+          MLIRMemRefTransforms
+          MLIRAffineToStandard
           MLIRArithToLLVM
           MLIRControlFlowToLLVM
           MLIRFuncToLLVM

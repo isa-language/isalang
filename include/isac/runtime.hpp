@@ -13,6 +13,7 @@ struct Type {
   uint32_t width = 0;
   unsigned elementBits = 32;
   bool isSigned = true;
+  bool dynamicOffset = false;
   bool operator==(const Type &) const = default;
 };
 struct Instruction {
@@ -40,7 +41,8 @@ struct Instruction {
     RecordAlloc,
     View,
     Length,
-    IndexCheck
+    IndexCheck,
+    Subview
   } kind;
   Value result = NoValue;
   Type type;

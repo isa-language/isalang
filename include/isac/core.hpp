@@ -66,6 +66,8 @@ struct Inst {
   SymbolId slot = None;
   uint32_t offset = 0;
   uint32_t projection = 0;
+  enum class PlaceProjection { None, Field, Index } placeProjection = PlaceProjection::None;
+  uint32_t fieldIndex = None;
   uint32_t loop = None;
   bool unconditional = false;
   FunctionId function = None;

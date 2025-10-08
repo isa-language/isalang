@@ -25,6 +25,19 @@ class Eraser {
                : T{floating(t) ? T::Float : T::Scalar, 1,
                    bitWidth(t, core.semantics.target.pointerWidth), signedType(t)};
   }
+  T referenceType(TypeId t) {
+    return scalar(t) ? T{T::Buffer, 1, 64, true, true} : type(t);
+  }
+  runtime::Value referenceView(std::vector<I> &out, runtime::Value value, TypeId t) {
+    auto target = referenceType(t);
+    if (runtimeTypes.at(value) == target)
+      return value;
+    I view{};
+    view.kind = I::View;
+    view.type = target;
+    view.args = {value};
+    return emit(out, view);
+  }
   unsigned recordWords(TypeId tid) const {
     auto representation = core.semantics.types[tid].representation;
     return representation == hir::Representation::StringRecord  ? 3
@@ -145,8 +158,10 @@ class Eraser {
         destroy(out, c.type, i.args.at(0));
       switch (c.kind) {
       case C::StoreReference:
-      case C::ReferenceArgument:
         values[c.result] = slots.at(c.slot);
+        break;
+      case C::ReferenceArgument:
+        values[c.result] = referenceView(out, slots.at(c.slot), c.type);
         break;
       case C::StaticStr:
         i.kind = I::StaticStr;
@@ -345,7 +360,27 @@ class Eraser {
         break;
       case C::BorrowShared:
       case C::BorrowUnique:
-        if (c.projection) {
+        if (c.placeProjection != C::PlaceProjection::None) {
+          auto source = slots.at(c.slot);
+          runtime::Value index;
+          if (c.placeProjection == C::PlaceProjection::Field) {
+            auto sourceType = core.semantics.symbols[c.slot].type;
+            index =
+                constant(out, core.semantics.types[sourceType].fields[c.fieldIndex].offset, true);
+          } else {
+            index = i.args.at(0);
+            I check{};
+            check.kind = I::IndexCheck;
+            check.args = {source, index};
+            emit(out, check, false);
+          }
+          i.kind = I::Subview;
+          i.type = referenceType(c.type);
+          i.args = {source, index};
+          slots[c.offset] = emit(out, i);
+        } else if (!c.args.empty())
+          slots[c.offset] = values.at(c.args[0]);
+        else if (c.projection) {
           auto value = project(out, slots.at(c.slot), c.projection, c.type);
           if (scalar(c.type)) {
             I alloc{};
@@ -406,9 +441,17 @@ class Eraser {
         i.callee = core.semantics.functions[c.function].intrinsic.empty()
                        ? name(c.function)
                        : intrinsicRuntimeSymbol(core.semantics.functions[c.function].intrinsicId);
-        if (c.slot != None)
-          i.args.insert(i.args.begin(), slots.at(c.slot));
-        if (i.type.kind == T::Buffer || recordWords(c.type)) {
+        if (c.slot != None) {
+          auto source = slots.at(c.slot);
+          auto tid = core.semantics.symbols[c.slot].type;
+          if (scalar(tid))
+            source = referenceView(out, source, tid);
+          i.args.insert(i.args.begin(), source);
+        }
+        if (core.semantics.functions[c.function].returnsReference()) {
+          i.type = referenceType(c.type);
+          values[c.result] = emit(out, i);
+        } else if (i.type.kind == T::Buffer || recordWords(c.type)) {
           I alloc{};
           alloc.kind = recordWords(c.type) ? I::RecordAlloc : I::Alloc;
           alloc.literal = recordWords(c.type);
@@ -498,7 +541,9 @@ public:
       f.result = type(hf.result);
       returnStorage = runtime::NoValue;
       returnType = hf.result;
-      if (f.result.kind == T::Buffer || recordWords(hf.result)) {
+      if (hf.returnsReference()) {
+        f.result = referenceType(hf.result);
+      } else if (f.result.kind == T::Buffer || recordWords(hf.result)) {
         returnStorage = p.values++;
         runtimeTypes[returnStorage] = f.result;
         f.params.push_back({returnStorage, f.result});
@@ -509,7 +554,7 @@ public:
         auto t = type(core.semantics.symbols[sid].type);
         if ((core.semantics.symbols[sid].receiver || core.semantics.symbols[sid].reference) &&
             scalar(core.semantics.symbols[sid].type))
-          t = {T::Buffer, 1, 64};
+          t = referenceType(core.semantics.symbols[sid].type);
         auto v = p.values++;
         f.params.push_back({v, t});
         runtimeTypes[v] = t;

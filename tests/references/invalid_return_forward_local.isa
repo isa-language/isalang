@@ -1,0 +1,8 @@
+fn identity(value: &String) -> &String {
+  return value;
+}
+fn bad(value: &String) -> &String {
+  let local = String::from("local");
+  return identity(&local);
+}
+fn main() {}

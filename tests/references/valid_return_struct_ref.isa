@@ -1,0 +1,20 @@
+struct Data {
+  value: i32,
+}
+fn identity(value: &Data, condition: bool) -> &Data {
+  if condition {
+    return &value;
+  }
+  let alias = &value;
+  return alias;
+}
+fn main() {
+  let data = Data::new();
+  data.value = 42;
+  let r = identity(&data, true);
+  print(r.value);
+  let s = identity(&data, false);
+  print(s.value);
+  data.value = 43;
+  print(data.value);
+}

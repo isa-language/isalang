@@ -9,7 +9,7 @@
 int main(int argc, char **argv) {
   const char *usage =
       "usage: isac file.isa [--check | --emit-tokens | --emit-ast | --emit-hir | "
-      "--emit-expanded | --emit-regions | --emit-core | --emit-erased | --emit-lir | "
+      "--emit-expanded | --emit-regions | --emit-region-constraints | --emit-core | --emit-erased | --emit-lir | "
       "--emit-liveness | --emit-mlir "
       "| --emit-std-mlir | "
       "--emit-llvm-dialect | --emit-llvm | --emit-asm | --emit-obj | -o executable "

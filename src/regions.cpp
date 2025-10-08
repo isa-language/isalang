@@ -48,6 +48,10 @@ class Builder {
       loan.region = i.region;
       loan.carrier = i.offset;
       loan.place.root = i.slot;
+      if (i.placeProjection == I::PlaceProjection::Field)
+        loan.place.projections.push_back({ProjectionKind::Field, i.fieldIndex});
+      else if (i.placeProjection == I::PlaceProjection::Index)
+        loan.place.projections.push_back({ProjectionKind::Index, None});
       if (i.projection)
         loan.place.projections.push_back({ProjectionKind::VariantPayload, i.projection});
       loan.capability = i.kind == I::BorrowShared ? BorrowKind::Shared : BorrowKind::Unique;
@@ -118,6 +122,25 @@ public:
   }
   FunctionGraph run() {
 
+    bool originsChanged = true;
+    while (originsChanged) {
+      originsChanged = false;
+      for (auto *i : instructions) {
+        if (!i || i->kind != I::Call || referenceArguments.contains(i->result))
+          continue;
+        const auto &target = program.semantics.functions[i->function];
+        if (!target.returnsReference())
+          continue;
+        auto index = std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
+                     target.params.begin();
+        auto argument = i->args.at(index);
+        if (referenceArguments.contains(argument)) {
+          referenceArguments[i->result] = referenceArguments.at(argument);
+          originsChanged = true;
+        }
+      }
+    }
+
     for (auto &b : graph.blocks)
       for (auto value : b.valueUses)
         if (referenceArguments.contains(value))
@@ -182,6 +205,25 @@ public:
                                      ConstraintReason::Reborrow,
                                      loan.origin});
       }
+    }
+    const auto &signature = program.semantics.functions[graph.function];
+    if (signature.resultOrigin != None) {
+      graph.regions.emplace(signature.resultRegion,
+                            Region{signature.resultRegion, RegionKind::Return, {}});
+      graph.constraints.push_back({ConstraintKind::Subregion,
+                                   signature.resultRegion,
+                                   program.semantics.symbols[signature.resultOrigin].region,
+                                   {},
+                                   ConstraintReason::FunctionResult,
+                                   signature.loc});
+      for (const auto &b : graph.blocks)
+        if (b.reachable && b.terminator == Terminator::Return)
+          graph.constraints.push_back({ConstraintKind::ContainsPoint,
+                                       signature.resultRegion,
+                                       None,
+                                       {b.id, 0},
+                                       ConstraintReason::FunctionResult,
+                                       b.origin});
     }
 
     for (const auto &constraint : graph.constraints)
@@ -258,6 +300,12 @@ void print(const core::Program &p, std::ostream &out) {
           << (loan.capability == BorrowKind::Shared ? "Shared" : "Unique")
           << " owner=" << p.semantics.symbols.at(loan.place.root).name << "#v" << loan.place.root
           << " carrier=#v" << loan.carrier << (loan.inferred ? " inferred" : " lexical") << "\n";
+      for (const auto &projection : loan.place.projections)
+        out << "    place projection="
+            << (projection.kind == ProjectionKind::Field   ? "Field"
+                : projection.kind == ProjectionKind::Index ? "Index"
+                                                           : "VariantPayload")
+            << " #" << projection.index << "\n";
       out << "    live points:";
       for (auto point : loan.points)
         out << " bb" << point << ":0";
@@ -274,11 +322,14 @@ void printConstraints(const core::Program &p, std::ostream &out) {
     for (const auto &constraint : graph.constraints) {
       out << "  #R" << constraint.region;
       if (constraint.kind == ConstraintKind::Subregion)
-        out << " <= #R" << constraint.upper << " reason=Reborrow";
+        out << " <= #R" << constraint.upper << " reason="
+            << (constraint.reason == ConstraintReason::FunctionResult ? "FunctionResult"
+                                                                      : "Reborrow");
       else
         out << " contains bb" << constraint.point.block << ":0 reason="
-            << (constraint.reason == ConstraintReason::BorrowCreation ? "BorrowCreation"
-                                                                      : "LiveCarrier");
+            << (constraint.reason == ConstraintReason::BorrowCreation   ? "BorrowCreation"
+                : constraint.reason == ConstraintReason::FunctionResult ? "FunctionResult"
+                                                                        : "LiveCarrier");
       out << " at " << constraint.origin.line << ":" << constraint.origin.column << "\n";
     }
   }

@@ -2,6 +2,7 @@ enum Pair<T> {
   Both(T, String),
   Empty,
 }
+
 fn main() -> i32 {
   let text = String::from("borrowed");
   let owned = String::from("owned");

@@ -1,0 +1,19 @@
+fn find(text: &String, present: bool) -> Option<&String> {
+  if present {
+    return Option::Some(text);
+  }
+  return Option::None;
+}
+
+fn main() {
+  let text = String::from("Isalang");
+  let result = find(&text, true);
+
+  match result {
+    Option::Some(view) => print(view),
+    Option::None => print("not found"),
+  }
+
+  text.push_str("!");
+  print(text);
+}

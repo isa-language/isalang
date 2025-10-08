@@ -1,0 +1,11 @@
+fn identity(value: &i32) -> &i32 {
+  return value;
+}
+fn main() {
+  let data = 10;
+  let r = identity(&data);
+  print(r);
+  let w = &mut data;
+  w = 20;
+  print(data);
+}

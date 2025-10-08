@@ -1,0 +1,20 @@
+struct Data {
+  a: i32,
+  b: i32,
+}
+fn index() -> usize {
+  print(7);
+  return 1;
+}
+fn main() {
+  let data = Data::new();
+  data.b = 42;
+  let field = &data.b;
+  print(field);
+  data.b = 43;
+  let values: i32[2] = [10, 20];
+  let element = &values[index()];
+  print(element);
+  values[1] = 30;
+  print(values[1]);
+}

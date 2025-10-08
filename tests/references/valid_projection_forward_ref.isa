@@ -1,0 +1,19 @@
+struct Data {
+  value: i32,
+}
+fn field(data: &Data) -> &i32 {
+  return &data.value;
+}
+fn relay(data: &Data) -> &i32 {
+  return field(data);
+}
+fn read(value: &i32) -> i32 {
+  return value;
+}
+fn main() {
+  let data = Data::new();
+  data.value = 21;
+  print(read(relay(&data)));
+  data.value = 22;
+  print(data.value);
+}

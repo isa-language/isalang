@@ -1,0 +1,15 @@
+fn identity(value: &String) -> &String {
+  return value;
+}
+fn main() {
+  let data = String::from("stored");
+  let wrapped = Option::Some(identity(&data));
+  match wrapped {
+    Option::Some(view) => {
+      print(view);
+    },
+    Option::None => {},
+  }
+  data.push_str("!");
+  print(data);
+}

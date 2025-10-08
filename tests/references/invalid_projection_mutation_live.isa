@@ -1,0 +1,9 @@
+fn first(values: &i32[]) -> &i32 {
+  return &values[0];
+}
+fn main() {
+  let values: i32[2] = [10, 20];
+  let r = first(&values);
+  values[1] = 30;
+  print(r);
+}

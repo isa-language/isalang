@@ -1,0 +1,13 @@
+fn identity(value: &String) -> &String {
+  return value;
+}
+fn relay(value: &String) -> &String {
+  return identity(value);
+}
+fn main() {
+  let data = String::from("hello");
+  let r = relay(&data);
+  print(r);
+  data.push_str("!");
+  print(data);
+}

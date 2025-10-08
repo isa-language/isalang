@@ -9,6 +9,8 @@ class Builder {
   Program p;
   std::vector<Inst> *out = nullptr;
   std::vector<SymbolId> temporaries;
+  std::map<ValueId, SymbolId> referenceResults;
+  bool referenceReturn = false;
   Inst make(Inst::Kind k, Loc l, TypeId t = Unit) {
     Inst i{};
     i.kind = k;
@@ -24,10 +26,39 @@ class Builder {
     out->push_back(std::move(i));
     return v;
   }
+  void borrowSource(const hir::Expr &e, Inst &binding) {
+    const auto &source = e.args.at(0);
+    if (source.kind == hir::Expr::Call) {
+      auto value = expr(source);
+      binding.slot = referenceResults.at(value);
+      binding.args = {value};
+    } else if (source.kind == hir::Expr::Field || source.kind == hir::Expr::Index) {
+      binding.slot = source.args.at(0).ref;
+      if (source.kind == hir::Expr::Field) {
+        binding.placeProjection = Inst::PlaceProjection::Field;
+        const auto &fields = p.semantics.types[source.args[0].type].fields;
+        auto field = std::find_if(fields.begin(), fields.end(),
+                                  [&](const auto &f) { return f.offset == source.ref; });
+        binding.fieldIndex = field - fields.begin();
+      } else {
+        binding.placeProjection = Inst::PlaceProjection::Index;
+        if (source.ref != None) {
+          auto index = make(Inst::Constant, source.loc, USize);
+          index.text = std::to_string(source.ref);
+          binding.args = {emit(index)};
+        } else
+          binding.args = {expr(source.args.at(1))};
+      }
+    } else
+      binding.slot = source.ref;
+  }
   SymbolId receiver(const hir::Expr &e) {
     if (e.kind == hir::Expr::Variable)
       return e.ref;
     auto value = e.kind == hir::Expr::Borrow ? None : expr(e);
+    Inst source{};
+    if (e.kind == hir::Expr::Borrow)
+      borrowSource(e, source);
     SymbolId id = p.semantics.symbols.size();
     hir::Symbol symbol{id,   "$temporary" + std::to_string(id), e.type, Access::Own, false, false,
                        e.loc};
@@ -38,7 +69,11 @@ class Builder {
       symbol.reference = true;
       symbol.access = e.borrowKind == BorrowKind::Shared ? Access::Shared : Access::Unique;
       binding.kind = e.borrowKind == BorrowKind::Shared ? Inst::BorrowShared : Inst::BorrowUnique;
-      binding.slot = e.args.at(0).ref;
+      binding.slot = source.slot;
+      binding.args = std::move(source.args);
+      binding.placeProjection = source.placeProjection;
+      binding.fieldIndex = source.fieldIndex;
+      symbol.region = e.region;
       binding.offset = id;
       binding.region = e.region;
       binding.access = symbol.access;
@@ -267,7 +302,9 @@ class Builder {
           auto argument = make(Inst::ReferenceArgument, e.args[n].loc, e.args[n].type);
           argument.slot = receiver(e.args[n]);
           argument.access = p.semantics.symbols[f.params[n]].access;
-          i.args.push_back(emit(argument));
+          auto value = emit(argument);
+          referenceResults[value] = argument.slot;
+          i.args.push_back(value);
         } else
           i.args.push_back(expr(e.args[n]));
       }
@@ -297,7 +334,12 @@ class Builder {
         else if (f.name == "isac_rt_memmove")
           i.kind = Inst::MemMove;
       }
-      return emit(i, e.type != Unit || i.kind == Inst::ProtocolTransition);
+      auto result = emit(i, e.type != Unit || i.kind == Inst::ProtocolTransition);
+      if (f.returnsReference()) {
+        auto index = std::find(f.params.begin(), f.params.end(), f.resultOrigin) - f.params.begin();
+        referenceResults[result] = referenceResults.at(i.args.at(index));
+      }
+      return result;
     }
     }
     fail(e.loc, DiagnosticCode::InternalError, "unhandled HIR expression");
@@ -334,7 +376,12 @@ class Builder {
       }
       case hir::Stmt::Return:
         i.kind = Inst::Return;
-        if (s.expr.type != Unit)
+        if (referenceReturn) {
+          auto reference = make(Inst::ReferenceArgument, s.expr.loc, s.expr.type);
+          reference.slot = receiver(s.expr);
+          reference.access = Access::Shared;
+          i.args = {emit(reference)};
+        } else if (s.expr.type != Unit)
           i.args = {expr(s.expr)};
         emit(i, false);
         break;
@@ -416,7 +463,7 @@ class Builder {
       case hir::Stmt::BorrowStart:
       case hir::Stmt::Borrow:
         i.kind = s.access == Access::Shared ? Inst::BorrowShared : Inst::BorrowUnique;
-        i.slot = s.expr.args.at(0).ref;
+        borrowSource(s.expr, i);
         i.region = s.expr.region;
         i.projection = s.expr.ref == None ? 0 : s.expr.ref;
         i.offset = s.symbol;
@@ -457,6 +504,8 @@ public:
     for (auto &f : p.semantics.functions) {
       if (f.external || !f.intrinsic.empty())
         continue;
+      referenceReturn = f.returnsReference();
+      referenceResults.clear();
       Function cf{f.id, block(f.body), {}};
       for (auto id : f.params) {
         (void)id;
@@ -1065,6 +1114,10 @@ class Checker {
         break;
       case Inst::BorrowShared:
       case Inst::BorrowUnique: {
+        if (i.placeProjection == Inst::PlaceProjection::None && !i.args.empty() &&
+            (!c.references.contains(i.args[0]) || c.references.at(i.args[0]) != i.slot))
+          fail(i.loc, DiagnosticCode::InvalidCore,
+               "returned borrow origin does not match call contract");
         if (i.projection) {
           if (!c.variants.contains(i.slot))
             fail(i.loc, DiagnosticCode::InvalidCore, "payload borrow requires a proven variant");
@@ -1122,8 +1175,29 @@ class Checker {
       case Inst::Call:
       case Inst::ProtocolTransition:
         call(i, c);
-        if (i.kind == Inst::Call && p.semantics.linear(i.type))
+        if (p.semantics.functions[i.function].returnsReference()) {
+          const auto &target = p.semantics.functions[i.function];
+          auto index = std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
+                       target.params.begin();
+          c.references[i.result] = c.references.at(i.args.at(index));
+        } else if (i.kind == Inst::Call && p.semantics.linear(i.type)) {
           c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
+          const auto &target = p.semantics.functions[i.function];
+          if (target.resultBorrowedContainer) {
+            auto index =
+                std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
+                target.params.begin();
+            auto alias = c.references.at(i.args.at(index));
+            const auto &source = live(c, alias, i.loc);
+            auto origin = source.root == None ? alias : source.root;
+            auto &owner = live(c, origin, i.loc);
+            for (auto offset : p.semantics.borrowedPayloadOffsets(i.type)) {
+              c.values[i.result].loans[offset] = origin;
+              ++owner.shared;
+            }
+            owner.borrowAt = i.loc;
+          }
+        }
         break;
       case Inst::ScopeEnd:
         for (auto it = i.locals.rbegin(); it != i.locals.rend(); ++it)
@@ -1132,10 +1206,43 @@ class Checker {
           c.vars.erase(id);
         break;
       case Inst::Return:
-        if (p.semantics.linear(function->result)) {
+        if (function->returnsReference()) {
+          auto alias = c.references.at(i.args.at(0));
+          const auto &borrow = live(c, alias, i.loc);
+          auto origin = borrow.root == None ? alias : borrow.root;
+          if (origin != function->resultOrigin) {
+            DiagnosticEngine()
+                .error(DiagnosticCode::EscapingView, i.loc,
+                       "reference to local value escapes the function")
+                .label(i.loc, "reference returned here")
+                .secondary(symbol(origin).loc, "owner `" + symbol(origin).name + "` created here")
+                .note("the result must borrow from input `" + symbol(function->resultOrigin).name +
+                      "`")
+                .help("return a reference to the input, or transfer ownership of the local value")
+                .emit();
+          }
+        } else if (p.semantics.linear(function->result)) {
           auto &result = take(c, i.args.at(0), i.loc);
-          if (!result.loans.empty() || result.state != None ||
-              result.allocation != p.semantics.needsDrop(function->result))
+          if (function->resultBorrowedContainer) {
+            const auto allowed = p.semantics.borrowedPayloadOffsets(function->result);
+            for (auto [offset, origin] : result.loans) {
+              if (!allowed.contains(offset))
+                fail(i.loc, DiagnosticCode::InvalidCore, "invalid returned payload path");
+              if (origin != function->resultOrigin)
+                DiagnosticEngine()
+                    .error(DiagnosticCode::EscapingView, i.loc,
+                           "reference stored in returned container escapes its local owner")
+                    .label(i.loc, "container returned here")
+                    .secondary(symbol(origin).loc,
+                               "owner `" + symbol(origin).name + "` created here")
+                    .note("the payload must borrow from input `" +
+                          symbol(function->resultOrigin).name + "`")
+                    .help("borrow from the input or return an owned payload")
+                    .emit();
+            }
+          }
+          if ((!function->resultBorrowedContainer && !result.loans.empty()) ||
+              result.state != None || result.allocation != p.semantics.needsDrop(function->result))
             fail(i.loc, DiagnosticCode::InvalidCore, "unsupported resource return contract");
         }
         finish(c, i.loc, i);
@@ -1383,6 +1490,10 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
       o << " variant=#V" << i.offset;
     if (i.kind == Inst::Read || i.kind == Inst::Write)
       o << " offset=" << i.offset;
+    if (i.placeProjection == Inst::PlaceProjection::Field)
+      o << " place.field=#" << i.fieldIndex;
+    if (i.placeProjection == Inst::PlaceProjection::Index)
+      o << " place.index";
     if (i.region != None)
       o << " region=#R" << i.region;
     if (i.kind == Inst::BorrowShared || i.kind == Inst::BorrowUnique)
@@ -1451,8 +1562,13 @@ void print(const Program &p, std::ostream &o) {
         << "<" << accessName(s.access) << ">\n";
     }
     for (const auto &region : hf.parameterRegions)
-      o << "  region.contract #v" << region.parameter << " #R" << region.region
-        << " caller-owned noescape\n";
+      o << "  region.contract #v" << region.parameter << " #R" << region.region << " caller-owned"
+        << (region.parameter == hf.resultOrigin ? " result-bound\n" : " noescape\n");
+    if (hf.resultBorrowedContainer)
+      o << "  result.payload-regions: Shared borrowed container\n";
+    if (hf.resultOrigin != None)
+      o << "  return.region #R" << hf.resultRegion << " <= #R"
+        << p.semantics.symbols[hf.resultOrigin].region << " origin=#v" << hf.resultOrigin << "\n";
     if (!hf.operations.empty()) {
       const auto &protocol = p.semantics.protocols[p.semantics.types[hf.owner].protocol];
       for (auto id : hf.operations)

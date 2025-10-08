@@ -1,0 +1,25 @@
+fn find(value: &String, ok: bool) -> Result<&String, i32> {
+  if ok {
+    return Result::Ok(value);
+  }
+  return Result::Err(7);
+}
+fn relay(value: &String, ok: bool) -> Result<&String, i32> {
+  return find(value, ok);
+}
+fn main() {
+  let value = String::from("result");
+  let first = relay(&value, true);
+  let moved = first.move();
+  match moved {
+    Result::Ok(view) => print(view),
+    Result::Err(error) => print(error),
+  }
+  let second = relay(&value, false);
+  match second {
+    Result::Ok(view) => print(view),
+    Result::Err(error) => print(error),
+  }
+  value.clear();
+  print(value.len());
+}

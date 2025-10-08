@@ -1,0 +1,31 @@
+enum Views<T> {
+  Both(T, T),
+  Empty,
+}
+fn pair(value: &String, full: bool) -> Views<&String> {
+  if full {
+    return Views::Both(value, value);
+  }
+  return Views::Empty;
+}
+fn main() {
+  let value = String::from("pair");
+  let views = pair(&value, true);
+  match views {
+    Views::Both(a, b) => {
+      print(a);
+      print(b);
+    },
+    Views::Empty => {},
+  }
+  let empty = pair(&value, false);
+  match empty {
+    Views::Both(a, b) => {
+      print(a);
+      print(b);
+    },
+    Views::Empty => {},
+  }
+  value.push_str("!");
+  print(value);
+}

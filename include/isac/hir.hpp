@@ -3,6 +3,7 @@
 #include "isac/intrinsics.hpp"
 #include "isac/target.hpp"
 #include <limits>
+#include <set>
 namespace isac {
 using GenericDeclId = uint32_t;
 using TypeParamId = uint32_t;
@@ -188,6 +189,12 @@ struct Function {
   Access access = Access::Own;
   std::vector<SymbolId> params;
   std::vector<ParameterRegion> parameterRegions;
+  SymbolId resultOrigin = None;
+  bool resultBorrowedContainer = false;
+  bool returnsReference() const {
+    return resultOrigin != None && !resultBorrowedContainer;
+  }
+  RegionId resultRegion = None;
   std::vector<OperationId> operations;
   std::vector<Stmt> body = {};
   Loc loc;
@@ -259,6 +266,44 @@ struct Program {
     for (size_t n = 0; n < index; ++n)
       offset += storageWidth(payload.at(n));
     return offset;
+  }
+
+  bool borrowResultCompatible(TypeId input, TypeId result) const {
+    if (input == result)
+      return true;
+    if (!scalar(result))
+      return false;
+    const auto &from = types.at(input);
+    if (from.kind == Type::Array || from.kind == Type::Slice)
+      return from.element == result;
+    if (from.kind == Type::Structure && from.representation == Representation::Stack)
+      for (const auto &field : from.fields)
+        if (field.type == result)
+          return true;
+    return false;
+  }
+  bool borrowedPayloadResultCompatible(TypeId input, TypeId result) const {
+    if (types.at(result).kind != Type::Enum || needsDrop(result))
+      return false;
+    bool found = false;
+    for (const auto &variant : types[result].variants)
+      for (auto payload : variant.payload) {
+        if (reference(payload)) {
+          if (types[payload].element != input)
+            return false;
+          found = true;
+        } else if (containsReferences(payload))
+          return false;
+      }
+    return found;
+  }
+  std::set<uint32_t> borrowedPayloadOffsets(TypeId result) const {
+    std::set<uint32_t> offsets;
+    for (const auto &variant : types.at(result).variants)
+      for (size_t n = 0; n < variant.payload.size(); ++n)
+        if (reference(variant.payload[n]))
+          offsets.insert(payloadOffset(result, variant.id, n));
+    return offsets;
   }
   bool reference(TypeId t) const {
     return types[t].kind == Type::Reference;

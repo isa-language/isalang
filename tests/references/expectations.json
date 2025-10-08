@@ -123,5 +123,140 @@
     "code": "E0312",
     "stdin": "",
     "stdout": ""
+  },
+  "valid_cfg_loop_exit": {
+    "code": null,
+    "stdin": "",
+    "stdout": "30\n10\n10\n30\n"
+  },
+  "invalid_cfg_loop_exit_live": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_cfg_continue_live": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_return_parameter_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "10\n20\n"
+  },
+  "valid_return_forward_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "hello\nhello!\n"
+  },
+  "valid_return_slice_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "3\n20\n"
+  },
+  "valid_return_struct_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "42\n42\n43\n"
+  },
+  "valid_return_ref_stored": {
+    "code": null,
+    "stdin": "",
+    "stdout": "stored\nstored!\n"
+  },
+  "invalid_return_local_origin": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_return_ref_mutation": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_return_ref_drop": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_return_ref_ambiguous": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_return_forward_local": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_return_projection_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "42\n10\n30\n"
+  },
+  "valid_projection_local_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "42\n7\n20\n30\n"
+  },
+  "valid_projection_forward_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "21\n22\n"
+  },
+  "invalid_projection_return_local": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_projection_return_array_local": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_projection_mutation_live": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_projection_drop_live": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_return_option_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "hello\nhello!\n0\n0\n"
+  },
+  "valid_return_result_ref": {
+    "code": null,
+    "stdin": "",
+    "stdout": "result\n7\n0\n"
+  },
+  "valid_return_generic_reference_payloads": {
+    "code": null,
+    "stdin": "",
+    "stdout": "pair\npair\npair!\n"
+  },
+  "invalid_return_option_local_ref": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_return_option_forward_local": {
+    "code": "E6003",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_return_option_mutation": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_return_option_move_drop": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
   }
 }

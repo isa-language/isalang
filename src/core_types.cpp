@@ -1,4 +1,5 @@
 #include "isac/core.hpp"
+#include <algorithm>
 #include <functional>
 #include <map>
 
@@ -19,7 +20,25 @@ void checkTypes(const Program &p) {
         function.access == Access::Own;
     if (function.consumesSelf != consuming)
       fail(function.loc, DiagnosticCode::InvalidCore, "invalid consuming receiver contract");
-    if (!function.external && function.intrinsic.empty() &&
+    if (function.resultBorrowedContainer !=
+        (function.resultOrigin != None && p.semantics.containsReferences(function.result)))
+      fail(function.loc, DiagnosticCode::InvalidCore, "invalid borrowed-container result contract");
+    if ((function.resultOrigin == None) != (function.resultRegion == None))
+      fail(function.loc, DiagnosticCode::InvalidCore, "incomplete reference result contract");
+    if (function.resultOrigin != None) {
+      if (function.resultOrigin >= p.semantics.symbols.size() || function.external ||
+          !function.intrinsic.empty() || function.owner != None ||
+          std::find(function.params.begin(), function.params.end(), function.resultOrigin) ==
+              function.params.end())
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid reference result origin");
+      const auto &origin = p.semantics.symbols[function.resultOrigin];
+      if (!origin.reference || origin.access != Access::Shared ||
+          !(function.resultBorrowedContainer
+                ? p.semantics.borrowedPayloadResultCompatible(origin.type, function.result)
+                : p.semantics.borrowResultCompatible(origin.type, function.result)))
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid reference result contract");
+    }
+    if (function.resultOrigin == None && !function.external && function.intrinsic.empty() &&
         (p.semantics.containsReferences(function.result) ||
          p.semantics.types.at(function.result).protocol != None ||
          (!p.semantics.heap(function.result) && p.semantics.needsDrop(function.result))))
@@ -61,7 +80,8 @@ void checkTypes(const Program &p) {
         };
         for (auto value : i.args)
           if (references.contains(value) && i.kind != Inst::Call &&
-              i.kind != Inst::ProtocolTransition)
+              i.kind != Inst::ProtocolTransition && i.kind != Inst::Return &&
+              i.kind != Inst::BorrowShared)
             bad();
         auto expect = [&](TypeId got, TypeId wanted) {
           if (got != wanted)
@@ -97,10 +117,38 @@ void checkTypes(const Program &p) {
           break;
         case Inst::BorrowShared:
         case Inst::BorrowUnique: {
+          if (i.placeProjection != Inst::PlaceProjection::None) {
+            const auto &source = p.semantics.types[slot()];
+            if (i.kind != Inst::BorrowShared || i.projection || !scalar(i.type))
+              bad();
+            if (i.placeProjection == Inst::PlaceProjection::Field) {
+              if (source.kind != hir::Type::Structure ||
+                  source.representation != hir::Representation::Stack ||
+                  i.fieldIndex >= source.fields.size() || !i.args.empty())
+                bad();
+              expect(source.fields.at(i.fieldIndex).type, i.type);
+            } else {
+              if ((source.kind != hir::Type::Array && source.kind != hir::Type::Slice) ||
+                  i.args.size() != 1)
+                bad();
+              expect(source.element, i.type);
+              expect(arg(0), USize);
+              if (references.contains(i.args[0]))
+                bad();
+            }
+          } else if (!i.args.empty()) {
+            if (i.kind != Inst::BorrowShared || i.args.size() != 1 ||
+                !references.contains(i.args[0]) || references.at(i.args[0]) != Access::Shared ||
+                i.projection)
+              bad();
+            expect(arg(0), i.type);
+          }
           if (i.offset >= p.semantics.symbols.size())
             bad();
           expect(p.semantics.symbols.at(i.offset).type, i.type);
-          if (!i.projection) {
+          if (i.placeProjection != Inst::PlaceProjection::None || !i.args.empty()) {
+
+          } else if (!i.projection) {
             const auto &from = p.semantics.types[slot()];
             const auto &to = p.semantics.types[i.type];
             if (!(from.kind == hir::Type::Array && to.kind == hir::Type::Slice &&
@@ -263,6 +311,12 @@ void checkTypes(const Program &p) {
           expect(arg(0), Bool);
           break;
         case Inst::Return:
+          if (signature.returnsReference()) {
+            if (i.args.size() != 1 || !references.contains(i.args[0]) ||
+                references.at(i.args[0]) != Access::Shared)
+              bad();
+          } else if (!i.args.empty() && references.contains(i.args[0]))
+            bad();
           if (signature.result == Unit) {
             if (!i.args.empty())
               bad();
@@ -281,6 +335,8 @@ void checkTypes(const Program &p) {
         case Inst::ProtocolTransition: {
           const auto &target = p.semantics.functions.at(i.function);
           expect(i.type, target.result);
+          if (target.returnsReference())
+            references[i.result] = Access::Shared;
           if (i.intrinsicId != target.intrinsicId)
             bad();
           size_t skip = i.slot == None ? 0 : 1;

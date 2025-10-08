@@ -1,0 +1,9 @@
+fn identity(values: &i32[]) -> &i32[] {
+  return values;
+}
+fn main() {
+  let values: i32[3] = [10, 20, 30];
+  let slice = identity(&values);
+  print(slice.len());
+  print(slice[1usize]);
+}

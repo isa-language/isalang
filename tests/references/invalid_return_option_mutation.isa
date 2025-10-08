@@ -1,0 +1,12 @@
+fn wrap(input: &String) -> Option<&String> {
+  return Option::Some(input);
+}
+fn main() {
+  let value = String::from("owner");
+  let wrapped = wrap(&value);
+  value.push_str("!");
+  match wrapped {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+}

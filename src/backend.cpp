@@ -1,5 +1,6 @@
 #include "isac/backend.hpp"
 #include "isac/target.hpp"
+#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
@@ -10,6 +11,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -52,6 +54,7 @@ ISAC_OP(LoadOp, "isac.load", OpTrait::VariadicOperands, OpTrait::OneResult)
 ISAC_OP(StoreOp, "isac.store", OpTrait::VariadicOperands, OpTrait::ZeroResults)
 ISAC_OP(ViewOp, "isac.view", OpTrait::OneOperand, OpTrait::OneResult)
 ISAC_OP(LengthOp, "isac.length", OpTrait::OneOperand, OpTrait::OneResult)
+ISAC_OP(SubviewOp, "isac.subview", OpTrait::NOperands<2>::Impl, OpTrait::OneResult)
 ISAC_OP(IndexCheckOp, "isac.index_check", OpTrait::NOperands<2>::Impl, OpTrait::ZeroResults)
 ISAC_OP(CallOp, "isac.call", OpTrait::VariadicOperands, OpTrait::VariadicResults)
 ISAC_OP(MemcpyOp, "isac.memcpy", OpTrait::NOperands<3>::Impl, OpTrait::OneResult)
@@ -83,9 +86,18 @@ LogicalResult ViewOp::verify() {
   auto from = getOperand().getType(), to = (*this)->getResult(0).getType();
   return buffer(from) && buffer(to) &&
                  cast<MemRefType>(from).getElementType() == cast<MemRefType>(to).getElementType() &&
-                 cast<MemRefType>(to).isDynamicDim(0)
+                 memref::CastOp::areCastCompatible(TypeRange{from}, TypeRange{to})
              ? success()
              : emitOpError("invalid slice view");
+}
+LogicalResult SubviewOp::verify() {
+  auto from = dyn_cast<MemRefType>(getOperand(0).getType());
+  auto to = dyn_cast<MemRefType>((*this)->getResult(0).getType());
+  return from && to && from.getRank() == 1 && to.getRank() == 1 && to.getDimSize(0) == 1 &&
+                 from.getElementType() == to.getElementType() &&
+                 isa<IntegerType>(getOperand(1).getType())
+             ? success()
+             : emitOpError("invalid element view");
 }
 LogicalResult LengthOp::verify() {
   return buffer(getOperand().getType()) && isa<IntegerType>((*this)->getResult(0).getType())
@@ -163,7 +175,7 @@ public:
   explicit IsacDialect(MLIRContext *c)
       : Dialect(getDialectNamespace(), c, TypeID::get<IsacDialect>()) {
     addOperations<AllocOp, LoadOp, StoreOp, CallOp, FreeOp, ReturnOp, MemcpyOp, MemmoveOp, ViewOp,
-                  LengthOp, IndexCheckOp>();
+                  LengthOp, IndexCheckOp, SubviewOp>();
   }
   static StringRef getDialectNamespace() {
     return "isac";
@@ -211,7 +223,13 @@ public:
         replacement = b.create<memref::AllocaOp>(loc, cast<MemRefType>(op->getResult(0).getType()));
       else if (isa<ViewOp>(op))
         replacement = b.create<memref::CastOp>(loc, op->getResult(0).getType(), op->getOperand(0));
-      else if (isa<LengthOp, IndexCheckOp>(op)) {
+      else if (isa<SubviewOp>(op)) {
+        auto index = b.create<arith::IndexCastOp>(loc, b.getIndexType(), op->getOperand(1));
+        replacement = b.create<memref::SubViewOp>(
+            loc, cast<MemRefType>(op->getResult(0).getType()), op->getOperand(0),
+            ArrayRef<OpFoldResult>{index.getResult()}, ArrayRef<OpFoldResult>{b.getIndexAttr(1)},
+            ArrayRef<OpFoldResult>{b.getIndexAttr(1)});
+      } else if (isa<LengthOp, IndexCheckOp>(op)) {
         auto zero = b.create<arith::ConstantIndexOp>(loc, 0);
         auto length = b.create<memref::DimOp>(loc, op->getOperand(0), zero);
         auto integerType =
@@ -272,7 +290,9 @@ class Emitter {
     return t.kind == runtime::Type::Buffer
                ? Type(MemRefType::get(
                      {t.width == 0 ? ShapedType::kDynamic : static_cast<int64_t>(t.width)},
-                     builder.getIntegerType(t.elementBits)))
+                     builder.getIntegerType(t.elementBits),
+                     t.dynamicOffset ? StridedLayoutAttr::get(&context, ShapedType::kDynamic, {1})
+                                     : StridedLayoutAttr{}))
                : Type(builder.getIntegerType(t.elementBits));
   }
   Operation *op(StringRef name, TypeRange types, ValueRange operands,
@@ -487,6 +507,9 @@ class Emitter {
       result =
           op(i.kind == I::MemCopy ? "isac.memcpy" : "isac.memmove", TypeRange{type(i.type)}, args)
               ->getResult(0);
+      break;
+    case I::Subview:
+      result = op("isac.subview", TypeRange{type(i.type)}, args)->getResult(0);
       break;
     case I::View:
       result = op("isac.view", TypeRange{type(i.type)}, args)->getResult(0);
@@ -716,6 +739,8 @@ public:
     }
     if (stage == BackendStage::LLVMDialect || stage == BackendStage::LLVMIR) {
       PassManager pm(&context);
+      pm.addPass(memref::createExpandStridedMetadataPass());
+      pm.addPass(createLowerAffinePass());
       ArithToLLVMConversionPassOptions arithmeticOptions;
       arithmeticOptions.indexBitwidth = input.target.pointerWidth;
       pm.addPass(createArithToLLVMConversionPass(arithmeticOptions));

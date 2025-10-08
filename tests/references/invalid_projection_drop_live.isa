@@ -1,0 +1,12 @@
+struct Data {
+  value: i32,
+}
+fn field(data: &Data) -> &i32 {
+  return &data.value;
+}
+fn main() {
+  let data = Data::new();
+  let r = field(&data);
+  data.drop();
+  print(r);
+}

@@ -1,0 +1,9 @@
+fn identity(value: &String) -> &String {
+  return value;
+}
+fn main() {
+  let value = String::from("hello");
+  let r = identity(&value);
+  value.drop();
+  print(r);
+}
