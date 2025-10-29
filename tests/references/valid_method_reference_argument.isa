@@ -1,0 +1,14 @@
+struct Data {
+  value: bool,
+}
+impl Data {
+  fn select(shared self, value: &i32) -> &i32 {
+    return value;
+  }
+}
+fn main() {
+  let data = Data::new();
+  let value = 17;
+  let r = data.select(&value);
+  print(r);
+}

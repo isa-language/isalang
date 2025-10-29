@@ -1,0 +1,8 @@
+fn inspect(value: Option<&String>, other: &mut String) {
+  other.clear();
+}
+fn main() {
+  let text = String::from("live");
+  let wrapped = Option::Some(&text);
+  inspect(wrapped.move(), &mut text);
+}

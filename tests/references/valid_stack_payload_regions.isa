@@ -1,0 +1,21 @@
+fn wrap(value: &i32) -> Option<&i32> {
+  return Option::Some(value);
+}
+fn forward(value: Option<&i32>) -> Option<&i32> {
+  return value.move();
+}
+fn main() {
+  let data = 42;
+  let value = forward(wrap(&data));
+  let moved = value.move();
+  match &moved {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  match moved {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  data = 43;
+  print(data);
+}

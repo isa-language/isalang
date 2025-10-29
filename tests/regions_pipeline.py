@@ -29,6 +29,25 @@ with tempfile.TemporaryDirectory() as directory:
         ("valid_return_option_ref", "hello\nhello!\n0\n0\n"),
         ("valid_return_result_ref", "result\n7\n0\n"),
         ("valid_return_generic_reference_payloads", "pair\npair\npair!\n"),
+        ("valid_generic_method_reference", "42\n43\n2.5\n1\n42\n"),
+        ("valid_method_reference_argument", "17\n"),
+        ("valid_borrowed_container_parameter", "parameter\nparameter!\n0\n0\n"),
+        ("valid_borrowed_result_parameter", "result\n7\nresult!\n"),
+        ("valid_borrowed_enum_parameter", "left\nright\n0\n0\n"),
+        ("valid_payload_region_roundtrip", "payload\npayload!\n0\n"),
+        ("valid_payload_region_paths", "paths\npaths\npaths!\n0\n0\ndone\n"),
+        ("valid_payload_region_branch", "branches\n0\nbranches!!\n"),
+        ("valid_payload_region_variant_sets", "7\n7\n"),
+        ("valid_payload_variant_set_join", "1\n3\n5\n7\n7\n7\n"),
+        ("valid_multiple_return_origins", "left\nleft\nleft\nright\nleft\nleft!\nright!\n"),
+        ("valid_multiple_payload_origins", "b\ndone\ndone\n"),
+        ("valid_mixed_return_origins", "container\nparameter\n"),
+        ("valid_stack_payload_regions", "42\n42\n43\n"),
+        ("valid_stack_aggregate_payload", "42\n43\n43\n3\n30\n40\n"),
+        ("valid_stack_payload_projection", "42\n1\n30\n40\n"),
+        ("valid_stack_payload_variant_layout", "42\n42\n7\n7\n43\n"),
+        ("valid_stack_payload_multiple_origins", "20\n30\n40\n"),
+        ("valid_stack_payload_scalar_types", "-7\n1\n2.5\n1.5\n225\n18446744073709551615\n"),
     ]:
         source = root / "tests/references" / (fixture + ".isa")
         for opt in ["-O0", "-O2"]:
@@ -121,3 +140,147 @@ with tempfile.TemporaryDirectory() as directory:
                 "result.payload-regions" not in result.stdout
                 and "return.region" not in result.stdout
             )
+
+    source = root / "tests/references/valid_generic_method_reference.isa"
+    for stage in ["hir", "core", "region-constraints", "erased", "lir", "mlir", "llvm"]:
+        result = subprocess.run(
+            [compiler, str(source), "--emit-" + stage], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        if stage in ["hir", "core"]:
+            assert "return.region" in result.stdout and "Holder<i32>" in result.stdout
+        elif stage == "region-constraints":
+            assert "reason=FunctionResult" in result.stdout
+        else:
+            assert (
+                "return.region" not in result.stdout
+                and "reason=FunctionResult" not in result.stdout
+            )
+
+    source = root / "tests/references/valid_borrowed_container_parameter.isa"
+    for stage in ["hir", "core", "erased", "lir", "mlir", "llvm"]:
+        result = subprocess.run(
+            [compiler, str(source), "--emit-" + stage], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        assert ("payload.region" in result.stdout) == (stage in ["hir", "core"])
+    binary = Path(directory) / "counted-parameter"
+    built = subprocess.run(
+        [compiler, str(source), "-O2", *flags, "--runtime-test-counters", "-o", str(binary)],
+        capture_output=True,
+        text=True,
+    )
+    assert built.returncode == 0, built.stderr
+    result = subprocess.run([str(binary)], capture_output=True, text=True, env=environment)
+    assert result.returncode == 0 and "allocations=1 frees=1" in result.stderr, result
+
+    source = root / "tests/references/valid_payload_region_paths.isa"
+    for stage in ["hir", "core", "region-constraints", "erased", "lir", "mlir", "llvm"]:
+        result = subprocess.run(
+            [compiler, str(source), "--emit-" + stage], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        if stage in ["hir", "core"]:
+            assert (
+                "return.payload-source" in result.stdout and "variant=#V1 field=1" in result.stdout
+            )
+            assert "result-bound" in result.stdout
+        elif stage == "region-constraints":
+            assert "reason=FunctionResult" in result.stdout
+        else:
+            assert (
+                "return.payload-source" not in result.stdout
+                and "payload.region" not in result.stdout
+            )
+    binary = Path(directory) / "counted-payload-roundtrip"
+    source = root / "tests/references/valid_payload_region_roundtrip.isa"
+    built = subprocess.run(
+        [compiler, str(source), "-O2", *flags, "--runtime-test-counters", "-o", str(binary)],
+        capture_output=True,
+        text=True,
+    )
+    assert built.returncode == 0, built.stderr
+    result = subprocess.run([str(binary)], capture_output=True, text=True, env=environment)
+    assert result.returncode == 0 and "allocations=1 frees=1" in result.stderr, result
+
+    source = root / "tests/references/valid_payload_region_variant_sets.isa"
+    for stage in ["core", "erased", "lir", "mlir", "llvm"]:
+        result = subprocess.run(
+            [compiler, str(source), "--emit-" + stage], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        if stage == "core":
+            assert "possible-variants={#V1 #V2 }" in result.stdout
+        else:
+            assert "possible-variants" not in result.stdout
+
+    source = root / "tests/references/valid_multiple_payload_origins.isa"
+    for stage in ["hir", "core", "region-constraints", "erased", "lir", "mlir", "llvm"]:
+        result = subprocess.run(
+            [compiler, str(source), "--emit-" + stage], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        if stage in ["hir", "core"]:
+            assert result.stdout.count("return.payload-source") == 4, result.stdout
+            assert result.stdout.count("  return.region ") == 4, result.stdout
+        elif stage == "region-constraints":
+            assert result.stdout.count("reason=FunctionResult") >= 4, result.stdout
+        else:
+            assert (
+                "return.payload-source" not in result.stdout
+                and "return.region" not in result.stdout
+            )
+    binary = Path(directory) / "counted-multiple-origins"
+    built = subprocess.run(
+        [compiler, str(source), "-O2", *flags, "--runtime-test-counters", "-o", str(binary)],
+        capture_output=True,
+        text=True,
+    )
+    assert built.returncode == 0, built.stderr
+    result = subprocess.run([str(binary)], capture_output=True, text=True, env=environment)
+    assert result.returncode == 0 and "allocations=2 frees=2" in result.stderr, result
+
+    source = root / "tests/references/valid_stack_payload_projection.isa"
+    for stage in ["core", "erased", "lir", "mlir", "std-mlir", "llvm"]:
+        result = subprocess.run(
+            [compiler, str(source), "--emit-" + stage], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        if stage == "core":
+            assert "stored-reference" in result.stdout and "return.region" in result.stdout
+        else:
+            assert "stored-reference" not in result.stdout and "return.region" not in result.stdout
+        if stage in ["erased", "lir"]:
+            assert "address.view" in result.stdout and " = address " in result.stdout
+        if stage == "mlir":
+            assert "isac.address" in result.stdout and "isac.address_view" in result.stdout
+        if stage == "llvm":
+            assert "unrealized_conversion_cast" not in result.stdout
+    binary = Path(directory) / "counted-stack-payloads"
+    built = subprocess.run(
+        [compiler, str(source), "-O2", *flags, "--runtime-test-counters", "-o", str(binary)],
+        capture_output=True,
+        text=True,
+    )
+    assert built.returncode == 0, built.stderr
+    result = subprocess.run([str(binary)], capture_output=True, text=True, env=environment)
+
+    assert result.returncode == 0 and result.stderr == "", result
+
+    bounds_source = Path(directory) / "stack-payload-bounds.isa"
+    bounds_source.write_text(
+        "fn item(values: &i32[], index: usize) -> Option<&i32> { return Option::Some(&values[index]); } fn main() { let a: i32[1] = [1]; let v = item(&a, 1); match v { Option::Some(r) => print(r), Option::None => {} } }"
+    )
+    for opt in ["-O0", "-O2"]:
+        binary = Path(directory) / "stack-payload-bounds"
+        built = subprocess.run(
+            [compiler, str(bounds_source), opt, *flags, "-o", str(binary)],
+            capture_output=True,
+            text=True,
+        )
+        assert built.returncode == 0, built.stderr
+        result = subprocess.run([str(binary)], capture_output=True, text=True, env=environment)
+        assert result.returncode != 0 and "out of bounds" in result.stderr, result
+        assert "AddressSanitizer" not in result.stderr and "runtime error:" not in result.stderr, (
+            result
+        )

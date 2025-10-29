@@ -1,0 +1,20 @@
+fn choose(a: &String, b: &String, condition: bool) -> Option<&String> {
+  if condition {
+    return Option::Some(a);
+  }
+  return Option::Some(b);
+}
+fn main() {
+  let a = String::from("a");
+  let b = String::from("b");
+  let result = choose(&a, &b, true);
+  match result {
+    Option::Some(r) => {
+      let view = r.as_str();
+      let copy = view;
+      b.clear();
+      print(copy);
+    },
+    Option::None => {}
+  }
+}

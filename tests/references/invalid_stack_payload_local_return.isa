@@ -1,0 +1,5 @@
+fn bad() -> Option<&i32> {
+  let local = 10;
+  return Option::Some(&local);
+}
+fn main() {}

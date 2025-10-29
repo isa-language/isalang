@@ -1,0 +1,9 @@
+struct Data {
+  value: String,
+}
+fn main() {
+  let d = Data::new();
+  d.value = String::from("ok");
+  let s = d.value.move();
+  print(s);
+}

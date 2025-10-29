@@ -1,6 +1,8 @@
 #include "isac/backend.hpp"
 #include "isac/target.hpp"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/LLVMCommon/MemRefBuilder.h"
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
@@ -52,6 +54,8 @@ static bool buffer(Type t) {
 ISAC_OP(AllocOp, "isac.alloc", OpTrait::VariadicOperands, OpTrait::OneResult)
 ISAC_OP(LoadOp, "isac.load", OpTrait::VariadicOperands, OpTrait::OneResult)
 ISAC_OP(StoreOp, "isac.store", OpTrait::VariadicOperands, OpTrait::ZeroResults)
+ISAC_OP(AddressOp, "isac.address", OpTrait::OneOperand, OpTrait::OneResult)
+ISAC_OP(AddressViewOp, "isac.address_view", OpTrait::OneOperand, OpTrait::OneResult)
 ISAC_OP(ViewOp, "isac.view", OpTrait::OneOperand, OpTrait::OneResult)
 ISAC_OP(LengthOp, "isac.length", OpTrait::OneOperand, OpTrait::OneResult)
 ISAC_OP(SubviewOp, "isac.subview", OpTrait::NOperands<2>::Impl, OpTrait::OneResult)
@@ -98,6 +102,21 @@ LogicalResult SubviewOp::verify() {
                  isa<IntegerType>(getOperand(1).getType())
              ? success()
              : emitOpError("invalid element view");
+}
+LogicalResult AddressOp::verify() {
+  auto source = dyn_cast<MemRefType>(getOperand().getType());
+  return source && source.getRank() == 1 && source.getElementType().isInteger(64) &&
+                 isa<LLVM::LLVMPointerType>((*this)->getResult(0).getType())
+             ? success()
+             : emitOpError("expected a word buffer and a pointer result");
+}
+LogicalResult AddressViewOp::verify() {
+  auto target = dyn_cast<MemRefType>((*this)->getResult(0).getType());
+  return isa<LLVM::LLVMPointerType>(getOperand().getType()) && target && target.getRank() == 1 &&
+                 target.hasStaticShape() && target.getDimSize(0) > 0 &&
+                 target.getElementType().isInteger(64)
+             ? success()
+             : emitOpError("expected a pointer and a fixed-size word view");
 }
 LogicalResult LengthOp::verify() {
   return buffer(getOperand().getType()) && isa<IntegerType>((*this)->getResult(0).getType())
@@ -175,7 +194,7 @@ public:
   explicit IsacDialect(MLIRContext *c)
       : Dialect(getDialectNamespace(), c, TypeID::get<IsacDialect>()) {
     addOperations<AllocOp, LoadOp, StoreOp, CallOp, FreeOp, ReturnOp, MemcpyOp, MemmoveOp, ViewOp,
-                  LengthOp, IndexCheckOp, SubviewOp>();
+                  LengthOp, IndexCheckOp, SubviewOp, AddressOp, AddressViewOp>();
   }
   static StringRef getDialectNamespace() {
     return "isac";
@@ -184,12 +203,14 @@ public:
 
 class LowerIsacPass : public PassWrapper<LowerIsacPass, OperationPass<ModuleOp>> {
 public:
+  unsigned pointerBits;
+  explicit LowerIsacPass(unsigned bits) : pointerBits(bits) {}
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LowerIsacPass)
   StringRef getArgument() const final {
     return "lower-isac";
   }
   void getDependentDialects(DialectRegistry &r) const override {
-    r.insert<memref::MemRefDialect, func::FuncDialect, arith::ArithDialect>();
+    r.insert<memref::MemRefDialect, func::FuncDialect, arith::ArithDialect, LLVM::LLVMDialect>();
   }
   void runOnOperation() override {
     SmallVector<Operation *> ops;
@@ -221,7 +242,37 @@ public:
           b.create<LLVM::StoreOp>(loc, op->getOperand(1), op->getOperand(0));
       } else if (isa<AllocOp>(op))
         replacement = b.create<memref::AllocaOp>(loc, cast<MemRefType>(op->getResult(0).getType()));
-      else if (isa<ViewOp>(op))
+      else if (isa<AddressOp>(op)) {
+        auto metadata = b.create<memref::ExtractStridedMetadataOp>(loc, op->getOperand(0));
+        auto base = b.create<memref::ExtractAlignedPointerAsIndexOp>(loc, op->getOperand(0));
+        auto word = b.create<arith::ConstantIndexOp>(loc, 8);
+        auto bytes = b.create<arith::MulIOp>(loc, metadata.getOffset(), word);
+        auto address = b.create<arith::AddIOp>(loc, base, bytes);
+        auto integer = b.create<arith::IndexCastOp>(loc, b.getIntegerType(pointerBits), address);
+        replacement =
+            b.create<LLVM::IntToPtrOp>(loc, op->getResult(0).getType(), integer.getResult());
+      } else if (isa<AddressViewOp>(op)) {
+        auto target = cast<MemRefType>(op->getResult(0).getType());
+        LowerToLLVMOptions options(&getContext());
+        options.overrideIndexBitwidth(pointerBits);
+        LLVMTypeConverter converter(&getContext(), options);
+        auto descriptorType = converter.convertType(target);
+        auto empty = b.create<LLVM::UndefOp>(loc, descriptorType);
+        MemRefDescriptor descriptor(empty);
+        auto indexType = b.getIntegerType(pointerBits);
+        auto zero = b.create<LLVM::ConstantOp>(loc, indexType, b.getIntegerAttr(indexType, 0));
+        auto one = b.create<LLVM::ConstantOp>(loc, indexType, b.getIntegerAttr(indexType, 1));
+        descriptor.setAllocatedPtr(b, loc, op->getOperand(0));
+        descriptor.setAlignedPtr(b, loc, op->getOperand(0));
+        descriptor.setOffset(b, loc, zero);
+        auto count = b.create<LLVM::ConstantOp>(loc, indexType,
+                                                b.getIntegerAttr(indexType, target.getDimSize(0)));
+        descriptor.setSize(b, loc, 0, count);
+        descriptor.setStride(b, loc, 0, one);
+        replacement =
+            b.create<UnrealizedConversionCastOp>(loc, TypeRange{target}, ValueRange{descriptor})
+                .getResult(0);
+      } else if (isa<ViewOp>(op))
         replacement = b.create<memref::CastOp>(loc, op->getResult(0).getType(), op->getOperand(0));
       else if (isa<SubviewOp>(op)) {
         auto index = b.create<arith::IndexCastOp>(loc, b.getIndexType(), op->getOperand(1));
@@ -508,6 +559,12 @@ class Emitter {
           op(i.kind == I::MemCopy ? "isac.memcpy" : "isac.memmove", TypeRange{type(i.type)}, args)
               ->getResult(0);
       break;
+    case I::Address:
+    case I::AddressView:
+      result = op(i.kind == I::Address ? "isac.address" : "isac.address_view",
+                  TypeRange{type(i.type)}, args)
+                   ->getResult(0);
+      break;
     case I::Subview:
       result = op("isac.subview", TypeRange{type(i.type)}, args)->getResult(0);
       break;
@@ -733,7 +790,7 @@ public:
       throw std::runtime_error("Isac MLIR verification failed");
     if (stage != BackendStage::IsacMLIR) {
       PassManager pm(&context);
-      pm.addPass(std::make_unique<dialect::LowerIsacPass>());
+      pm.addPass(std::make_unique<dialect::LowerIsacPass>(input.target.pointerWidth));
       if (failed(pm.run(*module)))
         throw std::runtime_error("Isac lowering failed");
     }

@@ -1,0 +1,16 @@
+fn choose(a: &String, b: &String, condition: bool) -> Option<&String> {
+  if condition {
+    return Option::Some(a);
+  }
+  return Option::Some(b);
+}
+fn main() {
+  let a = String::from("a");
+  let b = String::from("b");
+  let result = choose(&a, &b, false);
+  a.clear();
+  match result {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+}

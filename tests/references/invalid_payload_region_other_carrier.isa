@@ -1,0 +1,15 @@
+fn forward(value: Option<&String>) -> Option<&String> {
+  return value.move();
+}
+fn ignore(value: Option<&String>) {}
+fn main() {
+  let text = String::new();
+  let a = Option::Some(&text);
+  let b = Option::Some(&text);
+  ignore(forward(a.move()));
+  text.clear();
+  match b {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+}

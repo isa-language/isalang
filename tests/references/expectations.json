@@ -258,5 +258,250 @@
     "code": "E0312",
     "stdin": "",
     "stdout": ""
+  },
+  "valid_generic_method_reference": {
+    "stdout": "42\n43\n2.5\n1\n42\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_method_reference_argument": {
+    "stdout": "17\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_method_reference_mutation": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_method_reference_local": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "invalid_method_reference_temporary": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "valid_borrowed_container_parameter": {
+    "stdout": "parameter\nparameter!\n0\n0\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_borrowed_result_parameter": {
+    "stdout": "result\n7\nresult!\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_borrowed_enum_parameter": {
+    "stdout": "left\nright\n0\n0\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_borrowed_parameter_mutation": {
+    "stdout": "",
+    "code": "E0311",
+    "stdin": ""
+  },
+  "invalid_borrowed_parameter_argument_overlap": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_borrowed_parameter_other_carrier": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "valid_payload_region_roundtrip": {
+    "stdout": "payload\npayload!\n0\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_payload_region_paths": {
+    "stdout": "paths\npaths\npaths!\n0\n0\ndone\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_payload_region_branch": {
+    "stdout": "branches\n0\nbranches!!\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_payload_region_local_escape": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "invalid_payload_region_multiple_paths": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "invalid_payload_region_drop": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_payload_region_mutation": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_payload_region_other_carrier": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "valid_payload_region_variant_sets": {
+    "stdout": "7\n7\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_payload_variant_set_join": {
+    "stdout": "1\n3\n5\n7\n7\n7\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_payload_region_no_empty": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "valid_payload_region_multiple_origins": {
+    "stdout": "",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_borrowed_parameter_return_origins": {
+    "stdout": "",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_multiple_return_origins": {
+    "stdout": "left\nleft\nleft\nright\nleft\nleft!\nright!\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_multiple_payload_origins": {
+    "stdout": "b\ndone\ndone\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_mixed_return_origins": {
+    "stdout": "container\nparameter\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_multiple_origin_first_mutation": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_multiple_origin_second_drop": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_multiple_origin_payload_alias": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_multiple_origin_str_view": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_multiple_origin_call_conflict": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_multiple_origin_local_escape": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "invalid_multiple_payload_origin_a": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_multiple_payload_origin_b": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "valid_stack_payload_regions": {
+    "stdout": "42\n42\n43\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_stack_payload_projection": {
+    "stdout": "42\n1\n30\n40\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_stack_payload_variant_layout": {
+    "stdout": "42\n42\n7\n7\n43\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_stack_payload_multiple_origins": {
+    "stdout": "20\n30\n40\n",
+    "code": null,
+    "stdin": ""
+  },
+  "valid_stack_payload_scalar_types": {
+    "stdout": "-7\n1\n2.5\n1.5\n225\n18446744073709551615\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_stack_payload_mutation": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_stack_payload_local_return": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "invalid_stack_payload_wrong_origin": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "invalid_stack_payload_projection_mutation": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_stack_payload_second_origin": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "valid_stack_aggregate_payload": {
+    "stdout": "42\n43\n43\n3\n30\n40\n",
+    "code": null,
+    "stdin": ""
+  },
+  "invalid_stack_aggregate_drop": {
+    "stdout": "",
+    "code": "E0312",
+    "stdin": ""
+  },
+  "invalid_stack_aggregate_return_local": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
+  },
+  "invalid_stack_slice_payload": {
+    "stdout": "",
+    "code": "E6003",
+    "stdin": ""
   }
 }

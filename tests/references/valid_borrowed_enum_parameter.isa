@@ -1,0 +1,23 @@
+enum Views<T> {
+  Both(T, T),
+  Empty,
+}
+fn inspect(value: Views<&String>) {
+  match value {
+    Views::Both(a, b) => {
+      print(a);
+      print(b);
+    },
+    Views::Empty => {},
+  }
+}
+fn main() {
+  let a = String::from("left");
+  let b = String::from("right");
+  let views = Views::Both(&a, &b);
+  inspect(views.move());
+  a.clear();
+  b.clear();
+  print(a.len());
+  print(b.len());
+}

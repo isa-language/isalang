@@ -1,0 +1,17 @@
+struct Holder<T> {
+  value: T,
+}
+impl<T> Holder<T> {
+  fn value(shared self) -> &T {
+    return &self.value;
+  }
+  fn set(unique self, value: T) {
+    self.value = value;
+  }
+}
+fn main() {
+  let data = Holder<i32>::new();
+  let r = data.value();
+  data.set(20);
+  print(r);
+}

@@ -152,5 +152,171 @@ int main() {
     if (e.code != "E9001")
       return 1;
   }
+  const std::string methodReference =
+      "struct Holder<T> { value: T, } "
+      "impl<T> Holder<T> { fn value(shared self) -> &T { return &self.value; } } "
+      "fn main() { let h = Holder<i32>::new(); let r = h.value(); print(r); }";
+  auto methodCore = core::elaborate(resolve(parse(lex(methodReference))));
+  (void)core::verify(methodCore);
+  bool forgedMethodReceiver = false;
+  for (const auto &signature : methodCore.semantics.functions)
+    if (signature.returnsReference()) {
+      methodCore.semantics.symbols[signature.resultOrigin].access = Access::Unique;
+      forgedMethodReceiver = true;
+    }
+  if (!forgedMethodReceiver)
+    return 1;
+  try {
+    (void)core::verify(std::move(methodCore));
+    return 1;
+  } catch (const Error &e) {
+    if (e.code != "E9001")
+      return 1;
+  }
+  auto payloadInputCore = [] {
+    auto ast = parse(lex("struct Heap { ptr: RawPtr, } enum View<T> { Some(T), None, } "
+                         "fn ignore(value: View<&Heap>) {} fn main() {}"));
+    ast.structs[0].trusted = true;
+    ast.structs[0].representation = "box_i32";
+    return core::elaborate(resolve(ast));
+  };
+  (void)core::verify(payloadInputCore());
+  for (int mode = 0; mode < 3; ++mode) {
+    auto forged = payloadInputCore();
+    auto &contracts = forged.semantics.functions[0].payloadParameterRegions;
+    if (contracts.size() != 1)
+      return 1;
+    if (mode == 0)
+      contracts.clear();
+    else if (mode == 1)
+      contracts[0].origin = contracts[0].parameter;
+    else
+      forged.semantics.symbols[contracts[0].origin].access = Access::Unique;
+    try {
+      (void)core::verify(std::move(forged));
+      return 1;
+    } catch (const Error &e) {
+      if (e.code != "E9001")
+        return 1;
+    }
+  }
+  auto payloadResultCore = [] {
+    auto ast = parse(lex("struct Heap { ptr: RawPtr, } enum View<T> { Some(T), None, } "
+                         "fn forward(value: View<&Heap>) -> View<&Heap> { return value.move(); } "
+                         "fn main() {}"));
+    ast.structs[0].trusted = true;
+    ast.structs[0].representation = "box_i32";
+    return core::elaborate(resolve(ast));
+  };
+  (void)core::verify(payloadResultCore());
+  for (int mode = 0; mode < 5; ++mode) {
+    auto forged = payloadResultCore();
+    auto &signature = forged.semantics.functions[0];
+    if (!signature.resultPayloadSource)
+      return 1;
+    if (mode == 0)
+      signature.resultPayloadSource.reset();
+    else if (mode == 1)
+      signature.resultPayloadSource->path.variant = UINT32_MAX;
+    else if (mode == 2)
+      signature.resultPayloadSource->path.field = UINT32_MAX;
+    else if (mode == 3)
+      signature.resultPayloadSource->parameter = UINT32_MAX;
+    else
+      signature.resultOrigin = signature.params[0];
+    try {
+      (void)core::verify(std::move(forged));
+      return 1;
+    } catch (const Error &e) {
+      if (e.code != "E9001")
+        return 1;
+    }
+  }
+  auto multipleResultCore = [] {
+    auto ast = parse(lex("struct Heap { ptr: RawPtr, } enum View<T> { Some(T), None, } "
+                         "fn choose(a: View<&Heap>, b: View<&Heap>, flag: bool) -> View<&Heap> { "
+                         "if flag { return a.move(); } return b.move(); } fn main() {}"));
+    ast.structs[0].trusted = true;
+    ast.structs[0].representation = "box_i32";
+    return core::elaborate(resolve(ast));
+  };
+  (void)core::verify(multipleResultCore());
+  for (int mode = 0; mode < 7; ++mode) {
+    auto forged = multipleResultCore();
+    auto &signature = forged.semantics.functions[0];
+    if (signature.additionalResultOrigins.size() != 1 ||
+        signature.additionalPayloadSources.size() != 1)
+      return 1;
+    if (mode == 0)
+      signature.additionalResultOrigins[0] = UINT32_MAX;
+    else if (mode == 1)
+      signature.additionalResultOrigins[0] = signature.resultOrigin;
+    else if (mode == 2)
+      signature.additionalPayloadSources.clear();
+    else if (mode == 3)
+      signature.additionalPayloadSources[0].path.field = UINT32_MAX;
+    else if (mode == 4)
+      signature.additionalPayloadSources[0].parameter = UINT32_MAX;
+    else if (mode == 5)
+      forged.semantics.symbols[signature.additionalResultOrigins[0]].access = Access::Unique;
+    else
+      signature.additionalPayloadSources.push_back(signature.additionalPayloadSources[0]);
+    try {
+      (void)core::verify(std::move(forged));
+      return 1;
+    } catch (const Error &e) {
+      if (e.code != "E9001")
+        return 1;
+    }
+  }
+  auto stackPayloadCore = [] {
+    return core::elaborate(resolve(parse(
+        lex("enum Choice<T> { View(T), Number(i32), } "
+            "fn inspect(value: Choice<&i32>) { match &value { "
+            "Choice::View(r) => print(r), Choice::Number(n) => print(n), } } fn main() {}"))));
+  };
+  auto stackProgram = stackPayloadCore();
+  auto mark = [&](auto &&self, std::vector<core::Inst> &body) -> void {
+    for (auto &i : body) {
+      i.storedPayloadReference = true;
+      self(self, i.body);
+      self(self, i.otherwise);
+      self(self, i.condition);
+      self(self, i.latch);
+    }
+  };
+  for (auto &f : stackProgram.functions)
+    mark(mark, f.body);
+  auto verifiedStack = core::verify(std::move(stackProgram));
+  unsigned stored = 0, plain = 0;
+  auto inspectProjection = [&](auto &&self, const std::vector<core::Inst> &body) -> void {
+    for (const auto &i : body) {
+      if (i.kind == core::Inst::BorrowShared && i.projection) {
+        if (i.storedPayloadReference)
+          ++stored;
+        else
+          ++plain;
+      }
+      self(self, i.body);
+      self(self, i.otherwise);
+      self(self, i.condition);
+      self(self, i.latch);
+    }
+  };
+  for (const auto &f : verifiedStack.get().functions)
+    inspectProjection(inspectProjection, f.body);
+  if (stored != 1 || plain != 1 || erase(verifiedStack).functions.empty())
+    return 1;
+  auto invalidStack = stackPayloadCore();
+  for (auto &type : invalidStack.semantics.types)
+    if (type.kind == hir::Type::Reference)
+      type.element = RawPtr;
+  try {
+    (void)core::verify(std::move(invalidStack));
+    return 1;
+  } catch (const Error &e) {
+    if (e.code != "E9001")
+      return 1;
+  }
   std::cout << "Core gate rejects forged quantity, type and reference contracts\n";
 }

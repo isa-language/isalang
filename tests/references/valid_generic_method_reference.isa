@@ -1,0 +1,38 @@
+struct Holder<T> {
+  padding: i32,
+  value: T,
+}
+impl<T> Holder<T> {
+  fn set(unique self, value: T) {
+    self.value = value;
+  }
+  fn value(shared self) -> &T {
+    return &self.value;
+  }
+  fn forwarded(shared self) -> &T {
+    return self.value();
+  }
+}
+impl i32 {
+  fn twice(shared self) -> i32 {
+    return self + self;
+  }
+}
+fn make() -> Holder<i32> {
+  print(1);
+  let value = Holder<i32>::new();
+  value.set(21);
+  return value.move();
+}
+fn main() {
+  let a = Holder<i32>::new();
+  a.set(42);
+  let r = a.forwarded();
+  print(r);
+  a.set(43);
+  print(a.value());
+  let b = Holder<f64>::new();
+  b.set(2.5);
+  print(b.forwarded());
+  print(make().value().twice());
+}

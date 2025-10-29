@@ -1,0 +1,20 @@
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+struct Holder<T> {
+  value: T,
+}
+fn consume(h: Holder<Pair<String >>) {
+  let p = h.value.move();
+  let s = p.first.move();
+  print(s);
+}
+fn main() {
+  let p = Pair<String>::new();
+  p.first = String::from("a");
+  p.second = String::from("b");
+  let h = Holder<Pair<String >>::new();
+  h.value = p.move();
+  consume(h.move());
+}

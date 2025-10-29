@@ -1,0 +1,13 @@
+fn forward(value: Option<&String>) -> Option<&String> {
+  return value.move();
+}
+fn main() {
+  let text = String::from("protected");
+  let input = Option::Some(&text);
+  let output = forward(input.move());
+  text.clear();
+  match output {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+}

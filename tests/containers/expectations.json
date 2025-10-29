@@ -374,11 +374,6 @@
     "stdin": "",
     "stdout": "42\n7\n"
   },
-  "invalid_stored_reference_stack": {
-    "code": "E6003",
-    "stdin": "",
-    "stdout": ""
-  },
   "valid_option_function_return": {
     "code": null,
     "stdin": "",
@@ -514,11 +509,6 @@
     "stdin": "",
     "stdout": ""
   },
-  "invalid_generic_struct_linear_field": {
-    "code": "E0204",
-    "stdin": "",
-    "stdout": ""
-  },
   "invalid_generic_impl_arity": {
     "code": "E0200",
     "stdin": "",
@@ -536,6 +526,116 @@
   },
   "valid_reference_parameter_return": {
     "code": null,
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_stored_reference_stack": {
+    "code": null,
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_owned_field_partial": {
+    "code": "",
+    "stdout": "",
+    "stdin": ""
+  },
+  "valid_owned_field_take": {
+    "code": "",
+    "stdout": "one\n",
+    "stdin": ""
+  },
+  "valid_owned_field_replace": {
+    "code": "",
+    "stdout": "new\n",
+    "stdin": ""
+  },
+  "valid_owned_field_drop": {
+    "code": "",
+    "stdout": "",
+    "stdin": ""
+  },
+  "valid_owned_field_reinitialize": {
+    "code": "",
+    "stdout": "three\n",
+    "stdin": ""
+  },
+  "valid_owned_field_branch": {
+    "code": "",
+    "stdout": "",
+    "stdin": ""
+  },
+  "valid_owned_field_loop": {
+    "code": "",
+    "stdout": "",
+    "stdin": ""
+  },
+  "invalid_owned_field_uninitialized": {
+    "code": "E0301",
+    "stdout": "",
+    "stdin": ""
+  },
+  "invalid_owned_field_double_drop": {
+    "code": "E0301",
+    "stdout": "",
+    "stdin": ""
+  },
+  "invalid_owned_field_partial_move": {
+    "code": "E0301",
+    "stdout": "",
+    "stdin": ""
+  },
+  "invalid_owned_field_partial_borrow": {
+    "code": "E0301",
+    "stdout": "",
+    "stdin": ""
+  },
+  "valid_generic_struct_linear_field": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_owned_field_impl_cleanup": {
+    "code": "",
+    "stdin": "",
+    "stdout": "new\n"
+  },
+  "valid_owned_field_nongeneric": {
+    "code": "",
+    "stdin": "",
+    "stdout": "ok\n"
+  },
+  "valid_nested_owned_take": {
+    "code": "",
+    "stdin": "",
+    "stdout": "b\n"
+  },
+  "valid_nested_owned_drop": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_nested_owned_replace": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_nested_owned_parameter": {
+    "code": "",
+    "stdin": "",
+    "stdout": "a\n"
+  },
+  "valid_nested_owned_empty": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_nested_owned_partial_store": {
+    "code": "E0430",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_nested_owned_double_take": {
+    "code": "E0301",
     "stdin": "",
     "stdout": ""
   }

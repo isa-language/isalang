@@ -1,0 +1,27 @@
+struct Holder<T> {
+  value: T,
+}
+impl<T> Holder<T> {
+  fn set(unique self, value: T) {
+    self.value = value.move();
+  }
+}
+fn consume(p: Holder<String>) {
+  let x = p.value.move();
+  print(x);
+}
+fn partial(stop: bool) {
+  let p = Holder<String>::new();
+  if stop {
+    return;
+  }
+  p.value = String::from("cleanup");
+}
+fn main() {
+  partial(true);
+  partial(false);
+  let p = Holder<String>::new();
+  p.value = String::from("old");
+  p.set(String::from("new"));
+  consume(p.move());
+}

@@ -133,7 +133,12 @@ public:
           continue;
         auto index = std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
                      target.params.begin();
-        auto argument = i->args.at(index);
+        if (i->slot != None && index == 0) {
+          referenceArguments[i->result] = i->slot;
+          originsChanged = true;
+          continue;
+        }
+        auto argument = i->args.at(index - (i->slot != None));
         if (referenceArguments.contains(argument)) {
           referenceArguments[i->result] = referenceArguments.at(argument);
           originsChanged = true;
@@ -179,6 +184,9 @@ public:
     }
     for (const auto &parameter : program.semantics.functions[graph.function].parameterRegions)
       graph.regions.emplace(parameter.region, Region{parameter.region, RegionKind::Parameter, {}});
+    for (const auto &parameter :
+         program.semantics.functions[graph.function].payloadParameterRegions)
+      graph.regions.emplace(parameter.region, Region{parameter.region, RegionKind::Parameter, {}});
     for (const auto &loan : graph.loans) {
       graph.regions.emplace(loan.region, Region{loan.region, RegionKind::Local, {}});
       graph.constraints.push_back({ConstraintKind::ContainsPoint, loan.region, None, loan.created,
@@ -216,6 +224,13 @@ public:
                                    {},
                                    ConstraintReason::FunctionResult,
                                    signature.loc});
+      for (auto origin : signature.additionalResultOrigins)
+        graph.constraints.push_back({ConstraintKind::Subregion,
+                                     signature.resultRegion,
+                                     program.semantics.symbols[origin].region,
+                                     {},
+                                     ConstraintReason::FunctionResult,
+                                     signature.loc});
       for (const auto &b : graph.blocks)
         if (b.reachable && b.terminator == Terminator::Return)
           graph.constraints.push_back({ConstraintKind::ContainsPoint,

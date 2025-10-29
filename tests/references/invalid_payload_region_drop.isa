@@ -1,0 +1,14 @@
+fn forward(value: Option<&String>) -> Option<&String> {
+  return value.move();
+}
+fn main() {
+  let text = String::new();
+  let input = Option::Some(&text);
+  let output = forward(input.move());
+  let moved = output.move();
+  text.drop();
+  match moved {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+}

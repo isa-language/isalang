@@ -1,0 +1,32 @@
+fn forward(value: Option<&String>) -> Option<&String> {
+  return value.move();
+}
+fn rebuild(value: Option<&String>) -> Option<&String> {
+  match value {
+    Option::Some(view) => {
+      return Option::Some(view);
+    },
+    Option::None => {
+      return Option::None;
+    },
+  }
+}
+fn main() {
+  let text = String::from("payload");
+  let input = Option::Some(&text);
+  let output = forward(input.move());
+  let result = rebuild(output.move());
+  match result {
+    Option::Some(view) => print(view),
+    Option::None => print(0),
+  }
+  text.push_str("!");
+  print(text);
+  let none: Option<&String> = Option::None;
+  let absent = rebuild(forward(none.move()));
+  text.clear();
+  match absent {
+    Option::Some(view) => print(view),
+    Option::None => print(0),
+  }
+}

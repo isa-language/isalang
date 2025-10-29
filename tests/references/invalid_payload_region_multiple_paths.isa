@@ -1,0 +1,8 @@
+enum Views<T> {
+  Pair(T, T),
+  Empty,
+}
+fn wrong(value: Views<&String>) -> Option<&String> {
+  return Option::None;
+}
+fn main() {}

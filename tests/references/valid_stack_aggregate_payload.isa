@@ -1,0 +1,57 @@
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+impl<T> Pair<T> {
+  fn value(shared self) -> &T {
+    return &self.second;
+  }
+}
+fn wrap(data: &Pair<i32>) -> Option<&Pair<i32 >> {
+  return Option::Some(data);
+}
+fn relay(value: Option<&Pair<i32 >>) -> Option<&Pair<i32 >> {
+  return value.move();
+}
+fn value(input: Option<&Pair<i32 >>) -> Option<&i32> {
+  match input {
+    Option::Some(view) => {
+      return Option::Some(view.value());
+    },
+    Option::None => {
+      return Option::None;
+    },
+  }
+}
+fn array_view(values: &i32[3]) -> Option<&i32[3]> {
+  return Option::Some(values);
+}
+fn main() {
+  let data = Pair<i32>::new();
+  data.first = 1;
+  data.second = 42;
+  let item = relay(wrap(&data));
+  match item {
+    Option::Some(view) => print(view.value()),
+    Option::None => {}
+  }
+  data.second = 43;
+  print(data.second);
+  let field = value(wrap(&data));
+  match field {
+    Option::Some(v) => print(v),
+    Option::None => {}
+  }
+  data.second = 44;
+  let values: i32[3] = [10, 20, 30];
+  let array = array_view(&values);
+  match array {
+    Option::Some(view) => {
+      print(view.len());
+      print(view[2]);
+    },
+    Option::None => {}
+  }
+  values[2] = 40;
+  print(values[2]);
+}

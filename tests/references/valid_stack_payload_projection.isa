@@ -1,0 +1,33 @@
+struct Data {
+  first: i32,
+  second: i32,
+}
+fn field(data: &Data) -> Result<&i32, i32> {
+  return Result::Ok(&data.second);
+}
+fn element(values: &i32[], index: usize) -> Option<&i32> {
+  return Option::Some(&values[index]);
+}
+fn index() -> usize {
+  print(1);
+  return 2;
+}
+fn main() {
+  let data = Data::new();
+  data.first = 10;
+  data.second = 42;
+  let result = field(&data);
+  match result {
+    Result::Ok(v) => print(v),
+    Result::Err(e) => print(e)
+  }
+  data.second = 43;
+  let values: i32[3] = [10, 20, 30];
+  let item = element(&values, index());
+  match item {
+    Option::Some(v) => print(v),
+    Option::None => {}
+  }
+  values[2] = 40;
+  print(values[2]);
+}

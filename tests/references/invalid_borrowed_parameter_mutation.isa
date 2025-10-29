@@ -1,0 +1,10 @@
+fn inspect(value: Option<&String>) {
+  match value {
+    Option::Some(view) => view.clear(),
+    Option::None => {},
+  }
+}
+fn main() {
+  let text = String::new();
+  inspect(Option::Some(&text));
+}

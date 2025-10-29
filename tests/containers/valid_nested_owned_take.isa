@@ -1,0 +1,17 @@
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+struct Holder<T> {
+  value: T,
+}
+fn main() {
+  let pair = Pair<String>::new();
+  pair.first = String::from("a");
+  pair.second = String::from("b");
+  let outer = Holder<Pair<String >>::new();
+  outer.value = pair.move();
+  let taken = outer.value.move();
+  let text = taken.second.move();
+  print(text);
+}

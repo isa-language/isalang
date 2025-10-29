@@ -1,0 +1,48 @@
+fn choose(a: &String, b: &String, condition: bool) -> Option<&String> {
+  if condition {
+    return Option::Some(a);
+  }
+  return Option::Some(b);
+}
+fn forward(a: &String, b: &String, condition: bool) -> Option<&String> {
+  return choose(a, b, condition);
+}
+fn identity(value: &String) -> &String {
+  return value;
+}
+fn inspect(value: &String) {
+  print(value);
+}
+fn main() {
+  let a = String::from("left");
+  let b = String::from("right");
+  let first = forward(&a, &b, true);
+  let second = first.move();
+  match &second {
+    Option::Some(r) => {
+      inspect(r);
+      let view = identity(r).as_str();
+      let copy = view;
+      print(copy);
+    },
+    Option::None => {},
+  }
+  match second {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  let third = forward(&a, &b, false);
+  match third {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  let same = choose(&a, &a, true);
+  match same {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  a.push_str("!");
+  b.push_str("!");
+  print(a);
+  print(b);
+}

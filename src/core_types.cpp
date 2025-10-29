@@ -8,8 +8,7 @@ namespace isac::core {
 void checkTypes(const Program &p) {
   for (const auto &type : p.semantics.types)
     if (type.kind == hir::Type::Reference &&
-        (type.element >= p.semantics.types.size() || !p.semantics.heap(type.element) ||
-         p.semantics.types[type.element].protocol != None || type.width != 1 ||
+        (!p.semantics.supportsStoredSharedReference(type.element) || type.width != 1 ||
          type.dropGlue != hir::DropGlue::Trivial ||
          type.representation != hir::Representation::Stack))
       fail({}, DiagnosticCode::InvalidCore, "invalid stored-reference representation");
@@ -27,9 +26,12 @@ void checkTypes(const Program &p) {
       fail(function.loc, DiagnosticCode::InvalidCore, "incomplete reference result contract");
     if (function.resultOrigin != None) {
       if (function.resultOrigin >= p.semantics.symbols.size() || function.external ||
-          !function.intrinsic.empty() || function.owner != None ||
-          std::find(function.params.begin(), function.params.end(), function.resultOrigin) ==
-              function.params.end())
+          !function.intrinsic.empty() ||
+          (function.owner != None && (function.resultBorrowedContainer ||
+                                      p.semantics.types[function.owner].protocol != None)) ||
+          (!function.resultPayloadSource &&
+           std::find(function.params.begin(), function.params.end(), function.resultOrigin) ==
+               function.params.end()))
         fail(function.loc, DiagnosticCode::InvalidCore, "invalid reference result origin");
       const auto &origin = p.semantics.symbols[function.resultOrigin];
       if (!origin.reference || origin.access != Access::Shared ||
@@ -38,6 +40,67 @@ void checkTypes(const Program &p) {
                 : p.semantics.borrowResultCompatible(origin.type, function.result)))
         fail(function.loc, DiagnosticCode::InvalidCore, "invalid reference result contract");
     }
+    std::set<SymbolId> resultOrigins{function.resultOrigin};
+    for (auto id : function.additionalResultOrigins) {
+      if (!function.resultBorrowedContainer || function.resultOrigin == None ||
+          id >= p.semantics.symbols.size() || !resultOrigins.insert(id).second)
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid additional result origin");
+      const auto &origin = p.semantics.symbols[id];
+      if (!origin.reference || origin.access != Access::Shared ||
+          !p.semantics.borrowedPayloadResultCompatible(origin.type, function.result))
+        fail(function.loc, DiagnosticCode::InvalidCore,
+             "invalid additional result region contract");
+    }
+    std::set<SymbolId> payloadParameters, payloadOrigins;
+    for (const auto &contract : function.payloadParameterRegions) {
+      if (function.external || !function.intrinsic.empty() ||
+          contract.parameter >= p.semantics.symbols.size() ||
+          contract.origin >= p.semantics.symbols.size() || contract.region == None ||
+          std::find(function.params.begin(), function.params.end(), contract.parameter) ==
+              function.params.end() ||
+          std::find(function.params.begin(), function.params.end(), contract.origin) !=
+              function.params.end() ||
+          !payloadParameters.insert(contract.parameter).second ||
+          !payloadOrigins.insert(contract.origin).second)
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid payload parameter contract");
+      const auto &parameter = p.semantics.symbols[contract.parameter];
+      const auto &origin = p.semantics.symbols[contract.origin];
+      if (parameter.reference || parameter.receiver || !origin.reference || !origin.parameter ||
+          origin.receiver || origin.access != Access::Shared || origin.region != contract.region ||
+          p.semantics.borrowedPayloadInputType(parameter.type) != origin.type)
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid payload origin contract");
+    }
+    std::set<SymbolId> resultPayloadOrigins, resultPayloadParameters;
+    for (const auto &source : function.payloadResultSources()) {
+      if (!function.resultBorrowedContainer || !payloadParameters.contains(source.parameter))
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid payload result source");
+      const auto &parameter = p.semantics.symbols[source.parameter];
+      auto path = p.semantics.singleBorrowedPayloadPath(parameter.type);
+      auto contract = std::find_if(function.payloadParameterRegions.begin(),
+                                   function.payloadParameterRegions.end(),
+                                   [&](const auto &r) { return r.parameter == source.parameter; });
+      if (!path || *path != source.path || !function.acceptsResultOrigin(contract->origin) ||
+          !resultPayloadParameters.insert(source.parameter).second ||
+          !resultPayloadOrigins.insert(contract->origin).second ||
+          p.semantics.unborrowedVariants(function.result).empty())
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid payload result path or region");
+    }
+    if (function.resultPayloadSource) {
+      auto source = function.resultPayloadSource->parameter;
+      auto contract = std::find_if(function.payloadParameterRegions.begin(),
+                                   function.payloadParameterRegions.end(),
+                                   [&](const auto &r) { return r.parameter == source; });
+      if (contract->origin != function.resultOrigin)
+        fail(function.loc, DiagnosticCode::InvalidCore, "payload result primary origin mismatch");
+    }
+    for (auto id : function.additionalResultOrigins)
+      if (std::find(function.params.begin(), function.params.end(), id) == function.params.end() &&
+          !resultPayloadOrigins.contains(id))
+        fail(function.loc, DiagnosticCode::InvalidCore, "additional origin has no input contract");
+    for (auto id : function.params)
+      if (p.semantics.containsReferences(p.semantics.symbols[id].type) !=
+          payloadParameters.contains(id))
+        fail(function.loc, DiagnosticCode::InvalidCore, "missing payload parameter contract");
     if (function.resultOrigin == None && !function.external && function.intrinsic.empty() &&
         (p.semantics.containsReferences(function.result) ||
          p.semantics.types.at(function.result).protocol != None ||
@@ -232,6 +295,25 @@ void checkTypes(const Program &p) {
             bad();
           break;
         }
+        case Inst::FieldStore:
+        case Inst::FieldTake:
+        case Inst::FieldDrop: {
+          const auto &container = p.semantics.types[slot()];
+          if (container.kind != hir::Type::Structure || p.semantics.heap(slot()) ||
+              container.protocol != None || i.fieldIndex >= container.fields.size())
+            bad();
+          auto field = container.fields.at(i.fieldIndex).type;
+          expect(field, i.type);
+          if (!p.semantics.ownedFieldType(field))
+            bad();
+          if (i.kind == Inst::FieldStore) {
+            if (i.args.size() != 1)
+              bad();
+            expect(arg(0), field);
+          } else if (!i.args.empty())
+            bad();
+          break;
+        }
         case Inst::Read:
         case Inst::Write:
           if (i.args.size() == (i.kind == Inst::Read ? 1u : 2u)) {
@@ -244,6 +326,10 @@ void checkTypes(const Program &p) {
               expect(arg(0), i.type);
             break;
           }
+          for (auto field : p.semantics.ownedFields(slot()))
+            if (const auto &f = p.semantics.types[slot()].fields[field];
+                i.offset >= f.offset && i.offset < f.offset + p.semantics.storageWidth(f.type))
+              bad();
           if (i.offset >= p.semantics.types[slot()].width || (!scalar(i.type) && i.type != RawPtr))
             bad();
           if (i.kind == Inst::Write) {

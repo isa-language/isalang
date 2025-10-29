@@ -1,0 +1,15 @@
+enum Views<T> {
+  One(T),
+  Other(T),
+}
+fn wrong(value: Option<&String>) -> Views<&String> {
+  match value {
+    Option::Some(view) => {
+      return Views::One(view);
+    },
+    Option::None => {
+      return Views::Other(&String::new());
+    },
+  }
+}
+fn main() {}

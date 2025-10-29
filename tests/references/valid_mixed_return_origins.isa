@@ -1,0 +1,25 @@
+fn choose(a: Option<&String>, b: &String, condition: bool) -> Option<&String> {
+  if condition {
+    return a.move();
+  }
+  return Option::Some(b);
+}
+fn main() {
+  let a = String::from("container");
+  let b = String::from("parameter");
+  let result = choose(Option::Some(&a), &b, true);
+  match result {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  let second = choose(Option::Some(&a), &b, false);
+  match second {
+    Option::Some(r) => {
+      let view = r.as_str();
+      print(view);
+    },
+    Option::None => {}
+  }
+  a.clear();
+  b.clear();
+}

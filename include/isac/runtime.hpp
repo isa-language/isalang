@@ -42,7 +42,9 @@ struct Instruction {
     View,
     Length,
     IndexCheck,
-    Subview
+    Subview,
+    Address,
+    AddressView
   } kind;
   Value result = NoValue;
   Type type;

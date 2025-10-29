@@ -1,0 +1,9 @@
+fn main() {
+  let data = 42;
+  let item = Option::Some(&data);
+  data = 43;
+  match item {
+    Option::Some(v) => print(v),
+    Option::None => {}
+  }
+}

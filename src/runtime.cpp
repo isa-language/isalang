@@ -118,10 +118,10 @@ public:
 };
 void inst(const Instruction &i, std::ostream &o, int d) {
   static const char *names[] = {
-      "constant",   "alloc",  "load",        "store",  "call",     "binary",     "unary",
-      "if",         "return", "heap.alloc",  "free",   "load.ptr", "store.ptr",  "memcpy",
-      "memmove",    "cast",   "loop",        "break",  "continue", "static_str", "record.alloc",
-      "slice.view", "length", "index.check", "subview"};
+      "constant",   "alloc",  "load",        "store",   "call",     "binary",      "unary",
+      "if",         "return", "heap.alloc",  "free",    "load.ptr", "store.ptr",   "memcpy",
+      "memmove",    "cast",   "loop",        "break",   "continue", "static_str",  "record.alloc",
+      "slice.view", "length", "index.check", "subview", "address",  "address.view"};
   o << std::string(d, ' ');
   if (i.result != NoValue)
     o << "%" << i.result << " = ";

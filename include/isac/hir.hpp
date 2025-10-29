@@ -3,6 +3,7 @@
 #include "isac/intrinsics.hpp"
 #include "isac/target.hpp"
 #include <limits>
+#include <optional>
 #include <set>
 namespace isac {
 using GenericDeclId = uint32_t;
@@ -176,6 +177,22 @@ struct ParameterRegion {
   RegionId region;
   BorrowKind kind;
 };
+
+struct PayloadParameterRegion {
+  SymbolId parameter;
+  SymbolId origin;
+  RegionId region;
+};
+
+struct PayloadPath {
+  VariantId variant;
+  uint32_t field;
+  bool operator==(const PayloadPath &) const = default;
+};
+struct PayloadResultSource {
+  SymbolId parameter;
+  PayloadPath path;
+};
 struct Function {
   FunctionKind kind = FunctionKind::Normal;
   FunctionEffects effects;
@@ -189,7 +206,26 @@ struct Function {
   Access access = Access::Own;
   std::vector<SymbolId> params;
   std::vector<ParameterRegion> parameterRegions;
+  std::vector<PayloadParameterRegion> payloadParameterRegions;
   SymbolId resultOrigin = None;
+  std::optional<PayloadResultSource> resultPayloadSource;
+
+  std::vector<SymbolId> additionalResultOrigins;
+  std::vector<PayloadResultSource> additionalPayloadSources;
+  std::vector<PayloadResultSource> payloadResultSources() const {
+    auto sources = additionalPayloadSources;
+    if (resultPayloadSource)
+      sources.insert(sources.begin(), *resultPayloadSource);
+    return sources;
+  }
+  bool acceptsResultOrigin(SymbolId origin) const {
+    if (resultOrigin == origin)
+      return true;
+    for (auto candidate : additionalResultOrigins)
+      if (candidate == origin)
+        return true;
+    return false;
+  }
   bool resultBorrowedContainer = false;
   bool returnsReference() const {
     return resultOrigin != None && !resultBorrowedContainer;
@@ -267,6 +303,25 @@ struct Program {
       offset += storageWidth(payload.at(n));
     return offset;
   }
+  bool supportsStoredSharedReference(TypeId t) const {
+    if (t >= types.size() || types[t].protocol != None)
+      return false;
+    if (heap(t) || scalar(t))
+      return true;
+    const auto &shape = types[t];
+    if (shape.width == 0)
+      return false;
+    if (shape.kind == Type::Array)
+      return scalar(shape.element);
+    if (shape.kind != Type::Structure)
+      return false;
+    for (const auto &field : shape.fields) {
+      const auto &member = types[field.type];
+      if (!scalar(field.type) && !(member.kind == Type::Array && scalar(member.element)))
+        return false;
+    }
+    return true;
+  }
 
   bool borrowResultCompatible(TypeId input, TypeId result) const {
     if (input == result)
@@ -289,13 +344,49 @@ struct Program {
     for (const auto &variant : types[result].variants)
       for (auto payload : variant.payload) {
         if (reference(payload)) {
-          if (types[payload].element != input)
+          if (!borrowResultCompatible(input, types[payload].element))
             return false;
           found = true;
         } else if (containsReferences(payload))
           return false;
       }
     return found;
+  }
+  TypeId borrowedPayloadInputType(TypeId container) const {
+    if (types.at(container).kind != Type::Enum)
+      return None;
+    for (const auto &variant : types[container].variants)
+      for (auto payload : variant.payload)
+        if (reference(payload)) {
+          auto element = types[payload].element;
+          return borrowedPayloadResultCompatible(element, container) ? element : None;
+        }
+    return None;
+  }
+  std::optional<PayloadPath> singleBorrowedPayloadPath(TypeId container) const {
+    std::optional<PayloadPath> path;
+    if (types.at(container).kind != Type::Enum)
+      return {};
+    for (const auto &variant : types[container].variants)
+      for (uint32_t n = 0; n < variant.payload.size(); ++n)
+        if (containsReferences(variant.payload[n])) {
+          if (path || !reference(variant.payload[n]))
+            return {};
+          path = PayloadPath{variant.id, n};
+        }
+    return path;
+  }
+
+  std::set<VariantId> unborrowedVariants(TypeId container) const {
+    std::set<VariantId> result;
+    for (const auto &variant : types.at(container).variants) {
+      bool borrowed = false;
+      for (auto payload : variant.payload)
+        borrowed |= containsReferences(payload);
+      if (!borrowed)
+        result.insert(variant.id);
+    }
+    return result;
   }
   std::set<uint32_t> borrowedPayloadOffsets(TypeId result) const {
     std::set<uint32_t> offsets;
@@ -317,9 +408,33 @@ struct Program {
           return true;
     return false;
   }
+  bool ownedFieldType(TypeId t) const {
+    if (types[t].protocol != None)
+      return false;
+    if (heap(t))
+      return true;
+
+    if (types[t].kind != Type::Structure)
+      return false;
+    for (const auto &instance : instances)
+      if (instance.type == t)
+        return needsDrop(t);
+    return false;
+  }
+  std::set<uint32_t> ownedFields(TypeId t) const {
+    std::set<uint32_t> result;
+    if (types[t].kind == Type::Structure && !heap(t))
+      for (uint32_t n = 0; n < types[t].fields.size(); ++n)
+        if (ownedFieldType(types[t].fields[n].type))
+          result.insert(n);
+    return result;
+  }
   bool needsDrop(TypeId t) const {
     if (heap(t))
       return true;
+    for (const auto &field : types[t].fields)
+      if (needsDrop(field.type))
+        return true;
     for (const auto &variant : types[t].variants)
       for (auto payload : variant.payload)
         if (needsDrop(payload))

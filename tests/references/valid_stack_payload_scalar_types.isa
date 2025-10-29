@@ -1,0 +1,38 @@
+fn main() {
+  let small: i8 = -7;
+  let flag = true;
+  let real: f64 = 2.5;
+  let single: f32 = 1.5;
+  let letter = 'á';
+  let unsigned: u64 = 18446744073709551615u64;
+  let a = Option::Some(&small);
+  match a {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  let b = Option::Some(&flag);
+  match b {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  let c = Option::Some(&real);
+  match c {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  let d = Option::Some(&single);
+  match d {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  let e = Option::Some(&letter);
+  match e {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  let f = Option::Some(&unsigned);
+  match f {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+}

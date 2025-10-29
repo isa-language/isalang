@@ -1,0 +1,4 @@
+fn bad(values: &i32[]) {
+  let item = Option::Some(values);
+}
+fn main() {}

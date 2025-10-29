@@ -1,0 +1,11 @@
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+struct Holder<T> {
+  value: T,
+}
+fn main() {
+  let h = Holder<Pair<String >>::new();
+  h.value = Pair<String>::new();
+}

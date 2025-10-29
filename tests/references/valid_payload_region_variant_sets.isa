@@ -1,0 +1,34 @@
+enum Views<T> {
+  One(T),
+  Empty,
+  Missing(i32),
+}
+fn choose(value: Option<&String>, condition: bool) -> Views<&String> {
+  if condition {
+    return Views::Empty;
+  }
+  match value {
+    Option::Some(view) => {
+      return Views::One(view);
+    },
+    Option::None => {
+      return Views::Missing(7);
+    },
+  }
+}
+fn main() {
+  let text = String::from("unused");
+  let n: Option<&String> = Option::None;
+  let v = choose(n.move(), false);
+  text.clear();
+  match &v {
+    Views::Empty => print(1),
+    Views::Missing(code) => print(code),
+    Views::One(view) => print(view),
+  }
+  match v {
+    Views::Missing(code) => print(code),
+    Views::One(view) => print(view),
+    Views::Empty => print(2),
+  }
+}

@@ -1,0 +1,20 @@
+fn inspect(value: Result<&String, i32>, early: bool) {
+  if early {
+    return;
+  }
+  match value {
+    Result::Ok(view) => print(view),
+    Result::Err(code) => print(code),
+  }
+}
+fn main() {
+  let text = String::from("result");
+  let ok: Result<&String, i32> = Result::Ok(&text);
+  inspect(ok.move(), false);
+  let err: Result<&String, i32> = Result::Err(7);
+  inspect(err.move(), false);
+  let early: Result<&String, i32> = Result::Ok(&text);
+  inspect(early.move(), true);
+  text.push_str("!");
+  print(text);
+}

@@ -1,0 +1,19 @@
+fn choose(a: &i32, b: &i32, flag: bool) -> Option<&i32> {
+  if flag {
+    return Option::Some(a);
+  }
+  return Option::Some(b);
+}
+fn main() {
+  let a = 10;
+  let b = 20;
+  let value = choose(&a, &b, false);
+  match value {
+    Option::Some(r) => print(r),
+    Option::None => {}
+  }
+  a = 30;
+  b = 40;
+  print(a);
+  print(b);
+}

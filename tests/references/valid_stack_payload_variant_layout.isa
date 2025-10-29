@@ -1,0 +1,22 @@
+enum Choice<T> {
+  View(T),
+  Number(i32),
+}
+fn inspect(value: Choice<&i32>) {
+  match &value {
+    Choice::View(r) => print(r),
+    Choice::Number(n) => print(n)
+  }
+  match value {
+    Choice::View(r) => print(r),
+    Choice::Number(n) => print(n)
+  }
+}
+fn main() {
+  let number = 42;
+  inspect(Choice::View(&number));
+  let plain: Choice<&i32> = Choice::Number(7);
+  inspect(plain.move());
+  number = 43;
+  print(number);
+}

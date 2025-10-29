@@ -97,7 +97,8 @@ class Eraser {
     return result;
   }
   void destroy(std::vector<I> &out, TypeId tid, runtime::Value value,
-               const std::vector<uint32_t> &moved = {}) {
+               const std::vector<uint32_t> &moved = {},
+               const std::vector<uint32_t> &absentFields = {}) {
     const auto &t = core.semantics.types[tid];
     if (core.semantics.heap(tid)) {
       I drop{};
@@ -110,6 +111,14 @@ class Eraser {
                                                                             : "isac_rt_input_drop";
       }
       emit(out, drop, false);
+    } else if (t.kind == hir::Type::Structure) {
+      for (size_t n = t.fields.size(); n > 0; --n) {
+        auto id = static_cast<uint32_t>(n - 1);
+        const auto &field = t.fields[id];
+        if (core.semantics.needsDrop(field.type) &&
+            std::find(absentFields.begin(), absentFields.end(), id) == absentFields.end())
+          destroy(out, field.type, project(out, value, field.offset, field.type));
+      }
     } else if (t.kind == hir::Type::Enum) {
       auto tag = load(out, value, 0, {T::Scalar, 1, 32});
       for (const auto &variant : t.variants) {
@@ -151,14 +160,23 @@ class Eraser {
 
       for (auto sid : c.cleanup) {
         auto found = c.movedPayloads.find(sid);
+        auto absent = c.absentFields.find(sid);
         destroy(out, core.semantics.symbols[sid].type, slots.at(sid),
-                found == c.movedPayloads.end() ? std::vector<uint32_t>{} : found->second);
+                found == c.movedPayloads.end() ? std::vector<uint32_t>{} : found->second,
+                absent == c.absentFields.end() ? std::vector<uint32_t>{} : absent->second);
       }
       if (c.freeTemporary)
-        destroy(out, c.type, i.args.at(0));
+        destroy(out, c.type, i.args.at(0), {}, c.temporaryAbsentFields);
       switch (c.kind) {
       case C::StoreReference:
-        values[c.result] = slots.at(c.slot);
+        if (!core.semantics.heap(core.semantics.types[c.type].element)) {
+          i.kind = I::Address;
+          i.type = {T::Pointer, 1};
+          i.args = {slots.at(c.slot)};
+          values[c.result] = emit(out, i);
+        } else {
+          values[c.result] = slots.at(c.slot);
+        }
         break;
       case C::ReferenceArgument:
         values[c.result] = referenceView(out, slots.at(c.slot), c.type);
@@ -340,6 +358,24 @@ class Eraser {
         i.offset = c.offset;
         values[c.result] = emit(out, i);
         break;
+      case C::FieldStore:
+      case C::FieldTake:
+      case C::FieldDrop: {
+        const auto &field =
+            core.semantics.types[core.semantics.symbols[c.slot].type].fields.at(c.fieldIndex);
+        if (c.replaceField)
+          destroy(out, field.type, project(out, slots.at(c.slot), field.offset, field.type));
+        if (c.kind == C::FieldStore) {
+          if (type(field.type).kind == T::Buffer) {
+            for (uint32_t n = 0; n < type(field.type).width; ++n)
+              store(out, slots.at(c.slot), load(out, i.args.at(0), n, {T::Scalar, 1, 64}),
+                    field.offset + n);
+          } else
+            store(out, slots.at(c.slot), i.args.at(0), field.offset);
+        } else if (c.kind == C::FieldTake)
+          values[c.result] = project(out, slots.at(c.slot), field.offset, field.type);
+        break;
+      }
       case C::PayloadTake:
         values[c.result] = project(out, slots.at(c.slot), c.offset, c.type);
         break;
@@ -381,6 +417,15 @@ class Eraser {
         } else if (!c.args.empty())
           slots[c.offset] = values.at(c.args[0]);
         else if (c.projection) {
+
+          if (c.storedPayloadReference && !core.semantics.heap(c.type)) {
+            auto address = load(out, slots.at(c.slot), c.projection, {T::Pointer, 1});
+            i.kind = I::AddressView;
+            i.type = referenceType(c.type);
+            i.args = {address};
+            slots[c.offset] = emit(out, i);
+            break;
+          }
           auto value = project(out, slots.at(c.slot), c.projection, c.type);
           if (scalar(c.type)) {
             I alloc{};

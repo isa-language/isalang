@@ -1,0 +1,8 @@
+fn relay(value: Option<&String>) -> Option<&String> {
+  return value.move();
+}
+fn wrong(value: Option<&String>) -> Option<&String> {
+  let local = String::from("local");
+  return relay(Option::Some(&local));
+}
+fn main() {}

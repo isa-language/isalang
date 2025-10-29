@@ -1,0 +1,11 @@
+fn wrong(value: Option<&String>, origin: &String) -> Option<&String> {
+  match value {
+    Option::Some(view) => {
+      return Option::Some(view);
+    },
+    Option::None => {
+      return Option::None;
+    },
+  }
+}
+fn main() {}

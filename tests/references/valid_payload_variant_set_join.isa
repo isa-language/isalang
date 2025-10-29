@@ -1,0 +1,61 @@
+enum Views<T> {
+  One(T),
+  Empty,
+  Missing(i32),
+}
+fn choose(value: Option<&String>, condition: bool) -> Views<&String> {
+  if condition {
+    return Views::Empty;
+  }
+  match value {
+    Option::Some(view) => {
+      return Views::One(view);
+    },
+    Option::None => {
+      return Views::Missing(7);
+    },
+  }
+}
+fn main() {
+  let i: i32 = 0;
+  while i < 2 {
+    let n: Option<&String> = Option::None;
+    let v = choose(n.move(), i == 0);
+    if i == 0 {
+      match &v {
+        Views::Empty => print(1),
+        Views::Missing(code) => print(code),
+        Views::One(view) => print(view),
+      }
+    } else {
+      match &v {
+        Views::Missing(code) => print(code),
+        Views::Empty => print(2),
+        Views::One(view) => print(view),
+      }
+    }
+    loop {
+      if i == 0 {
+        match &v {
+          Views::Empty => print(3),
+          Views::Missing(code) => print(code),
+          Views::One(view) => print(view),
+        }
+        break;
+      }
+      match &v {
+        Views::Missing(code) => print(code),
+        Views::Empty => print(4),
+        Views::One(view) => print(view),
+      }
+      break;
+    }
+    let moved = v.move();
+    match moved {
+      Views::Empty => print(5),
+      Views::Missing(code) => print(code),
+      Views::One(view) => print(view),
+    }
+    i = i + 1;
+  }
+}

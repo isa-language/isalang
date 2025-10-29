@@ -1,0 +1,33 @@
+fn forward(value: Result<&String, i32>, yes: bool) -> Option<&String> {
+  if yes {
+    match value {
+      Result::Ok(view) => {
+        return Option::Some(view);
+      },
+      Result::Err(code) => {
+        return Option::None;
+      },
+    }
+  }
+  return Option::None;
+}
+
+fn relay(value: Option<&String>) -> Option<&String> {
+  return value.move();
+}
+
+fn main() {
+  let text = String::from("branches");
+  let i: i32 = 0;
+  while i < 2 {
+    let input: Result<&String, i32> = Result::Ok(&text);
+    let result = relay(forward(input.move(), i == 0));
+    match result {
+      Option::Some(view) => print(view),
+      Option::None => print(0),
+    }
+    text.push_str("!");
+    i = i + 1;
+  }
+  @println("{}", text);
+}

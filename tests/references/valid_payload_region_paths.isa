@@ -1,0 +1,55 @@
+enum Input<T> {
+  Missing,
+  Present(i32, T),
+}
+enum Views<T> {
+  Empty,
+  Pair(T, T),
+}
+fn adapt(value: Input<&String>, discard: bool) -> Result<&String, i32> {
+  if discard {
+    return Result::Err(9);
+  }
+  match value {
+    Input::Present(code, view) => {
+      return Result::Ok(view);
+    },
+    Input::Missing => {
+      return Result::Err(7);
+    },
+  }
+}
+fn duplicate(value: Result<&String, i32>) -> Views<&String> {
+  match value {
+    Result::Ok(view) => {
+      return Views::Pair(view, view);
+    },
+    Result::Err(code) => {
+      return Views::Empty;
+    },
+  }
+}
+fn inspect(value: Views<&String>) {
+  match value {
+    Views::Pair(a, b) => {
+      print(a);
+      print(b);
+    },
+    Views::Empty => print(0),
+  }
+}
+fn main() {
+  let text = String::from("paths");
+  let input = Input::Present(123, &text);
+  inspect(duplicate(adapt(input.move(), false)));
+  text.push_str("!");
+  print(text);
+  let missing: Input<&String> = Input::Missing;
+  let empty = duplicate(adapt(missing.move(), false));
+  text.clear();
+  inspect(empty.move());
+  let discarded = Input::Present(456, &text);
+  inspect(duplicate(adapt(discarded.move(), true)));
+  text.push_str("done");
+  print(text);
+}

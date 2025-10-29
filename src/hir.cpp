@@ -59,14 +59,14 @@ class Resolver {
     uint32_t offset = 0;
     for (const auto &field : decl.fields) {
       auto tid = substitute(field.type, instance.substitution);
-      if (!scalar(tid) && p.types[tid].kind != hir::Type::Array)
+      if (!scalar(tid) && p.types[tid].kind != hir::Type::Array && !p.ownedFieldType(tid))
         fail(loc, DiagnosticCode::InvalidPlace,
              "generic struct field `" + field.name +
                  "` requires aggregate element ownership support");
-      if (p.types[tid].width > 65536 - offset)
+      if (p.storageWidth(tid) > 65536 - offset)
         fail(loc, DiagnosticCode::InvalidPlace, "generic struct layout exceeds 65536 cells");
       type.fields.push_back({field.name, tid, offset});
-      offset += p.types[tid].width;
+      offset += p.storageWidth(tid);
     }
     type.width = std::max(1u, offset);
     auto tid = instance.type;
@@ -115,9 +115,10 @@ class Resolver {
   }
   std::map<TypeId, TypeId> sharedReferenceTypes;
   TypeId storedReferenceType(TypeId element, Loc loc) {
-    if (!p.heap(element) || p.types[element].protocol != None)
-      fail(loc, DiagnosticCode::EscapingView,
-           "stored references currently require a non-protocol heap wrapper");
+    if (!p.supportsStoredSharedReference(element))
+      fail(
+          loc, DiagnosticCode::EscapingView,
+          "stored references require a scalar, plain fixed stack aggregate or non-protocol heap wrapper");
     if (sharedReferenceTypes.contains(element))
       return sharedReferenceTypes.at(element);
     auto id = static_cast<TypeId>(p.types.size());
@@ -381,7 +382,9 @@ class Resolver {
                                 t == Str || t == RawPtr))
         fail(ap.loc, DiagnosticCode::EscapingView,
              "this reference parameter requires an unsupported ABI or protocol contract");
-      if (p.containsReferences(t))
+      if (p.containsReferences(t) &&
+          (ap.type.reference || self || f.external || !f.intrinsic.empty() ||
+           p.borrowedPayloadInputType(t) == None))
         fail(ap.loc, DiagnosticCode::EscapingView,
              "borrowed container parameters require payload origin contracts");
       if (t == Unit)
@@ -390,7 +393,18 @@ class Resolver {
                                       : ap.access;
       auto id = add(ap.name, t, ap.loc, access, true, self);
       f.params.push_back(id);
-      if (ap.type.reference) {
+      if (p.containsReferences(t)) {
+        auto origin = static_cast<SymbolId>(p.symbols.size());
+        auto region = nextRegion++;
+        hir::Symbol symbol{origin, ap.name, p.borrowedPayloadInputType(t), Access::Shared, true,
+                           false,  ap.loc};
+        symbol.reference = true;
+        symbol.region = region;
+        p.symbols.push_back(std::move(symbol));
+        f.payloadParameterRegions.push_back({id, origin, region});
+      }
+      if (ap.type.reference ||
+          (self && a.result.reference && access == Access::Shared && p.types[t].protocol == None)) {
         auto &symbol = p.symbols[id];
         symbol.reference = true;
         symbol.region = nextRegion++;
@@ -411,15 +425,42 @@ class Resolver {
         if (parameter.access == Access::Shared &&
             (f.resultBorrowedContainer ? p.borrowedPayloadResultCompatible(parameter.type, f.result)
                                        : p.borrowResultCompatible(parameter.type, f.result))) {
-          if (f.resultOrigin != None)
-            fail(a.result.loc, DiagnosticCode::EscapingView,
-                 "reference return has multiple possible input origins; this subset requires one");
-          f.resultOrigin = parameter.id;
+          if (f.resultOrigin != None) {
+            if (!f.resultBorrowedContainer)
+              fail(a.result.loc, DiagnosticCode::EscapingView,
+                   "direct reference return requires one input origin in this subset");
+            f.additionalResultOrigins.push_back(parameter.id);
+          } else {
+            f.resultOrigin = parameter.id;
+          }
         }
       }
-      if (f.resultOrigin == None || f.external || !f.intrinsic.empty() || f.owner != None)
+      if (f.resultBorrowedContainer)
+        for (const auto &region : f.payloadParameterRegions) {
+          const auto &origin = p.symbols[region.origin];
+          if (!p.borrowedPayloadResultCompatible(origin.type, f.result))
+            continue;
+          auto path = p.singleBorrowedPayloadPath(p.symbols[region.parameter].type);
+          if (!path)
+            fail(a.result.loc, DiagnosticCode::EscapingView,
+                 "returned references require a single borrowed payload path in the input "
+                 "container");
+          if (p.unborrowedVariants(f.result).empty())
+            fail(
+                a.result.loc, DiagnosticCode::EscapingView,
+                "payload-bound results require at least one reference-free variant in this subset");
+          if (f.resultOrigin == None) {
+            f.resultOrigin = region.origin;
+            f.resultPayloadSource = hir::PayloadResultSource{region.parameter, *path};
+          } else {
+            f.additionalResultOrigins.push_back(region.origin);
+            f.additionalPayloadSources.push_back({region.parameter, *path});
+          }
+        }
+      if (f.resultOrigin == None || f.external || !f.intrinsic.empty() ||
+          (f.owner != None && (f.resultBorrowedContainer || p.types[f.owner].protocol != None)))
         fail(a.result.loc, DiagnosticCode::EscapingView,
-             "reference return requires one compatible shared input-region contract; local owners "
+             "reference return requires a compatible shared input-region contract; local owners "
              "cannot escape");
       f.resultRegion = nextRegion++;
     }
@@ -476,7 +517,7 @@ class Resolver {
       auto &parameter = p.symbols[f.params[i]];
       auto &argument = e.args[i];
       bool alias = argument.kind == hir::Expr::Variable && p.symbols[argument.ref].reference;
-      if (parameter.reference) {
+      if (parameter.reference && !parameter.receiver) {
         if (argument.kind != hir::Expr::Borrow && !alias)
           fail(argument.loc, DiagnosticCode::ArgumentMismatch,
                "reference parameter requires an explicit borrow or reference binding");
@@ -839,7 +880,9 @@ class Resolver {
       if (e.args[0].type == RawPtr)
         fail(a.loc, DiagnosticCode::RestrictedOperation,
              "raw pointer reassignment is not supported");
-      if (p.linear(e.args[0].type))
+      if (p.linear(e.args[0].type) &&
+          !(e.args[0].kind == H::Field && e.args[0].args[0].kind == H::Variable &&
+            p.ownedFieldType(e.args[0].type)))
         fail(a.loc, DiagnosticCode::InvalidPlace,
              "PoC assignment supports scalar places; use a fresh let for resource moves");
       break;
@@ -867,7 +910,9 @@ class Resolver {
         return e;
       }
       if (a.text == "move" || a.text == "drop") {
-        if (recv.kind != H::Variable)
+        if (recv.kind != H::Variable &&
+            !(recv.kind == H::Field && recv.args[0].kind == H::Variable &&
+              p.ownedFieldType(recv.type)))
           fail(a.loc, DiagnosticCode::InvalidPlace, "explicit move/drop requires a named place");
         if (e.args.size() != 1)
           fail(a.loc, DiagnosticCode::ArgumentMismatch, "move/drop take no arguments");
@@ -984,7 +1029,7 @@ class Resolver {
     default:
       fail(a.loc, DiagnosticCode::TypeMismatch, "unsupported expression");
     }
-    if (e.kind == H::Call && p.functions[e.ref].returnsReference()) {
+    if ((e.kind == H::Call || e.kind == H::Method) && p.functions[e.ref].returnsReference()) {
       hir::Expr borrowed{};
       borrowed.kind = H::Borrow;
       borrowed.loc = e.loc;
@@ -1755,6 +1800,13 @@ public:
           fail(a.loc, DiagnosticCode::UnknownName, "unknown protocol `" + a.protocol + "`");
         p.types[id].protocol = protocols[a.protocol];
       }
+    }
+
+    for (auto &a : ast.structs) {
+      if (!a.parameters.empty())
+        continue;
+      privileged = a.trusted;
+      auto id = types[a.name];
       std::set<std::string> names;
       uint32_t offset = 0;
       for (auto &f : a.fields) {
@@ -1768,12 +1820,13 @@ public:
         if (t == Str)
           fail(f.loc, DiagnosticCode::EscapingView,
                "str fields require lifetime contracts, outside this PoC");
-        if (t == Unit || p.types[t].kind == hir::Type::Structure ||
-            p.types[t].kind == hir::Type::Enum)
+        if (t == Unit || (p.types[t].kind == hir::Type::Structure && !p.ownedFieldType(t)) ||
+            p.types[t].kind == hir::Type::Enum ||
+            (p.ownedFieldType(t) && p.types[id].protocol != None))
           fail(f.loc, DiagnosticCode::InvalidPlace,
-               "PoC struct fields require scalars or static scalar arrays");
+               "PoC struct fields require scalars, scalar arrays, or non-protocol heap owners");
         p.types[id].fields.push_back({f.name, t, offset});
-        offset += p.types[t].width;
+        offset += p.storageWidth(t);
       }
       p.types[id].width = std::max(1u, offset);
       if (p.types[id].representation == hir::Representation::StringRecord) {
@@ -2201,12 +2254,22 @@ void printHIR(const hir::Program &p, std::ostream &o) {
     for (const auto &region : f.parameterRegions)
       o << "  region.contract #v" << region.parameter << " #R" << region.region << " "
         << (region.kind == BorrowKind::Shared ? "Shared" : "Unique") << " caller-owned"
-        << (region.parameter == f.resultOrigin ? " result-bound\n" : " noescape\n");
+        << (f.acceptsResultOrigin(region.parameter) ? " result-bound\n" : " noescape\n");
+    for (const auto &region : f.payloadParameterRegions)
+      o << "  payload.region #v" << region.parameter << " #R" << region.region << " origin=#v"
+        << region.origin << " Shared caller-owned"
+        << (f.acceptsResultOrigin(region.origin) ? " result-bound\n" : " noescape\n");
+    for (const auto &source : f.payloadResultSources())
+      o << "  return.payload-source #v" << source.parameter << " variant=#V" << source.path.variant
+        << " field=" << source.path.field << "\n";
     if (f.resultBorrowedContainer)
       o << "  result.payload-regions: Shared borrowed container\n";
     if (f.resultOrigin != None)
       o << "  return.region #R" << f.resultRegion << " <= #R" << p.symbols[f.resultOrigin].region
         << " origin=#v" << f.resultOrigin << "\n";
+    for (auto origin : f.additionalResultOrigins)
+      o << "  return.region #R" << f.resultRegion << " <= #R" << p.symbols[origin].region
+        << " origin=#v" << origin << "\n";
     printS(f.body, o, 2);
   }
 }

@@ -1,0 +1,22 @@
+fn inspect(value: Option<&String>) {
+  match value {
+    Option::Some(view) => print(view),
+    Option::None => print(0),
+  }
+}
+fn forward(value: Option<&String>) {
+  inspect(value.move());
+}
+fn ignore(value: Option<&String>) {}
+fn main() {
+  let text = String::from("parameter");
+  let wrapped = Option::Some(&text);
+  forward(wrapped.move());
+  text.push_str("!");
+  print(text);
+  let none: Option<&String> = Option::None;
+  inspect(none.move());
+  ignore(Option::Some(&text));
+  text.clear();
+  print(text.len());
+}

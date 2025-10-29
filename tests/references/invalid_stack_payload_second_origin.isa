@@ -1,0 +1,13 @@
+fn choose(a: &i32, b: &i32) -> Option<&i32> {
+  return Option::Some(a);
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+  let item = choose(&a, &b);
+  b = 3;
+  match item {
+    Option::Some(v) => print(v),
+    Option::None => {}
+  }
+}

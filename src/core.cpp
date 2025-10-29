@@ -28,7 +28,7 @@ class Builder {
   }
   void borrowSource(const hir::Expr &e, Inst &binding) {
     const auto &source = e.args.at(0);
-    if (source.kind == hir::Expr::Call) {
+    if (source.kind == hir::Expr::Call || source.kind == hir::Expr::Method) {
       auto value = expr(source);
       binding.slot = referenceResults.at(value);
       binding.args = {value};
@@ -144,6 +144,11 @@ class Builder {
       i.access = Access::Shared;
       return emit(i);
     case E::Borrow:
+      if (scalar(e.type)) {
+        i.kind = Inst::Copy;
+        i.slot = receiver(e);
+        return emit(i);
+      }
       fail(e.loc, DiagnosticCode::InvalidCore, "unbound BorrowExpr in Core elaboration");
     case E::Cast:
       i.kind = Inst::Cast;
@@ -222,6 +227,19 @@ class Builder {
       return emit(i);
     case E::Assign: {
       const auto &target = e.args.at(0);
+      if (target.kind == E::Field && p.semantics.ownedFieldType(target.type)) {
+        i.kind = Inst::FieldStore;
+        i.slot = target.args.at(0).ref;
+        i.type = target.type;
+        i.quantity = Quantity::One;
+        const auto &fields = p.semantics.types[target.args[0].type].fields;
+        for (uint32_t n = 0; n < fields.size(); ++n)
+          if (fields[n].offset == target.ref)
+            i.fieldIndex = n;
+        i.args = {expr(e.args.at(1))};
+        emit(i, false);
+        return None;
+      }
       if (target.kind == E::Index && target.ref == None) {
         i.kind = Inst::Write;
         i.slot = receiver(target.args.at(0));
@@ -260,14 +278,28 @@ class Builder {
         i.args.push_back(expr(a));
       return emit(i);
     case E::Move:
+    case E::Drop:
+      if (e.args[0].kind == E::Field && p.semantics.ownedFieldType(e.args[0].type)) {
+        const auto &field = e.args[0];
+        i.kind = e.kind == E::Move ? Inst::FieldTake : Inst::FieldDrop;
+        i.slot = field.args.at(0).ref;
+        i.type = field.type;
+        i.quantity = Quantity::One;
+        const auto &fields = p.semantics.types[field.args[0].type].fields;
+        for (uint32_t n = 0; n < fields.size(); ++n)
+          if (fields[n].offset == field.ref)
+            i.fieldIndex = n;
+        return emit(i, e.kind == E::Move);
+      }
+      if (e.kind == E::Drop) {
+        i.kind = Inst::Drop;
+        i.slot = e.args[0].ref;
+        emit(i, false);
+        return None;
+      }
       i.kind = p.semantics.linear(e.type) ? Inst::Move : Inst::Copy;
       i.slot = e.args[0].ref;
       return emit(i);
-    case E::Drop:
-      i.kind = Inst::Drop;
-      i.slot = e.args[0].ref;
-      emit(i, false);
-      return None;
     case E::Print:
       if (p.semantics.types[e.args[0].type].representation == hir::Representation::StringRecord) {
         i.kind = Inst::TextPrint;
@@ -337,7 +369,9 @@ class Builder {
       auto result = emit(i, e.type != Unit || i.kind == Inst::ProtocolTransition);
       if (f.returnsReference()) {
         auto index = std::find(f.params.begin(), f.params.end(), f.resultOrigin) - f.params.begin();
-        referenceResults[result] = referenceResults.at(i.args.at(index));
+        referenceResults[result] = i.slot != None && index == 0
+                                       ? i.slot
+                                       : referenceResults.at(i.args.at(index - (i.slot != None)));
       }
       return result;
     }
@@ -532,8 +566,10 @@ struct Resource {
   SymbolId movedTo = None;
   Loc consumedAt = {}, borrowAt = {}, stateAt = {};
   std::set<uint32_t> movedPayloads = {};
-  std::map<uint32_t, SymbolId> loans = {};
+  std::map<uint32_t, std::set<SymbolId>> loans = {};
 
+  std::set<SymbolId> extraRoots = {};
+  std::set<uint32_t> absentFields = {};
   VariantId knownVariant = None;
   MemoryState memory() const {
     return !live                      ? MemoryState::Dead
@@ -543,9 +579,10 @@ struct Resource {
   }
   bool operator==(const Resource &other) const {
     return memory() == other.memory() && state == other.state && root == other.root &&
-           shared == other.shared && unique == other.unique && allocation == other.allocation &&
-           (!live || (movedPayloads == other.movedPayloads && loans == other.loans &&
-                      knownVariant == other.knownVariant));
+           extraRoots == other.extraRoots && shared == other.shared && unique == other.unique &&
+           allocation == other.allocation &&
+           (!live || (absentFields == other.absentFields && movedPayloads == other.movedPayloads &&
+                      loans == other.loans && knownVariant == other.knownVariant));
   }
 };
 struct Temporary {
@@ -554,10 +591,21 @@ struct Temporary {
   bool available = true;
   bool allocation = false;
   SymbolId movedFrom = None;
-  std::map<uint32_t, SymbolId> loans = {};
+  std::map<uint32_t, std::set<SymbolId>> loans = {};
+  std::set<uint32_t> absentFields = {};
+};
+struct VariantTest {
+  SymbolId symbol;
+  ValueId version;
+  VariantId variant;
 };
 struct Context {
   std::map<ValueId, VariantId> constructedVariants;
+
+  std::map<SymbolId, std::set<VariantId>> variantSets;
+  std::map<ValueId, std::set<VariantId>> valueVariantSets;
+  std::map<ValueId, std::pair<SymbolId, ValueId>> tagSources;
+  std::map<ValueId, VariantTest> variantTests;
   std::map<ValueId, int64_t> constants, tags;
   std::map<ValueId, bool> conditions;
 
@@ -567,7 +615,7 @@ struct Context {
   std::map<ValueId, SymbolId> pointers;
   std::map<SymbolId, SymbolId> pointerSlots;
   std::map<ValueId, SymbolId> references;
-  std::map<ValueId, SymbolId> views;
+  std::map<ValueId, std::set<SymbolId>> views;
   bool returned = false;
 };
 class Checker {
@@ -613,8 +661,42 @@ class Checker {
     }
     return it->second;
   }
+  std::set<SymbolId> origins(Context &c, SymbolId id, Loc loc) {
+    const auto &r = live(c, id, loc);
+    auto result = r.extraRoots;
+    result.insert(r.root == None ? id : r.root);
+    return result;
+  }
+  void retainOrigins(Context &c, const std::set<SymbolId> &owners, Loc loc) {
+    for (auto owner : owners) {
+      auto &r = live(c, owner, loc);
+      ++r.shared;
+      r.borrowAt = loc;
+    }
+  }
+  void releaseOrigins(Context &c, const std::set<SymbolId> &owners, Loc loc) {
+    for (auto owner : owners) {
+      auto &r = live(c, owner, loc);
+      if (!r.shared)
+        fail(loc, DiagnosticCode::InvalidCore, "unbalanced shared provenance carrier");
+      --r.shared;
+    }
+  }
+  void setAliasOrigins(Resource &alias, const std::set<SymbolId> &owners) {
+    alias.root = *owners.begin();
+    alias.extraRoots = owners;
+    alias.extraRoots.erase(alias.root);
+  }
+  void complete(const Resource &resource, Loc loc) {
+    if (!resource.absentFields.empty())
+      fail(
+          loc, DiagnosticCode::ConsumedResource,
+          "struct has uninitialized or moved owned fields; initialize them before moving or borrowing the whole value");
+  }
   Resource &access(Context &c, SymbolId id, Access requested, Loc l) {
     auto &r = live(c, id, l);
+    for (auto owner : r.extraRoots)
+      live(c, owner, l);
     auto &root = r.root == None ? r : live(c, r.root, l);
     if (r.root != None || symbol(id).reference) {
       if (r.root == None && (r.unique || (requested != Access::Shared && r.shared)))
@@ -645,7 +727,7 @@ class Checker {
         Loc activeOrigin = r.borrowAt;
         Loc lastUse;
         for (auto &[alias, resource] : c.vars)
-          if (resource.live && resource.root == id) {
+          if (resource.live && (resource.root == id || resource.extraRoots.contains(id))) {
             activeOrigin = resource.borrowAt;
             lastUse = symbol(alias).lastUse;
             break;
@@ -662,7 +744,7 @@ class Checker {
           if (state.live && state.root == None)
             for (const auto &[offset, owner] : state.loans) {
               (void)offset;
-              if (owner == id)
+              if (owner.contains(id))
                 diagnostic.secondary(symbol(container).loc,
                                      "this container retains a shared reference to the resource");
             }
@@ -677,6 +759,53 @@ class Checker {
     if (r.access == Access::Unique && requested == Access::Own)
       fail(l, DiagnosticCode::BorrowConflict, "unique borrow does not grant ownership");
     return root;
+  }
+  void forgetVariantSets(Context &c, SymbolId root) {
+    c.variantSets.erase(root);
+    for (auto it = c.tagSources.begin(); it != c.tagSources.end();)
+      if (it->second.first == root)
+        it = c.tagSources.erase(it);
+      else
+        ++it;
+    for (auto it = c.variantTests.begin(); it != c.variantTests.end();)
+      if (it->second.symbol == root)
+        it = c.variantTests.erase(it);
+      else
+        ++it;
+  }
+  void mergeVariantSets(Context &into, const Context &other) {
+    for (auto it = into.variantSets.begin(); it != into.variantSets.end();) {
+      auto found = other.variantSets.find(it->first);
+      if (found == other.variantSets.end())
+        it = into.variantSets.erase(it);
+      else {
+        it->second.insert(found->second.begin(), found->second.end());
+        ++it;
+      }
+    }
+  }
+  void refineTest(Context &c, ValueId condition, bool selected, Loc loc) {
+    auto found = c.variantTests.find(condition);
+    if (found == c.variantTests.end())
+      return;
+    const auto &test = found->second;
+    auto resource = c.vars.find(test.symbol);
+    if (resource == c.vars.end() || !resource->second.live ||
+        resource->second.version != test.version)
+      return;
+    if (!c.variantSets.contains(test.symbol)) {
+      for (const auto &variant : p.semantics.types[symbol(test.symbol).type].variants)
+        c.variantSets[test.symbol].insert(variant.id);
+    }
+    auto &variants = c.variantSets.at(test.symbol);
+    if (selected) {
+      if (!variants.contains(test.variant))
+        fail(loc, DiagnosticCode::InvalidCore, "impossible variant branch");
+      variants = {test.variant};
+    } else
+      variants.erase(test.variant);
+    if (variants.empty())
+      fail(loc, DiagnosticCode::InvalidCore, "empty variant set on a reachable branch");
   }
   void final(TypeId t, StateId s, const std::string &n, Loc l, Loc origin = {}) {
     auto pid = p.semantics.types[t].protocol;
@@ -739,10 +868,11 @@ class Checker {
     if (r.allocation) {
       site.cleanup.push_back(id);
       site.movedPayloads[id] = {r.movedPayloads.begin(), r.movedPayloads.end()};
+      site.absentFields[id] = {r.absentFields.begin(), r.absentFields.end()};
     }
     for (auto [offset, owner] : r.loans) {
       (void)offset;
-      --live(c, owner, l).shared;
+      releaseOrigins(c, owner, l);
     }
     r.loans.clear();
     r.allocation = false;
@@ -765,14 +895,14 @@ class Checker {
     auto &r = it->second;
     auto &root = c.vars.at(r.root);
     if (r.access == Access::Shared)
-      --root.shared;
+      releaseOrigins(c, origins(c, id, {}), {});
     else
       root.unique = false;
     r.live = false;
   }
   void endViews(Context &c) {
-    for (auto &[v, root] : c.views)
-      --c.vars.at(root).shared;
+    for (auto &[v, owners] : c.views)
+      releaseOrigins(c, owners, {});
     c.views.clear();
   }
   void finish(Context &c, Loc l, Inst &site) {
@@ -796,11 +926,13 @@ class Checker {
         fail(l, DiagnosticCode::UnconsumedResource,
              "unconsumed linear temporary %" + std::to_string(v));
   }
-  void call(Inst &i, Context &c) {
+  std::set<SymbolId> call(Inst &i, Context &c) {
+    std::set<SymbolId> payloadResultOrigin;
     auto &f = p.semantics.functions[i.function];
     size_t skip = i.slot == None ? 0 : 1;
     if (i.slot != None) {
       auto &r = access(c, i.slot, i.access, i.loc);
+      complete(r, i.loc);
       if (i.kind == Inst::ProtocolTransition) {
         auto &q = p.semantics.protocols[i.protocol];
         auto it = std::find_if(q.operations.begin(), q.operations.end(), [&](auto &op) {
@@ -843,10 +975,12 @@ class Checker {
           r.allocation = false;
       }
     }
+    if (i.slot != None && i.access == Access::Unique)
+      forgetVariantSets(c, c.vars.at(i.slot).root == None ? i.slot : c.vars.at(i.slot).root);
     std::map<SymbolId, Access> argumentRoots;
     if (i.slot != None) {
-      const auto &receiver = c.vars.at(i.slot);
-      argumentRoots[receiver.root == None ? i.slot : receiver.root] = i.access;
+      for (auto root : origins(c, i.slot, i.loc))
+        argumentRoots[root] = i.access;
     }
     for (size_t n = 0; n < i.args.size(); ++n) {
       const auto &parameter = symbol(f.params[n + skip]);
@@ -856,18 +990,45 @@ class Checker {
         if (found == c.references.end())
           fail(i.loc, DiagnosticCode::InvalidCore, "missing reference argument region");
         access(c, found->second, parameter.access, i.loc);
-        const auto &reference = c.vars.at(found->second);
-        auto root = reference.root == None ? found->second : reference.root;
-        if (argumentRoots.contains(root) &&
-            (parameter.access == Access::Unique || argumentRoots.at(root) == Access::Unique))
-          fail(i.loc, DiagnosticCode::InvalidReborrow,
-               "overlapping mutable reference arguments in the same call");
-        argumentRoots[root] = parameter.access;
+        for (auto root : origins(c, found->second, i.loc)) {
+          if (argumentRoots.contains(root) &&
+              (parameter.access == Access::Unique || argumentRoots.at(root) == Access::Unique))
+            fail(i.loc, DiagnosticCode::InvalidReborrow,
+                 "overlapping mutable reference arguments in the same call");
+          argumentRoots[root] = parameter.access;
+          if (parameter.access == Access::Unique)
+            forgetVariantSets(c, root);
+        }
       } else if (p.semantics.linear(t)) {
         auto &v = take(c, i.args[n], i.loc);
+        if (!v.absentFields.empty())
+          fail(i.loc, DiagnosticCode::ConsumedResource,
+               "cannot pass a struct with uninitialized owned fields");
         if (v.state != initial(t))
           fail(i.loc, DiagnosticCode::ProtocolReturn,
                "owned resource arguments must be in their initial protocol state");
+      }
+    }
+
+    for (size_t n = 0; n < i.args.size(); ++n) {
+      const auto &parameter = symbol(f.params[n + skip]);
+      if (!parameter.reference && p.semantics.containsReferences(parameter.type)) {
+        auto &value = c.values.at(i.args[n]);
+        for (const auto &source : f.payloadResultSources()) {
+          if (source.parameter != parameter.id)
+            continue;
+          const auto &path = source.path;
+          auto offset = p.semantics.payloadOffset(parameter.type, path.variant, path.field);
+          if (value.loans.contains(offset)) {
+            const auto &owners = value.loans.at(offset);
+            payloadResultOrigin.insert(owners.begin(), owners.end());
+          } else if (!value.loans.empty())
+            fail(i.loc, DiagnosticCode::InvalidCore,
+                 "argument loans do not match result source path");
+        }
+        for (auto [offset, owner] : value.loans)
+          releaseOrigins(c, owner, i.loc);
+        value.loans.clear();
       }
     }
     if (f.consumesSelf && i.slot != None) {
@@ -881,6 +1042,7 @@ class Checker {
       owner.consumedAt = i.loc;
       c.variants.erase(i.slot);
     }
+    return payloadResultOrigin;
   }
   void pointerAccess(Context &c, ValueId value, Access requested, Loc loc, bool free = false) {
     auto it = c.pointers.find(value);
@@ -909,24 +1071,45 @@ class Checker {
           i.inferredEnds.push_back(alias);
         }
       }
+      i.possibleVariants.clear();
+      i.storedPayloadReference = false;
       i.cleanup.clear();
       i.movedPayloads.clear();
       i.freeTemporary = false;
+      i.replaceField = false;
+      i.absentFields.clear();
+      i.temporaryAbsentFields.clear();
       switch (i.kind) {
       case Inst::Constant:
         if (i.type == I64)
           c.constants[i.result] = std::stoll(i.text);
         break;
       case Inst::Binary:
-        if (i.text == "==" && c.tags.contains(i.args[0]) && c.constants.contains(i.args[1]))
-          c.conditions[i.result] = c.tags.at(i.args[0]) == c.constants.at(i.args[1]);
+        if (i.text == "==" && c.constants.contains(i.args[1])) {
+          if (c.tags.contains(i.args[0]))
+            c.conditions[i.result] = c.tags.at(i.args[0]) == c.constants.at(i.args[1]);
+          if (c.tagSources.contains(i.args[0])) {
+            auto [id, version] = c.tagSources.at(i.args[0]);
+            auto resource = c.vars.find(id);
+            if (resource != c.vars.end() && resource->second.live &&
+                resource->second.version == version) {
+              auto variant = static_cast<VariantId>(c.constants.at(i.args[1]));
+              c.variantTests[i.result] = {id, version, variant};
+              if (c.variantSets.contains(id)) {
+                const auto &possible = c.variantSets.at(id);
+                if (!possible.contains(variant))
+                  c.conditions[i.result] = false;
+                else if (possible.size() == 1)
+                  c.conditions[i.result] = true;
+              }
+            }
+          }
+        }
         break;
       case Inst::StoreReference: {
-        auto &alias = live(c, i.slot, i.loc);
-        auto &root = access(c, i.slot, Access::Shared, i.loc);
-        auto owner = alias.root == None ? i.slot : alias.root;
-        ++root.shared;
-        root.borrowAt = i.loc;
+        access(c, i.slot, Access::Shared, i.loc);
+        auto owner = origins(c, i.slot, i.loc);
+        retainOrigins(c, owner, i.loc);
         c.values[i.result] = {i.type, None, true, false, None, {{0, owner}}};
         break;
       }
@@ -936,12 +1119,17 @@ class Checker {
         access(c, i.slot, i.access, i.loc);
         c.references[i.result] = i.slot;
         break;
-      case Inst::RefineVariant:
-        if (auto &resource = access(c, i.slot, Access::Shared, i.loc);
-            resource.knownVariant != None && resource.knownVariant != i.offset)
-          fail(i.loc, DiagnosticCode::InvalidCore, "variant refinement contradicts constructor");
+      case Inst::RefineVariant: {
+        const auto &resource = access(c, i.slot, Access::Shared, i.loc);
+        auto root = c.vars.at(i.slot).root == None ? i.slot : c.vars.at(i.slot).root;
+        if ((resource.knownVariant != None && resource.knownVariant != i.offset) ||
+            (c.variantSets.contains(root) && !c.variantSets.at(root).contains(i.offset)))
+          fail(i.loc, DiagnosticCode::InvalidCore, "variant refinement contradicts flow facts");
+        c.variantSets[root] = {i.offset};
+        i.possibleVariants = {i.offset};
         c.variants[i.slot] = i.offset;
         break;
+      }
       case Inst::EndViews:
         endViews(c);
         break;
@@ -952,14 +1140,12 @@ class Checker {
       case Inst::InputCall:
       case Inst::StringCall: {
         if (i.slot != None) {
-          auto &root = access(c, i.slot, i.access, i.loc);
+          access(c, i.slot, i.access, i.loc);
           if (i.intrinsicId == IntrinsicId::String_as_str ||
               i.intrinsicId == IntrinsicId::Input_result_str) {
-            auto &source = c.vars.at(i.slot);
-            auto rid = source.root == None ? i.slot : source.root;
-            ++root.shared;
-            root.borrowAt = i.loc;
-            c.views[i.result] = rid;
+            auto owners = origins(c, i.slot, i.loc);
+            retainOrigins(c, owners, i.loc);
+            c.views[i.result] = std::move(owners);
           }
         }
         if (p.semantics.linear(i.type))
@@ -1005,7 +1191,7 @@ class Checker {
       }
       case Inst::EnumConstruct: {
         const auto &payloads = p.semantics.types[i.type].variants.at(i.offset).payload;
-        std::map<uint32_t, SymbolId> loans;
+        std::map<uint32_t, std::set<SymbolId>> loans;
         if (p.semantics.containsReferences(i.type))
           c.constructedVariants[i.result] = i.offset;
         for (size_t n = 0; n < i.args.size(); ++n) {
@@ -1013,6 +1199,9 @@ class Checker {
           if (!p.semantics.linear(tid))
             continue;
           auto &payload = take(c, i.args[n], i.loc);
+          if (!payload.absentFields.empty())
+            fail(i.loc, DiagnosticCode::ConsumedResource,
+                 "cannot store a struct with uninitialized owned fields");
           if (p.semantics.reference(tid)) {
             if (payload.loans.size() != 1 || !payload.loans.contains(0))
               fail(i.loc, DiagnosticCode::InvalidCore, "stored reference has no origin");
@@ -1030,16 +1219,48 @@ class Checker {
       }
       case Inst::Create:
       case Inst::Array:
-        c.values[i.result] = {i.type, initial(i.type), true};
+        c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
+        c.values[i.result].absentFields = p.semantics.ownedFields(i.type);
         break;
+      case Inst::FieldStore:
+      case Inst::FieldTake:
+      case Inst::FieldDrop: {
+        auto &owner =
+            access(c, i.slot, i.kind == Inst::FieldStore ? Access::Unique : Access::Own, i.loc);
+        if (i.kind != Inst::FieldStore && symbol(i.slot).receiver && !function->consumesSelf)
+          fail(i.loc, DiagnosticCode::BorrowConflict,
+               "moving fields through self requires a consuming receiver contract");
+        if (i.kind == Inst::FieldStore) {
+          auto &value = take(c, i.args.at(0), i.loc);
+          if (!value.allocation || value.state != None || !value.loans.empty() ||
+              !value.absentFields.empty())
+            fail(i.loc, DiagnosticCode::AllocationContract,
+                 "owned field requires a fully initialized, non-borrowed owner");
+          i.replaceField = !owner.absentFields.erase(i.fieldIndex);
+        } else {
+          if (!owner.absentFields.insert(i.fieldIndex).second)
+            fail(i.loc, DiagnosticCode::ConsumedResource,
+                 "owned field is uninitialized or has already been consumed");
+          if (i.kind == Inst::FieldTake)
+            c.values[i.result] = {i.type, None, true, true};
+          else
+            i.replaceField = true;
+        }
+        break;
+      }
       case Inst::Move: {
         c.variants.erase(i.slot);
         auto &r = access(c, i.slot, Access::Own, i.loc);
+        complete(r, i.loc);
         if (symbol(i.slot).receiver && !function->consumesSelf)
           fail(i.loc, DiagnosticCode::BorrowConflict, "method self cannot be moved");
         i.resourceInput = r.version;
         if (r.knownVariant != None)
           c.constructedVariants[i.result] = r.knownVariant;
+        if (c.variantSets.contains(i.slot)) {
+          c.valueVariantSets[i.result] = c.variantSets.at(i.slot);
+          c.variantSets.erase(i.slot);
+        }
         c.values[i.result] = {i.type, r.state, true, r.allocation, i.slot, std::move(r.loans)};
         r.loans.clear();
         c.vars[i.slot].allocation = false;
@@ -1055,10 +1276,15 @@ class Checker {
             p.semantics.types[symbol(i.slot).type].kind == hir::Type::Enum &&
             resource.knownVariant != None)
           c.tags[i.result] = resource.knownVariant;
+        if (i.kind == Inst::Read && i.offset == 0 && i.type == I64 &&
+            p.semantics.types[symbol(i.slot).type].kind == hir::Type::Enum) {
+          auto root = c.vars.at(i.slot).root == None ? i.slot : c.vars.at(i.slot).root;
+          c.tagSources[i.result] = {root, resource.version};
+        }
         if (i.type == Str && c.vars.at(i.slot).root != None) {
-          auto root = c.vars.at(i.slot).root;
-          ++c.vars.at(root).shared;
-          c.views[i.result] = root;
+          auto owners = origins(c, i.slot, i.loc);
+          retainOrigins(c, owners, i.loc);
+          c.views[i.result] = std::move(owners);
         }
         if (i.type == RawPtr) {
           if (p.semantics.heap(symbol(i.slot).type))
@@ -1083,12 +1309,19 @@ class Checker {
         }
         c.vars[i.slot] = {true,  state,     Access::Own, None, 0,
                           false, i.args[0], allocation,  "",   None};
-        if (c.constructedVariants.contains(i.args[0]))
+        c.variantSets.erase(i.slot);
+        if (c.valueVariantSets.contains(i.args[0]))
+          c.variantSets[i.slot] = c.valueVariantSets.at(i.args[0]);
+        if (c.constructedVariants.contains(i.args[0])) {
           c.vars[i.slot].knownVariant = c.constructedVariants.at(i.args[0]);
-        if (p.semantics.linear(i.type))
+          c.variantSets[i.slot] = {c.constructedVariants.at(i.args[0])};
+        }
+        if (p.semantics.linear(i.type)) {
           c.vars[i.slot].loans = c.values.at(i.args[0]).loans;
+          c.vars[i.slot].absentFields = c.values.at(i.args[0]).absentFields;
+        }
         if (i.type == Str && c.views.contains(i.args[0])) {
-          c.vars[i.slot].root = c.views.at(i.args[0]);
+          setAliasOrigins(c.vars[i.slot], c.views.at(i.args[0]));
           c.vars[i.slot].access = Access::Shared;
           c.vars[i.slot].borrowAt = c.vars.at(c.vars[i.slot].root).borrowAt;
           c.views.erase(i.args[0]);
@@ -1105,9 +1338,10 @@ class Checker {
           auto &t = take(c, i.args[0], i.loc);
           final(t.type, t.state, "temporary", i.loc);
           i.freeTemporary = t.allocation;
+          i.temporaryAbsentFields = {t.absentFields.begin(), t.absentFields.end()};
           for (auto [offset, owner] : t.loans) {
             (void)offset;
-            --live(c, owner, i.loc).shared;
+            releaseOrigins(c, owner, i.loc);
           }
           t.loans.clear();
         }
@@ -1132,18 +1366,22 @@ class Checker {
               found = stored || payloads[n] == i.type;
             }
           if (stored) {
+            i.storedPayloadReference = true;
             access(c, i.slot, Access::Shared, i.loc);
             const auto &container = c.vars.at(i.slot);
             const auto &loans =
                 container.root == None ? container.loans : c.vars.at(container.root).loans;
             if (i.kind != Inst::BorrowShared || !loans.contains(i.projection))
               fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
-            auto owner = loans.at(i.projection);
+            auto owners = loans.at(i.projection);
+            if (owners.empty())
+              fail(i.loc, DiagnosticCode::InvalidCore, "empty stored-reference origins");
+            auto owner = *owners.begin();
             auto &root = live(c, owner, i.loc);
-            ++root.shared;
-            root.borrowAt = i.loc;
+            retainOrigins(c, owners, i.loc);
             c.vars[i.offset] = {true,  root.state,   Access::Shared, owner, 0,
                                 false, root.version, false,          "",    None};
+            setAliasOrigins(c.vars[i.offset], owners);
             c.vars[i.offset].borrowAt = i.loc;
             break;
           }
@@ -1151,6 +1389,7 @@ class Checker {
             fail(i.loc, DiagnosticCode::ConsumedResource, "cannot borrow a consumed enum payload");
         }
         auto &source = live(c, i.slot, i.loc);
+        complete(source, i.loc);
         bool shared = i.kind == Inst::BorrowShared;
 
         if (source.root != None && (!shared || source.access != Access::Shared))
@@ -1158,14 +1397,17 @@ class Checker {
         auto &root = access(c, i.slot, shared ? Access::Shared : Access::Unique, i.loc);
         SymbolId rid = source.root == None ? i.slot : source.root;
         root.borrowAt = i.loc;
+        auto owners = origins(c, i.slot, i.loc);
         if (shared)
-          ++root.shared;
+          retainOrigins(c, owners, i.loc);
         else
           root.unique = true;
         c.vars[i.offset] = {true,         root.state, shared ? Access::Shared : Access::Unique,
                             rid,          0,          false,
                             root.version, false,      "",
                             None};
+        if (shared)
+          setAliasOrigins(c.vars[i.offset], owners);
         c.vars[i.offset].borrowAt = i.loc;
         break;
       }
@@ -1173,44 +1415,66 @@ class Checker {
         endBorrow(c, i.slot);
         break;
       case Inst::Call:
-      case Inst::ProtocolTransition:
-        call(i, c);
+      case Inst::ProtocolTransition: {
+        auto payloadOrigin = call(i, c);
         if (p.semantics.functions[i.function].returnsReference()) {
           const auto &target = p.semantics.functions[i.function];
           auto index = std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
                        target.params.begin();
-          c.references[i.result] = c.references.at(i.args.at(index));
+          c.references[i.result] = i.slot != None && index == 0
+                                       ? i.slot
+                                       : c.references.at(i.args.at(index - (i.slot != None)));
         } else if (i.kind == Inst::Call && p.semantics.linear(i.type)) {
           c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
           const auto &target = p.semantics.functions[i.function];
           if (target.resultBorrowedContainer) {
-            auto index =
-                std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
-                target.params.begin();
-            auto alias = c.references.at(i.args.at(index));
-            const auto &source = live(c, alias, i.loc);
-            auto origin = source.root == None ? alias : source.root;
-            auto &owner = live(c, origin, i.loc);
-            for (auto offset : p.semantics.borrowedPayloadOffsets(i.type)) {
-              c.values[i.result].loans[offset] = origin;
-              ++owner.shared;
+            auto resultOrigins = payloadOrigin;
+            if (!target.resultPayloadSource) {
+              auto index =
+                  std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
+                  target.params.begin();
+              auto alias = c.references.at(i.args.at(index));
+              auto more = origins(c, alias, i.loc);
+              resultOrigins.insert(more.begin(), more.end());
             }
-            owner.borrowAt = i.loc;
+            for (auto input : target.additionalResultOrigins) {
+              if (std::find(target.params.begin(), target.params.end(), input) ==
+                  target.params.end())
+                continue;
+              auto index = std::find(target.params.begin(), target.params.end(), input) -
+                           target.params.begin();
+              auto more = origins(c, c.references.at(i.args.at(index)), i.loc);
+              resultOrigins.insert(more.begin(), more.end());
+            }
+            if (resultOrigins.empty()) {
+
+              auto possible = p.semantics.unborrowedVariants(i.type);
+              i.possibleVariants.assign(possible.begin(), possible.end());
+              c.valueVariantSets[i.result] = std::move(possible);
+              break;
+            }
+            for (auto offset : p.semantics.borrowedPayloadOffsets(i.type)) {
+              c.values[i.result].loans[offset] = resultOrigins;
+              retainOrigins(c, resultOrigins, i.loc);
+            }
           }
         }
         break;
+      }
       case Inst::ScopeEnd:
         for (auto it = i.locals.rbegin(); it != i.locals.rend(); ++it)
           drop(c, *it, i.loc, true, i);
-        for (auto id : i.locals)
+        for (auto id : i.locals) {
           c.vars.erase(id);
+          c.variantSets.erase(id);
+        }
         break;
       case Inst::Return:
         if (function->returnsReference()) {
           auto alias = c.references.at(i.args.at(0));
           const auto &borrow = live(c, alias, i.loc);
           auto origin = borrow.root == None ? alias : borrow.root;
-          if (origin != function->resultOrigin) {
+          if (origin != function->resultOrigin || !borrow.extraRoots.empty()) {
             DiagnosticEngine()
                 .error(DiagnosticCode::EscapingView, i.loc,
                        "reference to local value escapes the function")
@@ -1225,20 +1489,27 @@ class Checker {
           auto &result = take(c, i.args.at(0), i.loc);
           if (function->resultBorrowedContainer) {
             const auto allowed = p.semantics.borrowedPayloadOffsets(function->result);
-            for (auto [offset, origin] : result.loans) {
-              if (!allowed.contains(offset))
-                fail(i.loc, DiagnosticCode::InvalidCore, "invalid returned payload path");
-              if (origin != function->resultOrigin)
-                DiagnosticEngine()
-                    .error(DiagnosticCode::EscapingView, i.loc,
-                           "reference stored in returned container escapes its local owner")
-                    .label(i.loc, "container returned here")
-                    .secondary(symbol(origin).loc,
-                               "owner `" + symbol(origin).name + "` created here")
-                    .note("the payload must borrow from input `" +
-                          symbol(function->resultOrigin).name + "`")
-                    .help("borrow from the input or return an owned payload")
-                    .emit();
+            for (const auto &[offset, owners] : result.loans) {
+              for (auto origin : owners) {
+                if (!allowed.contains(offset))
+                  fail(i.loc, DiagnosticCode::InvalidCore, "invalid returned payload path");
+                if (!function->acceptsResultOrigin(origin))
+                  DiagnosticEngine()
+                      .error(
+                          DiagnosticCode::EscapingView, i.loc,
+                          symbol(origin).parameter
+                              ? "borrowed payload cannot escape through an unrelated result region"
+                              : "reference stored in returned container escapes its local owner")
+                      .label(i.loc, "container returned here")
+                      .secondary(
+                          symbol(origin).loc,
+                          (symbol(origin).parameter ? "borrowed input `" : "owner `") +
+                              symbol(origin).name +
+                              (symbol(origin).parameter ? "` received here" : "` created here"))
+                      .note("returned payloads may borrow only from the contracted input origins")
+                      .help("borrow from the input or return an owned payload")
+                      .emit();
+              }
             }
           }
           if ((!function->resultBorrowedContainer && !result.loans.empty()) ||
@@ -1297,6 +1568,8 @@ class Checker {
             }
           for (auto &edge : exits)
             compatible(exits[0], edge, i.loc, "loop exit");
+          for (size_t n = 1; n < exits.size(); ++n)
+            mergeVariantSets(exits[0], exits[n]);
           c = std::move(exits[0]);
         }
         break;
@@ -1305,11 +1578,14 @@ class Checker {
         if (c.conditions.contains(i.args[0])) {
 
           bool selected = c.conditions.at(i.args[0]);
+          refineTest(c, i.args[0], selected, i.loc);
           block(selected ? i.body : i.otherwise, c);
           (selected ? i.otherwise : i.body).clear();
           break;
         }
         Context then = c, other = c;
+        refineTest(then, i.args[0], true, i.loc);
+        refineTest(other, i.args[0], false, i.loc);
         block(i.body, then);
         block(i.otherwise, other);
         if (then.returned && other.returned) {
@@ -1339,6 +1615,7 @@ class Checker {
             then.vars.at(id).version = merged;
           }
         }
+        mergeVariantSets(then, other);
         c = std::move(then);
         for (auto it = c.variants.begin(); it != c.variants.end();) {
           auto fact = other.variants.find(it->first);
@@ -1384,6 +1661,18 @@ public:
                         p.semantics.needsDrop(s.type),
                         "",
                         None};
+        }
+        for (const auto &contract : function->payloadParameterRegions) {
+          auto &origin = c.vars[contract.origin];
+          origin.live = true;
+          origin.access = Access::Shared;
+          origin.state = initial(symbol(contract.origin).type);
+          origin.allocation = p.semantics.heap(symbol(contract.origin).type);
+          origin.borrowAt = symbol(contract.parameter).loc;
+          for (auto offset : p.semantics.borrowedPayloadOffsets(symbol(contract.parameter).type)) {
+            c.vars[contract.parameter].loans[offset] = {contract.origin};
+            ++origin.shared;
+          }
         }
         block(cf.body, c);
         if (!c.returned) {
@@ -1440,7 +1729,10 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                                 "payload.take",
                                 "reference.argument",
                                 "reference.store",
-                                "length"};
+                                "length",
+                                "field.store",
+                                "field.take",
+                                "field.drop"};
   for (auto &i : ops) {
     if (i.kind == Inst::Loop)
       dump(i.condition, p, o, d + 2);
@@ -1452,6 +1744,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                 ? ") => input.drop (free successful text payload)\n"
             : p.types[p.symbols[id].type].kind == hir::Type::Enum
                 ? ") => drop active variant payloads\n"
+            : !p.ownedFields(p.symbols[id].type).empty()
+                ? ") => drop initialized fields in reverse order\n"
                 : ") => heap.free\n");
     if (i.freeTemporary)
       o << std::string(d, ' ') << "drop temporary => heap.free\n";
@@ -1467,8 +1761,18 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
     if (i.result != None)
       o << "%" << i.result << " = ";
     o << names[i.kind];
+    if (i.kind == Inst::FieldStore || i.kind == Inst::FieldTake || i.kind == Inst::FieldDrop)
+      o << " field=#" << i.fieldIndex << (i.replaceField ? " drop-previous" : "");
     if (i.projection)
       o << " payload.offset=" << i.projection;
+    if (i.storedPayloadReference)
+      o << " stored-reference";
+    if (!i.possibleVariants.empty()) {
+      o << " possible-variants={";
+      for (auto variant : i.possibleVariants)
+        o << "#V" << variant << " ";
+      o << "}";
+    }
     if (i.kind == Inst::RefineVariant)
       o << " variant=#V" << i.offset;
     if (i.slot != None)
@@ -1563,12 +1867,22 @@ void print(const Program &p, std::ostream &o) {
     }
     for (const auto &region : hf.parameterRegions)
       o << "  region.contract #v" << region.parameter << " #R" << region.region << " caller-owned"
-        << (region.parameter == hf.resultOrigin ? " result-bound\n" : " noescape\n");
+        << (hf.acceptsResultOrigin(region.parameter) ? " result-bound\n" : " noescape\n");
+    for (const auto &region : hf.payloadParameterRegions)
+      o << "  payload.region #v" << region.parameter << " #R" << region.region << " origin=#v"
+        << region.origin << " Shared caller-owned"
+        << (hf.acceptsResultOrigin(region.origin) ? " result-bound\n" : " noescape\n");
+    for (const auto &source : hf.payloadResultSources())
+      o << "  return.payload-source #v" << source.parameter << " variant=#V" << source.path.variant
+        << " field=" << source.path.field << "\n";
     if (hf.resultBorrowedContainer)
       o << "  result.payload-regions: Shared borrowed container\n";
     if (hf.resultOrigin != None)
       o << "  return.region #R" << hf.resultRegion << " <= #R"
         << p.semantics.symbols[hf.resultOrigin].region << " origin=#v" << hf.resultOrigin << "\n";
+    for (auto origin : hf.additionalResultOrigins)
+      o << "  return.region #R" << hf.resultRegion << " <= #R" << p.semantics.symbols[origin].region
+        << " origin=#v" << origin << "\n";
     if (!hf.operations.empty()) {
       const auto &protocol = p.semantics.protocols[p.semantics.types[hf.owner].protocol];
       for (auto id : hf.operations)

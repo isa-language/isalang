@@ -54,11 +54,15 @@ struct Inst {
     PayloadTake,
     ReferenceArgument,
     StoreReference,
-    Length
+    Length,
+    FieldStore,
+    FieldTake,
+    FieldDrop
   } kind;
   Loc loc;
   uint32_t semanticPoint = None;
   std::vector<SymbolId> inferredEnds;
+  std::vector<VariantId> possibleVariants;
   std::vector<SymbolId> exitEnds;
   RegionId region = None;
   ValueId result = None;
@@ -66,6 +70,7 @@ struct Inst {
   SymbolId slot = None;
   uint32_t offset = 0;
   uint32_t projection = 0;
+  bool storedPayloadReference = false;
   enum class PlaceProjection { None, Field, Index } placeProjection = PlaceProjection::None;
   uint32_t fieldIndex = None;
   uint32_t loop = None;
@@ -82,6 +87,9 @@ struct Inst {
   std::vector<SymbolId> cleanup;
   std::map<SymbolId, std::vector<uint32_t>> movedPayloads;
   bool freeTemporary = false;
+  bool replaceField = false;
+  std::map<SymbolId, std::vector<uint32_t>> absentFields;
+  std::vector<uint32_t> temporaryAbsentFields;
   Quantity quantity = Quantity::Omega;
   Access access = Access::Own;
   ProtocolId protocol = None;

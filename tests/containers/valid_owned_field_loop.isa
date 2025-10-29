@@ -1,0 +1,13 @@
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+fn main() {
+  let p = Pair<String>::new();
+  let i = 0;
+  while i<3 {
+    p.first = String::from("a");
+    p.first.drop();
+    i = i + 1;
+  }
+}

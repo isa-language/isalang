@@ -1,0 +1,19 @@
+fn choose(a: &String, b: &String, condition: bool) -> Option<&String> {
+  if condition {
+    return Option::Some(a);
+  }
+  return Option::Some(b);
+}
+fn conflict(r: &String, w: &mut String) {
+  print(r);
+  w.clear();
+}
+fn main() {
+  let a = String::from("a");
+  let b = String::from("b");
+  let result = choose(&a, &b, true);
+  match result {
+    Option::Some(r) => conflict(r, &mut b),
+    Option::None => {}
+  }
+}

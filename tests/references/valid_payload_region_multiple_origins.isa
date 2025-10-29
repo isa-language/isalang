@@ -1,0 +1,4 @@
+fn wrong(a: Option<&String>, b: Option<&String>) -> Option<&String> {
+  return a.move();
+}
+fn main() {}

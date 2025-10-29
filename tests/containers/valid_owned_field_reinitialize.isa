@@ -1,0 +1,14 @@
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+fn main() {
+  let p = Pair<String>::new();
+  p.first = String::from("one");
+  p.second = String::from("two");
+  p.first.drop();
+  p.first = String::from("three");
+  let q = p.move();
+  let x = q.first.move();
+  print(x);
+}
