@@ -1,0 +1,18 @@
+struct Inner {
+  prefix: i32,
+  text: String,
+}
+struct Outer {
+  prefix: i32,
+  inner: Inner,
+}
+fn main() {
+  let i = Inner::new();
+  i.text = String::from("42");
+  let o = Outer::new();
+  o.inner = i.move();
+  let r = &o.inner.text;
+  print(r);
+  let s = &o.inner.text;
+  print(s);
+}

@@ -1,0 +1,12 @@
+struct Holder<T> {
+  value: T,
+}
+struct Inner {
+  value: String,
+}
+fn main() {
+  let h = Holder<Inner>::new();
+  let i = Inner::new();
+  i.value = String::from("argument");
+  h.value = i.move();
+}

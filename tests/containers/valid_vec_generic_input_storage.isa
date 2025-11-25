@@ -1,0 +1,14 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<ResultString>::new();
+  v.push(read_line());
+  let o = v.pop();
+  match o.move() {
+    Some(r) => {
+      if r.is_ok() {
+        print(r.value());
+      }
+    },
+    None => {}
+  }
+}

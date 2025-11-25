@@ -1,0 +1,11 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn main() {
+  let h = Holder<Buffer>::new();
+  let b = Buffer::new(2);
+  b.release();
+  h.value = b.move();
+  h.value.drop();
+}

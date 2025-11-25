@@ -11,6 +11,7 @@ class Eraser {
   std::unordered_map<runtime::Value, runtime::Type> runtimeTypes;
   runtime::Value returnStorage = runtime::NoValue;
   TypeId returnType = Unit;
+  uint32_t cleanupLoop = UINT32_MAX;
   using I = runtime::Instruction;
   using T = runtime::Type;
   T type(TypeId t) {
@@ -26,7 +27,10 @@ class Eraser {
                    bitWidth(t, core.semantics.target.pointerWidth), signedType(t)};
   }
   T referenceType(TypeId t) {
-    return scalar(t) ? T{T::Buffer, 1, 64, true, true} : type(t);
+    auto result = scalar(t) ? T{T::Buffer, 1, 64} : type(t);
+    if (result.kind == T::Buffer)
+      result.dynamicOffset = true;
+    return result;
   }
   runtime::Value referenceView(std::vector<I> &out, runtime::Value value, TypeId t) {
     auto target = referenceType(t);
@@ -96,11 +100,274 @@ class Eraser {
       store(out, result, load(out, buffer, offset + n, {T::Scalar, 1, 64}), n);
     return result;
   }
+  runtime::Value abi(std::vector<I> &out, const std::string &callee, T result,
+                     std::vector<runtime::Value> args) {
+    I call{};
+    call.kind = I::Call;
+    call.callee = callee;
+    call.type = result;
+    call.args = std::move(args);
+    return emit(out, call, result.kind != T::Void);
+  }
+  runtime::Value storageView(std::vector<I> &out, runtime::Value pointer, TypeId element) {
+    I view{};
+    view.kind = I::AddressView;
+    view.type = {T::Buffer, core.semantics.storageWidth(element), 64};
+    view.args = {pointer};
+    return emit(out, view);
+  }
+  void writeElement(std::vector<I> &out, runtime::Value storage, runtime::Value value,
+                    TypeId element, uint32_t offset = 0) {
+    if (type(element).kind == T::Buffer)
+      for (uint32_t n = 0; n < core.semantics.storageWidth(element); ++n)
+        store(out, storage, load(out, value, n, {T::Scalar, 1, 64}), offset + n);
+    else
+      store(out, storage, value, offset);
+  }
+
+  runtime::Value transferElement(std::vector<I> &out, TypeId tid, runtime::Value value,
+                                 bool toHeap) {
+    if (auto words = recordWords(tid)) {
+      auto bytes = constant(out, words * (core.semantics.target.pointerWidth / 8), true);
+      I alloc{};
+      alloc.type = {T::Pointer, 1};
+      alloc.kind = toHeap ? I::HeapAlloc : I::RecordAlloc;
+      alloc.literal = words;
+      if (toHeap)
+        alloc.args = {bytes};
+      auto target = emit(out, alloc);
+      I copy{};
+      copy.kind = I::MemCopy;
+      copy.type = {T::Pointer, 1};
+      copy.args = {target, value, bytes};
+      emit(out, copy);
+      if (!toHeap) {
+        I free{};
+        free.kind = I::Free;
+        free.args = {value};
+        emit(out, free, false);
+      }
+      return target;
+    }
+    const auto &t = core.semantics.types[tid];
+    if (core.semantics.heap(tid) || type(tid).kind != T::Buffer)
+      return value;
+    auto result = project(out, value, 0, tid);
+    if (t.kind == hir::Type::Structure) {
+      for (const auto &field : t.fields)
+        if (core.semantics.needsDrop(field.type)) {
+          auto member = project(out, value, field.offset, field.type);
+          writeElement(out, result, transferElement(out, field.type, member, toHeap), field.type,
+                       field.offset);
+        }
+    } else if (t.kind == hir::Type::Enum) {
+      auto tag = load(out, value, 0, {T::Scalar, 1, 32});
+      for (const auto &variant : t.variants) {
+        std::vector<I> body;
+        for (size_t n = 0; n < variant.payload.size(); ++n) {
+          auto pt = variant.payload[n];
+          if (!core.semantics.needsDrop(pt))
+            continue;
+          auto offset = core.semantics.payloadOffset(tid, variant.id, n);
+          auto member = project(body, value, offset, pt);
+          writeElement(body, result, transferElement(body, pt, member, toHeap), pt, offset);
+        }
+        if (body.empty())
+          continue;
+        I compare{};
+        compare.kind = I::Binary;
+        compare.callee = "==";
+        compare.type = {T::Scalar, 1, 32};
+        compare.args = {tag, constant(out, variant.id)};
+        I branch{};
+        branch.kind = I::If;
+        branch.args = {emit(out, compare)};
+        branch.body = std::move(body);
+        emit(out, branch, false);
+      }
+    }
+    return result;
+  }
+  void destroyVector(std::vector<I> &out, TypeId tid, runtime::Value value, bool clear) {
+    auto element = core.semantics.types[tid].element;
+    if (core.semantics.needsDrop(element)) {
+      T size{T::Size, 1, core.semantics.target.pointerWidth};
+      auto len = abi(out, "isac_rt_vec_len", size, {value});
+      I alloc{};
+      alloc.kind = I::Alloc;
+      alloc.type = {T::Buffer, 1, 64};
+      auto counter = emit(out, alloc);
+      store(out, counter, len);
+      I loop{};
+      loop.kind = I::Loop;
+      loop.loop = cleanupLoop--;
+      loop.unconditional = true;
+      auto index = load(loop.body, counter, 0, size);
+      I compare{};
+      compare.kind = I::Binary;
+      compare.callee = "==";
+      compare.type = {T::Scalar, 1, 32};
+      compare.args = {index, constant(loop.body, 0, true)};
+      I done{};
+      done.kind = I::If;
+      done.args = {emit(loop.body, compare)};
+      I exit{};
+      exit.kind = I::Break;
+      exit.loop = loop.loop;
+      done.body = {exit};
+      emit(loop.body, done, false);
+      I decrement{};
+      decrement.kind = I::Binary;
+      decrement.callee = "-";
+      decrement.type = size;
+      decrement.args = {index, constant(loop.body, 1, true)};
+      auto next = emit(loop.body, decrement);
+      store(loop.body, counter, next);
+      auto ptr = abi(loop.body, "isac_rt_vec_at", {T::Pointer, 1}, {value, next});
+      auto view = storageView(loop.body, ptr, element);
+      destroy(loop.body, element, project(loop.body, view, 0, element), {}, {}, {}, true);
+      emit(out, loop, false);
+    }
+    abi(out, clear ? "isac_rt_vec_clear_storage" : "isac_rt_vec_drop_storage", {T::Void, 0},
+        {value});
+  }
+  runtime::Value containerCall(std::vector<I> &out, const core::Inst &c,
+                               std::vector<runtime::Value> args) {
+    const auto &function = core.semantics.functions[c.function];
+    auto element = core.semantics.types[function.owner].element;
+    T pointer{T::Pointer, 1}, size{T::Size, 1, core.semantics.target.pointerWidth};
+    auto owner = c.slot == None ? runtime::NoValue : slots.at(c.slot);
+    switch (c.intrinsicId) {
+    case IntrinsicId::Box_new_generic: {
+      I alloc{};
+      alloc.kind = I::HeapAlloc;
+      alloc.type = pointer;
+      alloc.args = {constant(out, 8 * core.semantics.storageWidth(element), true)};
+      auto result = emit(out, alloc);
+      auto stored = transferElement(out, element, args[0], true);
+      writeElement(out, storageView(out, result, element), stored, element);
+      return result;
+    }
+    case IntrinsicId::Box_get: {
+      auto view = storageView(out, owner, element);
+      return core.semantics.heap(element) ? project(out, view, 0, element)
+                                          : referenceView(out, view, element);
+    }
+    case IntrinsicId::Box_into_inner: {
+      auto value = project(out, storageView(out, owner, element), 0, element);
+      auto result = transferElement(out, element, value, false);
+      I free{};
+      free.kind = I::Free;
+      free.args = {owner};
+      emit(out, free, false);
+      return result;
+    }
+    case IntrinsicId::Vec_new:
+    case IntrinsicId::Vec_with_capacity:
+      return abi(out, "isac_rt_vec_new", pointer,
+                 {constant(out, 8 * core.semantics.storageWidth(element), true),
+                  args.empty() ? constant(out, 0, true) : args[0]});
+    case IntrinsicId::Vec_len:
+      return abi(out, "isac_rt_vec_len", size, {owner});
+    case IntrinsicId::Vec_capacity:
+      return abi(out, "isac_rt_vec_capacity", size, {owner});
+    case IntrinsicId::Vec_push: {
+      auto ptr = abi(out, "isac_rt_vec_push_slot", pointer, {owner});
+      auto stored = transferElement(out, element, args[0], true);
+      writeElement(out, storageView(out, ptr, element), stored, element);
+      return runtime::NoValue;
+    }
+    case IntrinsicId::Vec_clear:
+      destroyVector(out, function.owner, owner, true);
+      return runtime::NoValue;
+    case IntrinsicId::Vec_get:
+    case IntrinsicId::Vec_first:
+    case IntrinsicId::Vec_last: {
+      I alloc{};
+      alloc.kind = I::Alloc;
+      alloc.type = type(c.type);
+      auto result = emit(out, alloc);
+      auto len = abi(out, "isac_rt_vec_len", size, {owner});
+      auto index = args.empty() ? constant(out, 0, true) : args[0];
+      I compare{};
+      compare.kind = I::Binary;
+      compare.type = {T::Scalar, 1, 32};
+      compare.callee = c.intrinsicId == IntrinsicId::Vec_last ? "==" : ">=";
+      compare.unsignedOperands = true;
+      compare.args = c.intrinsicId == IntrinsicId::Vec_last
+                         ? std::vector<runtime::Value>{len, constant(out, 0, true)}
+                         : std::vector<runtime::Value>{index, len};
+      I branch{};
+      branch.kind = I::If;
+      branch.args = {emit(out, compare)};
+      const auto &variants = core.semantics.types[c.type].variants;
+      store(branch.body, result, constant(branch.body, variants[1].id));
+      if (c.intrinsicId == IntrinsicId::Vec_last) {
+        I subtract{};
+        subtract.kind = I::Binary;
+        subtract.type = size;
+        subtract.callee = "-";
+        subtract.args = {len, constant(branch.otherwise, 1, true)};
+        index = emit(branch.otherwise, subtract);
+      }
+      auto address = abi(branch.otherwise, "isac_rt_vec_at", pointer, {owner, index});
+
+      if (core.semantics.heap(element))
+        address =
+            project(branch.otherwise, storageView(branch.otherwise, address, element), 0, element);
+      store(branch.otherwise, result, constant(branch.otherwise, variants[0].id));
+      store(branch.otherwise, result, address,
+            core.semantics.payloadOffset(c.type, variants[0].id, 0));
+      emit(out, branch, false);
+      return result;
+    }
+    case IntrinsicId::Vec_pop: {
+      I alloc{};
+      alloc.kind = I::Alloc;
+      alloc.type = type(c.type);
+      auto result = emit(out, alloc);
+      auto len = abi(out, "isac_rt_vec_len", size, {owner});
+      I compare{};
+      compare.kind = I::Binary;
+      compare.callee = "==";
+      compare.type = {T::Scalar, 1, 32};
+      compare.args = {len, constant(out, 0, true)};
+      I branch{};
+      branch.kind = I::If;
+      branch.args = {emit(out, compare)};
+      const auto &variants = core.semantics.types[c.type].variants;
+      store(branch.body, result, constant(branch.body, variants[1].id));
+      auto ptr = abi(branch.otherwise, "isac_rt_vec_pop_slot", pointer, {owner});
+      auto view = storageView(branch.otherwise, ptr, element);
+      auto value = project(branch.otherwise, view, 0, element);
+      auto taken = transferElement(branch.otherwise, element, value, false);
+      store(branch.otherwise, result, constant(branch.otherwise, variants[0].id));
+      writeElement(branch.otherwise, result, taken, element,
+                   core.semantics.payloadOffset(c.type, variants[0].id, 0));
+      emit(out, branch, false);
+      return result;
+    }
+    default:
+      fail(c.loc, DiagnosticCode::InvalidCore, "unhandled verified container intrinsic");
+    }
+  }
   void destroy(std::vector<I> &out, TypeId tid, runtime::Value value,
                const std::vector<uint32_t> &moved = {},
-               const std::vector<uint32_t> &absentFields = {}) {
+               const std::vector<uint32_t> &absentFields = {}, const core::FieldDropPlan &plan = {},
+               bool heapDescriptors = false) {
+    if (plan.skip)
+      return;
     const auto &t = core.semantics.types[tid];
-    if (core.semantics.heap(tid)) {
+    if (t.representation == hir::Representation::GenericBox) {
+      auto view = storageView(out, value, t.element);
+      destroy(out, t.element, project(out, view, 0, t.element), {}, {}, {}, true);
+      I free{};
+      free.kind = I::Free;
+      free.args = {value};
+      emit(out, free, false);
+    } else if (t.representation == hir::Representation::GenericVec) {
+      destroyVector(out, tid, value, false);
+    } else if (core.semantics.heap(tid)) {
       I drop{};
       drop.kind = I::Free;
       drop.args = {value};
@@ -111,13 +378,21 @@ class Eraser {
                                                                             : "isac_rt_input_drop";
       }
       emit(out, drop, false);
+      if (heapDescriptors && recordWords(tid)) {
+        I free{};
+        free.kind = I::Free;
+        free.args = {value};
+        emit(out, free, false);
+      }
     } else if (t.kind == hir::Type::Structure) {
       for (size_t n = t.fields.size(); n > 0; --n) {
         auto id = static_cast<uint32_t>(n - 1);
         const auto &field = t.fields[id];
         if (core.semantics.needsDrop(field.type) &&
             std::find(absentFields.begin(), absentFields.end(), id) == absentFields.end())
-          destroy(out, field.type, project(out, value, field.offset, field.type));
+          destroy(out, field.type, project(out, value, field.offset, field.type), {}, {},
+                  plan.fields.contains(id) ? plan.fields.at(id) : core::FieldDropPlan{},
+                  heapDescriptors);
       }
     } else if (t.kind == hir::Type::Enum) {
       auto tag = load(out, value, 0, {T::Scalar, 1, 32});
@@ -129,7 +404,7 @@ class Eraser {
           if (!core.semantics.needsDrop(pt) ||
               std::find(moved.begin(), moved.end(), offset) != moved.end())
             continue;
-          destroy(body, pt, project(body, value, offset, pt));
+          destroy(body, pt, project(body, value, offset, pt), {}, {}, {}, heapDescriptors);
         }
         if (body.empty())
           continue;
@@ -163,10 +438,11 @@ class Eraser {
         auto absent = c.absentFields.find(sid);
         destroy(out, core.semantics.symbols[sid].type, slots.at(sid),
                 found == c.movedPayloads.end() ? std::vector<uint32_t>{} : found->second,
-                absent == c.absentFields.end() ? std::vector<uint32_t>{} : absent->second);
+                absent == c.absentFields.end() ? std::vector<uint32_t>{} : absent->second,
+                c.fieldCleanup.contains(sid) ? c.fieldCleanup.at(sid) : core::FieldDropPlan{});
       }
       if (c.freeTemporary)
-        destroy(out, c.type, i.args.at(0), {}, c.temporaryAbsentFields);
+        destroy(out, c.type, i.args.at(0), {}, c.temporaryAbsentFields, c.temporaryFieldPlan);
       switch (c.kind) {
       case C::StoreReference:
         if (!core.semantics.heap(core.semantics.types[c.type].element)) {
@@ -197,6 +473,12 @@ class Eraser {
         i.args = {slots.at(c.slot)};
         emit(out, i, false);
         break;
+      case C::ContainerCall: {
+        auto result = containerCall(out, c, i.args);
+        if (c.result != None)
+          values[c.result] = result;
+        break;
+      }
       case C::InputCall:
       case C::StringCall: {
         i.kind = I::Call;
@@ -364,7 +646,8 @@ class Eraser {
         const auto &field =
             core.semantics.types[core.semantics.symbols[c.slot].type].fields.at(c.fieldIndex);
         if (c.replaceField)
-          destroy(out, field.type, project(out, slots.at(c.slot), field.offset, field.type));
+          destroy(out, field.type, project(out, slots.at(c.slot), field.offset, field.type), {}, {},
+                  c.replacedFieldPlan);
         if (c.kind == C::FieldStore) {
           if (type(field.type).kind == T::Buffer) {
             for (uint32_t n = 0; n < type(field.type).width; ++n)
@@ -401,8 +684,17 @@ class Eraser {
           runtime::Value index;
           if (c.placeProjection == C::PlaceProjection::Field) {
             auto sourceType = core.semantics.symbols[c.slot].type;
-            index =
-                constant(out, core.semantics.types[sourceType].fields[c.fieldIndex].offset, true);
+            uint32_t offset = 0;
+            for (auto field : c.fieldPath) {
+              const auto &member = core.semantics.types[sourceType].fields.at(field);
+              offset += member.offset;
+              sourceType = member.type;
+            }
+            if (core.semantics.heap(c.type)) {
+              slots[c.offset] = load(out, source, offset, type(c.type));
+              break;
+            }
+            index = constant(out, offset, true);
           } else {
             index = i.args.at(0);
             I check{};
@@ -489,7 +781,7 @@ class Eraser {
         if (c.slot != None) {
           auto source = slots.at(c.slot);
           auto tid = core.semantics.symbols[c.slot].type;
-          if (scalar(tid))
+          if (scalar(tid) || c.access != Access::Own)
             source = referenceView(out, source, tid);
           i.args.insert(i.args.begin(), source);
         }
@@ -597,8 +889,10 @@ public:
       std::vector<I> prefix;
       for (auto sid : hf.params) {
         auto t = type(core.semantics.symbols[sid].type);
-        if ((core.semantics.symbols[sid].receiver || core.semantics.symbols[sid].reference) &&
-            scalar(core.semantics.symbols[sid].type))
+        if (core.semantics.symbols[sid].reference ||
+            (core.semantics.symbols[sid].receiver &&
+             (scalar(core.semantics.symbols[sid].type) ||
+              core.semantics.symbols[sid].access != Access::Own)))
           t = referenceType(core.semantics.symbols[sid].type);
         auto v = p.values++;
         f.params.push_back({v, t});

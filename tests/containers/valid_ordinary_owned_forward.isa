@@ -1,0 +1,25 @@
+struct Outer {
+  prefix: i32,
+  pair: Pair,
+  tail: i32,
+}
+struct Pair {
+  first: String,
+  number: i32,
+  second: String,
+}
+fn main() {
+  let p = Pair::new();
+  p.first = String::from("first");
+  p.second = String::from("second");
+  p.number = 17;
+  let o = Outer::new();
+  o.prefix = 1;
+  o.tail = 2;
+  o.pair = p.move();
+  let q = o.pair.move();
+  let text = q.second.move();
+  print(text);
+  print(q.number);
+  print(o.tail);
+}

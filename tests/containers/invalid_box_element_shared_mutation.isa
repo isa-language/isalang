@@ -1,0 +1,6 @@
+@import("std.vec", "std.box")
+fn main() {
+  let b = Box<String>::new(String::from("text"));
+  let r = b.get();
+  r.push_str("!");
+}

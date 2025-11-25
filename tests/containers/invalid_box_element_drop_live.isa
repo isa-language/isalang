@@ -1,0 +1,7 @@
+@import("std.vec", "std.box")
+fn main() {
+  let b = Box<i32>::new(42);
+  let r = b.get();
+  b.drop();
+  print(r);
+}

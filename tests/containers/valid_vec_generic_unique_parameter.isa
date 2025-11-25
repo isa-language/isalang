@@ -1,0 +1,9 @@
+@import "std.vec"
+fn add(values: &mut Vec<String>, text: String) {
+  values.push(text.move());
+}
+fn main() {
+  let v = Vec<String>::new();
+  add(&mut v, String::from("parameter"));
+  print(v.len());
+}

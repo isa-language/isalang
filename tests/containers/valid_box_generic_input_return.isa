@@ -1,0 +1,11 @@
+@import "std.box"
+fn make() -> Box<ResultString> {
+  return Box<ResultString>::new(read_line());
+}
+fn main() {
+  let b = make();
+  let r = b.into_inner();
+  if r.is_ok() {
+    print(r.value());
+  }
+}

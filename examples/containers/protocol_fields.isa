@@ -1,0 +1,26 @@
+@import "std.buffer"
+
+struct Resources {
+  buffer: Buffer,
+  text: String,
+}
+
+fn main() {
+  let resources = Resources::new();
+  resources.buffer = Buffer::new(8);
+  resources.text = String::from("owner");
+
+  let reader = &resources.text;
+  print(reader);
+
+  let writer = &mut resources.text;
+  writer.push_str("!");
+  print(writer);
+
+  let buffer = resources.buffer.move();
+  buffer.write(0, 42);
+  print(buffer.read(0));
+  buffer.release();
+  resources.buffer = buffer.move();
+
+}

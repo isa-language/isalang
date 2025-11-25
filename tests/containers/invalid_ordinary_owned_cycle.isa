@@ -1,0 +1,4 @@
+struct Self {
+  value: Self,
+}
+fn main() {}

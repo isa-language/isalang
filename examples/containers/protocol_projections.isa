@@ -1,0 +1,31 @@
+@import "std.buffer"
+
+struct Owner {
+  buffer: Buffer,
+  text: String,
+  spare: String,
+}
+
+fn main() {
+  let owner = Owner::new();
+  owner.buffer = Buffer::new(4);
+  owner.text = String::from("owned");
+
+  owner.buffer.write(0, 42);
+  print(owner.buffer.read(0));
+
+  owner.text.push_str("!");
+  print(owner.text.len());
+
+  let reader = &owner.buffer;
+  let alias = &reader;
+  print(alias.len());
+
+  let writer = &mut owner.buffer;
+  writer.write(1, 20);
+  print(writer.read(1));
+
+  let buffer = owner.buffer.move();
+  buffer.release();
+  owner.buffer = buffer.move();
+}

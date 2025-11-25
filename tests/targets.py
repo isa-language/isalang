@@ -1,4 +1,4 @@
-import pathlib, subprocess, sys, tempfile, struct
+import pathlib, subprocess, sys, tempfile, struct, re
 
 compiler, root = sys.argv[1:]
 root = pathlib.Path(root)
@@ -22,9 +22,8 @@ with tempfile.TemporaryDirectory() as d:
         assert (
             'target triple = "' + triple + '"' in r.stdout and 'target datalayout = "' in r.stdout
         )
-        assert (
-            "@isa_0_word(i32" if triple.startswith("i686") else "@isa_0_word(i64"
-        ) in r.stdout, r.stdout
+        width = "i32" if triple.startswith("i686") else "i64"
+        assert re.search(r"@isa_\d+_word\(" + width + r"\b", r.stdout), r.stdout
         obj = d / (triple + ".o")
         r = run(source, "--target=" + triple, "--emit-obj", "-o", obj)
         assert r.returncode == 0, r.stderr

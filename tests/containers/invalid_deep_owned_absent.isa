@@ -1,0 +1,12 @@
+struct Inner {
+  prefix: i32,
+  text: String,
+}
+struct Outer {
+  prefix: i32,
+  inner: Inner,
+}
+fn main() {
+  let o = Outer::new();
+  print(o.inner.text.len());
+}

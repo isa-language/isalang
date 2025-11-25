@@ -1,0 +1,18 @@
+struct Holder<T> {
+  prefix: T,
+  value: Inner,
+}
+struct Inner {
+  value: String,
+}
+fn main() {
+  let h = Holder<i32>::new();
+  let i = Inner::new();
+  i.value = String::from("generic");
+  h.prefix = 19;
+  h.value = i.move();
+  let v = h.value.move();
+  let t = v.value.move();
+  print(t);
+  print(h.prefix);
+}

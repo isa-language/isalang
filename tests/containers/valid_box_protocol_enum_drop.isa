@@ -1,0 +1,23 @@
+@import "std.box"
+protocol State {
+  initial Closed;
+  final Closed;
+  state Closed {
+    open(self) -> Open;
+  }
+  state Open {
+    close(self) -> Closed;
+  }
+}
+struct Resource: State {
+  value: i32,
+}
+impl Resource {
+  fn open(self) {}
+  fn close(self) {}
+}
+fn main() {
+  let r = Resource::new();
+  let o = Option::Some(r.move());
+  let b = Box<Option<Resource >>::new(o.move());
+}

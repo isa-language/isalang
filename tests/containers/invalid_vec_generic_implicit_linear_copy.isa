@@ -1,0 +1,6 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<String>::new();
+  let t = String::from("x");
+  v.push(t);
+}

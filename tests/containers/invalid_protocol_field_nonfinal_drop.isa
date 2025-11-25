@@ -1,0 +1,8 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn main() {
+  let h = Holder<Buffer>::new();
+  h.value = Buffer::new(2);
+}

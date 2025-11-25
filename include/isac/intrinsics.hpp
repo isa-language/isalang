@@ -6,7 +6,13 @@
 #include <vector>
 namespace isac {
 enum class IntrinsicCategory { Memory, Arithmetic, IO, Compiler, Platform };
-enum class IntrinsicLowering { ExternalCall, StringRecord, InputRecord, HeapConstructor };
+enum class IntrinsicLowering {
+  ExternalCall,
+  StringRecord,
+  InputRecord,
+  HeapConstructor,
+  ContainerStorage
+};
 enum class IntrinsicId : uint32_t {
   None,
 #define ISAC_INTRINSIC(id, name, category, lowering, io, allocation) id,
@@ -20,6 +26,12 @@ struct IntrinsicInfo {
   IntrinsicLowering lowering;
   FunctionEffects effects;
 };
+namespace hir {
+struct Program;
+struct Function;
+}
+bool containerBorrowIntrinsic(IntrinsicId);
+bool validContainerIntrinsic(const hir::Program &, const hir::Function &);
 const IntrinsicInfo &intrinsicInfo(IntrinsicId);
 IntrinsicId findIntrinsic(std::string_view);
 

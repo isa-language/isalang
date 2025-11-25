@@ -1,0 +1,13 @@
+@import "std.vec"
+fn create(cond: bool) {
+  let v = Vec<String>::new();
+  v.push(String::from("drop"));
+  if cond {
+    return;
+  }
+  v.push(String::from("normal"));
+}
+fn main() {
+  create(true);
+  create(false);
+}

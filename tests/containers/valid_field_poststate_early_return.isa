@@ -1,0 +1,20 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn finish(h: &mut Holder<Buffer>, flag: bool) {
+  let b = h.value.move();
+  b.release();
+  h.value = b.move();
+  if flag {
+    return;
+  }
+}
+fn main() {
+  let a = Holder<Buffer>::new();
+  a.value = Buffer::new(2);
+  finish(&mut a, true);
+  let b = Holder<Buffer>::new();
+  b.value = Buffer::new(3);
+  finish(&mut b, false);
+}

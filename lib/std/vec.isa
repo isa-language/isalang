@@ -1,0 +1,30 @@
+@import "std.option"
+@representation "generic_vec"
+pub struct Vec<T> {
+  element: T,
+}
+impl<T> Vec<T> {
+  @intrinsic "vec.new"
+  pub fn new() -> Vec<T>;
+  @intrinsic "vec.with_capacity"
+  pub fn with_capacity(capacity: usize) -> Vec<T>;
+  @intrinsic "vec.push"
+  pub fn push(unique self, value: T);
+  @intrinsic "vec.pop"
+  pub fn pop(unique self) -> Option<T>;
+  @intrinsic "vec.len"
+  pub fn len(shared self) -> usize;
+  @intrinsic "vec.capacity"
+  pub fn capacity(shared self) -> usize;
+  pub fn is_empty(shared self) -> bool {
+    return self.len() == 0;
+  }
+  @intrinsic "vec.get"
+  pub fn get(shared self, index: usize) -> Option<&T>;
+  @intrinsic "vec.first"
+  pub fn first(shared self) -> Option<&T>;
+  @intrinsic "vec.last"
+  pub fn last(shared self) -> Option<&T>;
+  @intrinsic "vec.clear"
+  pub fn clear(unique self);
+}

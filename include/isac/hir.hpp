@@ -2,6 +2,7 @@
 #include "isac/frontend.hpp"
 #include "isac/intrinsics.hpp"
 #include "isac/target.hpp"
+#include <algorithm>
 #include <limits>
 #include <optional>
 #include <set>
@@ -40,8 +41,22 @@ struct Field {
   TypeId type;
   uint32_t offset;
 };
-enum class Representation { Stack, BoxPointer, BufferPointer, StringRecord, InputRecord };
-enum class DropGlue { Trivial, FreeAllocation, StringAllocation, InputAllocation };
+enum class Representation {
+  Stack,
+  BoxPointer,
+  BufferPointer,
+  StringRecord,
+  InputRecord,
+  GenericBox,
+  GenericVec
+};
+enum class DropGlue {
+  Trivial,
+  FreeAllocation,
+  StringAllocation,
+  InputAllocation,
+  ContainerElements
+};
 struct Variant {
   VariantId id;
   std::string name;
@@ -266,6 +281,7 @@ struct GenericStruct {
   std::string name;
   std::vector<TypeParamId> parameters;
   std::vector<GenericField> fields;
+  Representation representation = Representation::Stack;
 };
 struct Substitution {
   std::vector<std::pair<TypeParamId, TypeId>> types;
@@ -326,9 +342,11 @@ struct Program {
   bool borrowResultCompatible(TypeId input, TypeId result) const {
     if (input == result)
       return true;
+    const auto &from = types.at(input);
+    if (dynamicContainer(input))
+      return from.element == result && supportsStoredSharedReference(result);
     if (!scalar(result))
       return false;
-    const auto &from = types.at(input);
     if (from.kind == Type::Array || from.kind == Type::Slice)
       return from.element == result;
     if (from.kind == Type::Structure && from.representation == Representation::Stack)
@@ -408,17 +426,62 @@ struct Program {
           return true;
     return false;
   }
-  bool ownedFieldType(TypeId t) const {
-    if (types[t].protocol != None)
+  bool dynamicContainer(TypeId t) const {
+    auto r = types.at(t).representation;
+    return r == Representation::GenericBox || r == Representation::GenericVec;
+  }
+
+  bool containerElement(TypeId t) const {
+    if (t == Unit || t == RawPtr || t == Str || reference(t) || types.at(t).kind == Type::Slice)
       return false;
+    if (types.at(t).protocol != None) {
+      const auto &protocol = protocols.at(types[t].protocol);
+      if (std::find(protocol.finals.begin(), protocol.finals.end(), protocol.initial) ==
+          protocol.finals.end())
+        return false;
+    }
+    if (dynamicContainer(t))
+      return containerElement(types[t].element);
     if (heap(t))
       return true;
-
-    if (types[t].kind != Type::Structure)
+    for (const auto &field : types[t].fields)
+      if (!containerElement(field.type))
+        return false;
+    for (const auto &variant : types[t].variants)
+      for (auto payload : variant.payload)
+        if (!containerElement(payload))
+          return false;
+    if (types[t].kind == Type::Array)
+      return containerElement(types[t].element);
+    return true;
+  }
+  bool ownedFieldType(TypeId t) const {
+    if (heap(t))
+      return true;
+    if (types[t].protocol != None)
       return false;
-    for (const auto &instance : instances)
-      if (instance.type == t)
-        return needsDrop(t);
+    return types[t].kind == Type::Structure && needsDrop(t);
+  }
+  bool containsProtocolFields(TypeId t) const {
+    if (types[t].protocol != None)
+      return true;
+    for (const auto &field : types[t].fields)
+      if (containsProtocolFields(field.type))
+        return true;
+    for (const auto &variant : types[t].variants)
+      for (auto payload : variant.payload)
+        if (containsProtocolFields(payload))
+          return true;
+    return false;
+  }
+  bool containsProtocolOwnedFields(TypeId t) const {
+    for (const auto &field : types[t].fields)
+      if (types[field.type].protocol != None || containsProtocolOwnedFields(field.type))
+        return true;
+    for (const auto &variant : types[t].variants)
+      for (auto payload : variant.payload)
+        if (containsProtocolOwnedFields(payload))
+          return true;
     return false;
   }
   std::set<uint32_t> ownedFields(TypeId t) const {

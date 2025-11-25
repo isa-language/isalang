@@ -1,0 +1,15 @@
+@import("std.vec", "std.box")
+fn make() -> Vec<i32> {
+  let v = Vec<i32>::new();
+  v.push(1);
+  return v.move();
+}
+fn main() {
+  let o = make().get(0);
+  match o {
+    Some(r) => {
+      print(r);
+    },
+    None => {}
+  }
+}

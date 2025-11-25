@@ -5,7 +5,7 @@ namespace isac::macros {
 using MacroId = uint32_t;
 using ModuleId = uint32_t;
 enum class AtSymbolKind { Macro, Intrinsic, CompilerBuiltin };
-enum class BuiltinId { None, Format, Print, Println, Input, SizeOf, AlignOf };
+enum class BuiltinId { None, Format, Print, Println, Input, SizeOf, AlignOf, Import };
 struct AtSymbol {
   AtSymbolKind kind;
   uint32_t id;
@@ -34,12 +34,19 @@ struct Expansion {
   MacroId macro;
   Loc call, definition;
 };
+struct ExpansionInput {
+  ModuleId module;
+  bool trusted;
+  std::vector<Token> tokens;
+};
 struct Expanded {
+  std::vector<ExpansionInput> modules;
   std::vector<Token> tokens;
   std::vector<MacroDecl> declarations;
   std::vector<Expansion> expansions;
 };
 std::vector<TokenTree> tokenTrees(const std::vector<Token> &);
 Expanded expand(const std::vector<Token> &, SourceManager *sources = nullptr);
+Expanded expandModules(const std::vector<ExpansionInput> &);
 void print(const Expanded &, std::ostream &);
 }

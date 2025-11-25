@@ -638,5 +638,780 @@
     "code": "E0301",
     "stdin": "",
     "stdout": ""
+  },
+  "valid_ordinary_owned_forward": {
+    "code": "",
+    "stdin": "",
+    "stdout": "second\n17\n2\n"
+  },
+  "valid_ordinary_owned_backward": {
+    "code": "",
+    "stdin": "",
+    "stdout": "nested\n"
+  },
+  "valid_ordinary_owned_replace": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_ordinary_owned_deep": {
+    "code": "",
+    "stdin": "",
+    "stdout": "second\n"
+  },
+  "valid_ordinary_owned_generic_field": {
+    "code": "",
+    "stdin": "",
+    "stdout": "generic\n19\n"
+  },
+  "valid_ordinary_owned_generic_argument": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_ordinary_owned_early_return": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_ordinary_owned_cycle": {
+    "code": "E0204",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_ordinary_owned_indirect_cycle": {
+    "code": "E0204",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_ordinary_owned_generic_cycle": {
+    "code": "E0204",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_ordinary_owned_overflow": {
+    "code": "E0204",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_ordinary_owned_partial_store": {
+    "code": "E0430",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_protocol_field_transfer": {
+    "code": "",
+    "stdin": "",
+    "stdout": "42\n"
+  },
+  "valid_protocol_field_released_drop": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_protocol_field_replace": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_protocol_field_nested": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_protocol_field_parameter": {
+    "code": "",
+    "stdin": "",
+    "stdout": "3\n"
+  },
+  "valid_protocol_field_nested_parameter": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_protocol_field_early_return": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_nonfinal_drop": {
+    "code": "E0410",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_nonfinal_explicit_drop": {
+    "code": "E0410",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_nonfinal_replace": {
+    "code": "E0410",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_after_take_released": {
+    "code": "E0401",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_call_state": {
+    "code": "E0403",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_reference_poststate": {
+    "code": "E0410",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_enum_contract": {
+    "code": "E0430",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_nested_nonfinal": {
+    "code": "E0410",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_owned_projection_shared_unique": {
+    "code": "",
+    "stdin": "",
+    "stdout": "hello\nhello!\n"
+  },
+  "valid_owned_projection_multiple_shared": {
+    "code": "",
+    "stdin": "",
+    "stdout": "hello\nhello\n"
+  },
+  "valid_owned_projection_box_unique": {
+    "code": "",
+    "stdin": "",
+    "stdout": "20\n"
+  },
+  "valid_owned_projection_after_last_use": {
+    "code": "",
+    "stdin": "",
+    "stdout": "old\nnew\n"
+  },
+  "valid_owned_projection_view": {
+    "code": "",
+    "stdin": "",
+    "stdout": "view\nview!\n"
+  },
+  "invalid_owned_projection_absent": {
+    "code": "E0301",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_owned_projection_move_live": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_owned_projection_replace_live": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_owned_projection_owner_drop": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_owned_projection_unique_overlap": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_owned_fields_enum_payload": {
+    "code": "",
+    "stdin": "",
+    "stdout": "payload\n"
+  },
+  "invalid_protocol_field_enum_parameter": {
+    "code": "E0430",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_protocol_projection_methods": {
+    "code": "",
+    "stdin": "",
+    "stdout": "42\n6\n4\n20\n"
+  },
+  "valid_owned_field_autoref_chain": {
+    "code": "",
+    "stdin": "",
+    "stdout": "42\n3\n"
+  },
+  "valid_protocol_projection_preserving_function": {
+    "code": "",
+    "stdin": "",
+    "stdout": "10\n20\n"
+  },
+  "valid_protocol_projection_last_use": {
+    "code": "",
+    "stdin": "",
+    "stdout": "1\n"
+  },
+  "valid_protocol_projection_borrow_released": {
+    "code": "",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_projection_released_read": {
+    "code": "E0401",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_projection_explicit_released_read": {
+    "code": "E0401",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_field_owning_method": {
+    "code": "E0310",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_owned_field_autoref_conflict": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_projection_conflict": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_projection_owner_move": {
+    "code": "E0312",
+    "stdin": "",
+    "stdout": ""
+  },
+  "invalid_protocol_projection_absent": {
+    "code": "E0301",
+    "stdin": "",
+    "stdout": ""
+  },
+  "valid_field_poststate_release": {
+    "stdout": "42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_field_poststate_impl": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_field_poststate_forward": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_field_poststate_early_return": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_field_poststate_restore": {
+    "stdout": "4\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_field_poststate_two_parameters": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_field_poststate_after_release": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0401"
+  },
+  "invalid_field_poststate_missing": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0310"
+  },
+  "invalid_field_poststate_early_missing": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0310"
+  },
+  "invalid_field_poststate_mismatch": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0403"
+  },
+  "invalid_field_poststate_recursive": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0403"
+  },
+  "invalid_field_poststate_shared_take": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0311"
+  },
+  "valid_deep_owned_methods": {
+    "stdout": "42\n3\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_stack_owned_projection": {
+    "stdout": "2\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_stack_owned_unique_projection": {
+    "stdout": "3\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_deep_owned_shared": {
+    "stdout": "42\n42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_deep_owned_unique": {
+    "stdout": "42!\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_deep_stack_method": {
+    "stdout": "3\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_deep_protocol_poststate": {
+    "stdout": "42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_deep_protocol_local_restore": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_deep_owned_reborrow": {
+    "stdout": "3\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_deep_scalar_projection": {
+    "stdout": "0\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_deep_generic_projection": {
+    "stdout": "8\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_deep_protocol_released_read": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0401"
+  },
+  "invalid_deep_owned_absent": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_stack_projection_partial": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_deep_projection_conflict": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_deep_projection_owner_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_deep_projection_missing_restore": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0310"
+  },
+  "invalid_deep_projection_parent_use": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "valid_box_generic_new": {
+    "stdout": "42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_generic_string_return": {
+    "stdout": "heap\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_generic_owned_struct": {
+    "stdout": "7\nowned\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_generic_recursive_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_generic_enum_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_generic_scalar_array": {
+    "stdout": "20\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_generic_move": {
+    "stdout": "moved\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_generic_shared_access": {
+    "stdout": "3\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_box_generic_use_after_move": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_box_generic_double_consume": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_box_generic_element_move": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_box_generic_consume_borrowed": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_box_generic_reference_element": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0611"
+  },
+  "invalid_box_generic_protocol_element": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0611"
+  },
+  "invalid_box_generic_incomplete_struct": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "valid_vec_generic_new": {
+    "stdout": "0\n0\n1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_growth": {
+    "stdout": "17\n16\n16\n0\n99\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_pop_empty": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_string_return": {
+    "stdout": "two\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_owned_struct": {
+    "stdout": "42\nfield\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_nested_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_enum_elements": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_early_return": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_field_owner": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_clear_twice": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_generic_numeric_types": {
+    "stdout": "1.25\n-7\n1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_vec_generic_use_after_push_move": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_vec_generic_use_after_move": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0301"
+  },
+  "invalid_vec_generic_mutation_shared": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_vec_generic_drop_borrowed": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_vec_generic_type_mismatch": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "invalid_vec_generic_reference_element": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0611"
+  },
+  "invalid_vec_generic_protocol_field": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0611"
+  },
+  "valid_vec_generic_unique_parameter": {
+    "stdout": "1\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_generic_input_return": {
+    "stdout": "hello\n",
+    "stdin": "hello\n",
+    "code": ""
+  },
+  "valid_vec_generic_input_storage": {
+    "stdout": "input\n",
+    "stdin": "input\n",
+    "code": ""
+  },
+  "invalid_vec_generic_implicit_linear_copy": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0302"
+  },
+  "invalid_vec_generic_nested_incomplete": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0310"
+  },
+  "valid_box_element_shared": {
+    "stdout": "42\n42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_element_string": {
+    "stdout": "text\n4\ntext!\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_element_array": {
+    "stdout": "8\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_element_struct": {
+    "stdout": "18\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_element_return_contract": {
+    "stdout": "42\n42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_element_temporary": {
+    "stdout": "temporary\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_shared": {
+    "stdout": "10\n2\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_string": {
+    "stdout": "hello\n5\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_first_last": {
+    "stdout": "10\n20\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_missing": {
+    "stdout": "1\n2\n3\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_return_contract": {
+    "stdout": "42\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_array": {
+    "stdout": "8\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_nested_chain": {
+    "stdout": "nested\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_loop": {
+    "stdout": "1\n2\n",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_box_element_consume_live": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_box_element_drop_live": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_box_element_shared_mutation": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0311"
+  },
+  "invalid_box_element_temporary_escape": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E6003"
+  },
+  "invalid_vec_element_push_live": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_vec_element_pop_live": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_vec_element_clear_live": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_vec_element_move_live": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_vec_element_drop_live": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0312"
+  },
+  "invalid_vec_element_shared_mutation": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0311"
+  },
+  "invalid_vec_element_temporary_escape": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E6003"
+  },
+  "invalid_vec_element_index_type": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0200"
+  },
+  "valid_box_protocol_final_storage": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_protocol_final_storage": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "invalid_box_protocol_open_storage": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0403"
+  },
+  "invalid_vec_protocol_open_storage": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0403"
+  },
+  "invalid_vec_protocol_extracted_nonfinal": {
+    "stdout": "",
+    "stdin": "",
+    "code": "E0410"
+  },
+  "valid_box_element_format": {
+    "stdout": "owned 5\nowned\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_element_format_temporary": {
+    "stdout": "temporary\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_element_format": {
+    "stdout": "nested 6\n",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_vec_protocol_nested_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
+  },
+  "valid_box_protocol_enum_drop": {
+    "stdout": "",
+    "stdin": "",
+    "code": ""
   }
 }

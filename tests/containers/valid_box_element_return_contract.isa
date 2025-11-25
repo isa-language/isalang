@@ -1,0 +1,10 @@
+@import("std.vec", "std.box")
+fn read(box: &Box<i32>) -> &i32 {
+  return box.get();
+}
+fn main() {
+  let b = Box<i32>::new(42);
+  let r = read(&b);
+  print(r);
+  print(b.into_inner());
+}

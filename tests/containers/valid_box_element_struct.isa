@@ -1,0 +1,13 @@
+@import("std.vec", "std.box")
+struct Data {
+  x: i32,
+  y: i32,
+}
+fn main() {
+  let d = Data::new();
+  d.x = 17;
+  d.y = 18;
+  let b = Box<Data>::new(d.move());
+  let r = b.get();
+  print(r.y);
+}

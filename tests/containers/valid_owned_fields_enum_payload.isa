@@ -1,0 +1,15 @@
+struct Inner {
+  value: String,
+}
+fn main() {
+  let i = Inner::new();
+  i.value = String::from("payload");
+  let wrapped = Option::Some(i.move());
+  match wrapped {
+    Option::Some(value) => {
+      let text = value.value.move();
+      print(text);
+    },
+    Option::None => {},
+  }
+}

@@ -1,0 +1,15 @@
+@import "std.vec"
+fn main() {
+  let floats = Vec<f64>::new();
+  floats.push(1.25);
+  let f = floats.pop();
+  @println("{}", f.unwrap());
+  let signed = Vec<i8>::new();
+  signed.push(-7);
+  let s = signed.pop();
+  print(s.unwrap() as i32);
+  let flags = Vec<bool>::new();
+  flags.push(true);
+  let b = flags.pop();
+  print(b.unwrap());
+}

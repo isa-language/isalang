@@ -1,0 +1,22 @@
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+
+struct Holder<T> {
+  value: T,
+}
+
+fn main() {
+  let pair = Pair<String>::new();
+  pair.first = String::from("first");
+  pair.second = String::from("second");
+
+  let outer = Holder<Pair<String >>::new();
+  outer.value = pair.move();
+
+  let extracted = outer.value.move();
+  let text = extracted.second.move();
+  print(text);
+
+}

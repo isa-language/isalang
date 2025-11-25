@@ -1,0 +1,18 @@
+struct Owner {
+  text: String,
+  spare: String,
+}
+fn inspect(text: &String) {
+  print(text);
+}
+fn main() {
+  let o = Owner::new();
+  o.text = String::from("hello");
+  let r = &o.text;
+  inspect(r);
+  let w = &mut o.text;
+  w.push_str("!");
+  let again = &o.text;
+  print(again);
+  let taken = o.text.move();
+}

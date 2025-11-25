@@ -1,7 +1,7 @@
 #include "isac/backend.hpp"
 #include "isac/erasure.hpp"
 #include "isac/liveness.hpp"
-#include "isac/macros.hpp"
+#include "isac/modules.hpp"
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -9,7 +9,9 @@
 int main(int argc, char **argv) {
   const char *usage =
       "usage: isac file.isa [--check | --emit-tokens | --emit-ast | --emit-hir | "
-      "--emit-expanded | --emit-regions | --emit-region-constraints | --emit-core | --emit-erased | --emit-lir | "
+      "--emit-expanded | --emit-imports | --emit-regions | --emit-region-constraints | --emit-core "
+      "| --emit-erased "
+      "| --emit-lir | "
       "--emit-liveness | --emit-mlir "
       "| --emit-std-mlir | "
       "--emit-llvm-dialect | --emit-llvm | --emit-asm | --emit-obj | -o executable "
@@ -31,6 +33,7 @@ int main(int argc, char **argv) {
                                    "--emit-regions",
                                    "--check",
                                    "--emit-expanded",
+                                   "--emit-imports",
                                    "--emit-liveness",
                                    "--emit-tokens",
                                    "--emit-ast",
@@ -135,12 +138,17 @@ int main(int argc, char **argv) {
     }
     for (auto &t : ts)
       t.loc.file = input;
-    auto expanded = isac::macros::expand(ts, &sources);
+    auto compilation = isac::modules::compile(ts, &sources);
+    if (mode == "--emit-imports") {
+      isac::modules::print(compilation.modules, std::cout);
+      return 0;
+    }
+    auto &expanded = compilation.expanded;
     if (mode == "--emit-expanded") {
       isac::macros::print(expanded, std::cout);
       return 0;
     }
-    auto ast = isac::loadImports(isac::parse(expanded.tokens), &sources);
+    auto ast = std::move(compilation.ast);
     if (mode == "--emit-ast") {
       isac::printAST(ast, std::cout);
       return 0;

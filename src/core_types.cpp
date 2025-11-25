@@ -6,6 +6,78 @@
 namespace isac::core {
 
 void checkTypes(const Program &p) {
+
+  std::vector<unsigned> layoutState(p.semantics.types.size());
+  std::function<void(TypeId)> layout = [&](TypeId id) {
+    auto badLayout = [&] { fail({}, DiagnosticCode::InvalidCore, "invalid by-value type layout"); };
+    if (id >= p.semantics.types.size())
+      badLayout();
+    if (layoutState[id] == 2)
+      return;
+    if (layoutState[id] == 1)
+      badLayout();
+    layoutState[id] = 1;
+    const auto &type = p.semantics.types[id];
+    if (p.semantics.dynamicContainer(id)) {
+      layout(type.element);
+      if (type.kind != hir::Type::Structure || type.width != 1 || !type.fields.empty() ||
+          type.protocol != None || type.dropGlue != hir::DropGlue::ContainerElements ||
+          !p.semantics.containerElement(type.element))
+        badLayout();
+      bool instanceFound = false;
+      for (const auto &instance : p.semantics.instances)
+        if (instance.type == id && instance.declaration >= p.semantics.genericEnums.size()) {
+          auto index = instance.declaration - p.semantics.genericEnums.size();
+          if (index >= p.semantics.genericStructs.size())
+            badLayout();
+          const auto &decl = p.semantics.genericStructs[index];
+          if (decl.representation != type.representation || decl.parameters.size() != 1 ||
+              instance.substitution.types !=
+                  std::vector<std::pair<TypeParamId, TypeId>>{{decl.parameters[0], type.element}})
+            badLayout();
+          instanceFound = true;
+        }
+      if (!instanceFound)
+        badLayout();
+    } else if (type.kind == hir::Type::Structure && !p.semantics.heap(id)) {
+      uint32_t width = 0;
+      for (const auto &field : type.fields) {
+        layout(field.type);
+        auto cells = p.semantics.storageWidth(field.type);
+        if (cells > 65536 || width > 65536 - cells || field.offset != width)
+          badLayout();
+        width += cells;
+      }
+      if (type.width != std::max(1u, width))
+        badLayout();
+    } else if (type.kind == hir::Type::Enum) {
+      uint32_t width = 1;
+      for (const auto &variant : type.variants) {
+        uint32_t cells = 1;
+        for (auto payload : variant.payload) {
+          layout(payload);
+          auto size = p.semantics.storageWidth(payload);
+          if (size > 65536 || cells > 65536 - size)
+            badLayout();
+          cells += size;
+        }
+        width = std::max(width, cells);
+      }
+      if (type.width != width)
+        badLayout();
+    }
+    layoutState[id] = 2;
+  };
+  for (TypeId id = 0; id < p.semantics.types.size(); ++id)
+    layout(id);
+  for (const auto &type : p.semantics.types) {
+    if (type.kind == hir::Type::Enum)
+      for (const auto &variant : type.variants)
+        for (auto payload : variant.payload)
+          if (p.semantics.containsProtocolOwnedFields(payload))
+            fail({}, DiagnosticCode::InvalidCore,
+                 "missing protocolled enum payload field contract");
+  }
   for (const auto &type : p.semantics.types)
     if (type.kind == hir::Type::Reference &&
         (!p.semantics.supportsStoredSharedReference(type.element) || type.width != 1 ||
@@ -13,10 +85,15 @@ void checkTypes(const Program &p) {
          type.representation != hir::Representation::Stack))
       fail({}, DiagnosticCode::InvalidCore, "invalid stored-reference representation");
   for (const auto &function : p.semantics.functions) {
-    bool consuming =
-        function.owner != None && p.semantics.types.at(function.owner).kind == hir::Type::Enum &&
-        !function.params.empty() && p.semantics.symbols.at(function.params[0]).receiver &&
-        function.access == Access::Own;
+    bool consuming = function.owner != None &&
+                     (p.semantics.types.at(function.owner).kind == hir::Type::Enum ||
+                      function.intrinsicId == IntrinsicId::Box_into_inner) &&
+                     !function.params.empty() &&
+                     p.semantics.symbols.at(function.params[0]).receiver &&
+                     function.access == Access::Own;
+    if (intrinsicInfo(function.intrinsicId).lowering == IntrinsicLowering::ContainerStorage &&
+        !validContainerIntrinsic(p.semantics, function))
+      fail(function.loc, DiagnosticCode::InvalidCore, "invalid generic container signature");
     if (function.consumesSelf != consuming)
       fail(function.loc, DiagnosticCode::InvalidCore, "invalid consuming receiver contract");
     if (function.resultBorrowedContainer !=
@@ -26,9 +103,10 @@ void checkTypes(const Program &p) {
       fail(function.loc, DiagnosticCode::InvalidCore, "incomplete reference result contract");
     if (function.resultOrigin != None) {
       if (function.resultOrigin >= p.semantics.symbols.size() || function.external ||
-          !function.intrinsic.empty() ||
-          (function.owner != None && (function.resultBorrowedContainer ||
-                                      p.semantics.types[function.owner].protocol != None)) ||
+          (!function.intrinsic.empty() && !containerBorrowIntrinsic(function.intrinsicId)) ||
+          (function.owner != None &&
+           ((function.resultBorrowedContainer && !containerBorrowIntrinsic(function.intrinsicId)) ||
+            p.semantics.types[function.owner].protocol != None)) ||
           (!function.resultPayloadSource &&
            std::find(function.params.begin(), function.params.end(), function.resultOrigin) ==
                function.params.end()))
@@ -164,6 +242,10 @@ void checkTypes(const Program &p) {
           bad();
         if (i.kind == Inst::Loop)
           block(i.condition);
+        if (!i.fieldPath.empty() &&
+            !(i.placeProjection == Inst::PlaceProjection::Field &&
+              (i.kind == Inst::BorrowShared || i.kind == Inst::BorrowUnique)))
+          bad();
         switch (i.kind) {
         case Inst::StoreReference:
           if (!p.semantics.reference(i.type) || p.semantics.types[i.type].element != slot() ||
@@ -182,15 +264,26 @@ void checkTypes(const Program &p) {
         case Inst::BorrowUnique: {
           if (i.placeProjection != Inst::PlaceProjection::None) {
             const auto &source = p.semantics.types[slot()];
-            if (i.kind != Inst::BorrowShared || i.projection || !scalar(i.type))
+            if (i.projection)
               bad();
             if (i.placeProjection == Inst::PlaceProjection::Field) {
-              if (source.kind != hir::Type::Structure ||
-                  source.representation != hir::Representation::Stack ||
-                  i.fieldIndex >= source.fields.size() || !i.args.empty())
+              if (i.fieldPath.empty() || i.fieldIndex != i.fieldPath.back() || !i.args.empty())
                 bad();
-              expect(source.fields.at(i.fieldIndex).type, i.type);
+              auto type = slot();
+              for (auto index : i.fieldPath) {
+                const auto &container = p.semantics.types[type];
+                if (container.kind != hir::Type::Structure || p.semantics.heap(type) ||
+                    index >= container.fields.size())
+                  bad();
+                type = container.fields[index].type;
+              }
+              expect(type, i.type);
+              if (!(scalar(i.type) && i.kind == Inst::BorrowShared) &&
+                  !p.semantics.ownedFieldType(i.type))
+                bad();
             } else {
+              if (i.kind != Inst::BorrowShared || !scalar(i.type))
+                bad();
               if ((source.kind != hir::Type::Array && source.kind != hir::Type::Slice) ||
                   i.args.size() != 1)
                 bad();
@@ -350,7 +443,8 @@ void checkTypes(const Program &p) {
           break;
         }
         case Inst::Create:
-          if (p.semantics.types[i.type].kind != hir::Type::Structure)
+          if (p.semantics.types[i.type].kind != hir::Type::Structure ||
+              p.semantics.dynamicContainer(i.type))
             bad();
           break;
         case Inst::Cast: {
@@ -409,6 +503,7 @@ void checkTypes(const Program &p) {
           } else
             expect(arg(0), signature.result);
           break;
+        case Inst::ContainerCall:
         case Inst::InputCall:
         case Inst::StringCall:
         case Inst::HeapAlloc:
@@ -433,6 +528,12 @@ void checkTypes(const Program &p) {
             if (i.access != target.access)
               bad();
           }
+          bool storageCall =
+              intrinsicInfo(target.intrinsicId).lowering == IntrinsicLowering::ContainerStorage;
+          if ((i.kind == Inst::ContainerCall) != storageCall ||
+              (storageCall &&
+               (i.text != target.intrinsic || !validContainerIntrinsic(p.semantics, target))))
+            bad();
           if (i.kind == Inst::InputCall &&
               (intrinsicInfo(target.intrinsicId).lowering != IntrinsicLowering::InputRecord ||
                i.text != target.intrinsic))

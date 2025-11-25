@@ -1,0 +1,13 @@
+@import "std.buffer"
+struct Owner {
+  buffer: Buffer,
+  text: String,
+  spare: String,
+}
+fn main() {
+  let o = Owner::new();
+  o.text = String::from("hello");
+  let r = &o.text;
+  o.text.push_str("!");
+  print(r);
+}

@@ -1,0 +1,18 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn work(stop: bool) {
+  let h = Holder<Buffer>::new();
+  if stop {
+    return;
+  }
+  let b = Buffer::new(2);
+  b.release();
+  h.value = b.move();
+  return;
+}
+fn main() {
+  work(true);
+  work(false);
+}

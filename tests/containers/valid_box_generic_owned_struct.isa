@@ -1,0 +1,15 @@
+@import "std.box"
+struct Pair<T> {
+  first: T,
+  text: String,
+}
+fn main() {
+  let p = Pair<i32>::new();
+  p.first = 7;
+  p.text = String::from("owned");
+  let b = Box<Pair<i32 >>::new(p.move());
+  let taken = b.into_inner();
+  print(taken.first);
+  let text = taken.text.move();
+  print(text);
+}

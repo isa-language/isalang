@@ -49,7 +49,8 @@ class Builder {
       loan.carrier = i.offset;
       loan.place.root = i.slot;
       if (i.placeProjection == I::PlaceProjection::Field)
-        loan.place.projections.push_back({ProjectionKind::Field, i.fieldIndex});
+        for (auto field : i.fieldPath)
+          loan.place.projections.push_back({ProjectionKind::Field, field});
       else if (i.placeProjection == I::PlaceProjection::Index)
         loan.place.projections.push_back({ProjectionKind::Index, None});
       if (i.projection)
@@ -126,7 +127,8 @@ public:
     while (originsChanged) {
       originsChanged = false;
       for (auto *i : instructions) {
-        if (!i || i->kind != I::Call || referenceArguments.contains(i->result))
+        if (!i || (i->kind != I::Call && i->kind != I::ContainerCall) ||
+            referenceArguments.contains(i->result))
           continue;
         const auto &target = program.semantics.functions[i->function];
         if (!target.returnsReference())
@@ -257,12 +259,18 @@ public:
         changed |= size != upper.size();
       }
     }
+    std::map<SymbolId, std::vector<Projection>> paths;
+    for (const auto &loan : graph.loans)
+      paths[loan.carrier] = loan.place.projections;
     for (auto &loan : graph.loans) {
       loan.points = graph.regions.at(loan.region).points;
 
       std::set<SymbolId> seen;
-      while (parents.contains(loan.place.root) && seen.insert(loan.place.root).second)
+      while (parents.contains(loan.place.root) && seen.insert(loan.place.root).second) {
+        const auto &prefix = paths[loan.place.root];
+        loan.place.projections.insert(loan.place.projections.begin(), prefix.begin(), prefix.end());
         loan.place.root = parents.at(loan.place.root);
+      }
       Loc lastUse = loan.origin;
       for (const auto &b : graph.blocks)
         if (b.reachable && b.uses.contains(loan.carrier) &&

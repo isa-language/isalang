@@ -1,0 +1,7 @@
+@import "std.box"
+fn main() {
+  let a = Box<i32>::new(3);
+  borrow shared a as r {
+    a.into_inner();
+  }
+}

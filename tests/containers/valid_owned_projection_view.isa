@@ -1,0 +1,16 @@
+struct Owner {
+  text: String,
+  spare: String,
+}
+fn main() {
+  let o = Owner::new();
+  o.text = String::from("view");
+  {
+    let r = &o.text;
+    let v = r.as_str();
+    print(v);
+  };
+  let w = &mut o.text;
+  w.push_str("!");
+  print(w);
+}

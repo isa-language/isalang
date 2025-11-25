@@ -10,6 +10,25 @@ struct Merge {
   SymbolId slot;
   ValueId left, right, result;
 };
+struct FieldDropPlan {
+  bool skip = false;
+  std::map<uint32_t, FieldDropPlan> fields;
+};
+
+struct OwnedFieldState {
+  StateId state = None;
+  bool allocation = false;
+  std::map<uint32_t, OwnedFieldState> fields;
+  Loc origin = {};
+  bool operator==(const OwnedFieldState &other) const {
+    return state == other.state && allocation == other.allocation && fields == other.fields;
+  }
+};
+struct FieldPostState {
+  SymbolId parameter;
+  std::map<uint32_t, OwnedFieldState> fields;
+  Loc origin;
+};
 struct Inst {
   enum Kind {
     Constant,
@@ -57,7 +76,8 @@ struct Inst {
     Length,
     FieldStore,
     FieldTake,
-    FieldDrop
+    FieldDrop,
+    ContainerCall
   } kind;
   Loc loc;
   uint32_t semanticPoint = None;
@@ -73,6 +93,7 @@ struct Inst {
   bool storedPayloadReference = false;
   enum class PlaceProjection { None, Field, Index } placeProjection = PlaceProjection::None;
   uint32_t fieldIndex = None;
+  std::vector<uint32_t> fieldPath;
   uint32_t loop = None;
   bool unconditional = false;
   FunctionId function = None;
@@ -90,6 +111,8 @@ struct Inst {
   bool replaceField = false;
   std::map<SymbolId, std::vector<uint32_t>> absentFields;
   std::vector<uint32_t> temporaryAbsentFields;
+  std::map<SymbolId, FieldDropPlan> fieldCleanup;
+  FieldDropPlan replacedFieldPlan, temporaryFieldPlan;
   Quantity quantity = Quantity::Omega;
   Access access = Access::Own;
   ProtocolId protocol = None;
@@ -100,6 +123,7 @@ struct Function {
   FunctionId id;
   std::vector<Inst> body;
   std::vector<ValueId> parameters;
+  std::vector<FieldPostState> fieldPostStates = {};
 };
 struct Program {
   hir::Program semantics;

@@ -1,0 +1,23 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+struct Outer {
+  inner: Inner,
+}
+struct Inner {
+  data: Buffer,
+}
+fn consume(o: Outer) {
+  let i = o.inner.move();
+  let b = i.data.move();
+  b.release();
+}
+fn main() {
+  let b = Buffer::new(2);
+  let i = Inner::new();
+  i.data = b.move();
+  let o = Outer::new();
+  o.inner = i.move();
+  consume(o.move());
+}

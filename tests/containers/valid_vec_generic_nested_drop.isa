@@ -1,0 +1,9 @@
+@import "std.box"
+@import "std.vec"
+fn main() {
+  let outer = Vec<Box<Vec<String >> >::new();
+  let inner = Vec<String>::new();
+  inner.push(String::from("nested"));
+  let b = Box<Vec<String >>::new(inner.move());
+  outer.push(b.move());
+}

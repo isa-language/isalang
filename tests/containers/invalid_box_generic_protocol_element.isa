@@ -1,0 +1,4 @@
+@import "std.box"
+@import "std.buffer" fn main() {
+  let b = Box<Buffer>::new(Buffer::new(1));
+}

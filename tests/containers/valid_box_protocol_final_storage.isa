@@ -1,0 +1,25 @@
+@import("std.vec", "std.box")
+protocol FileState {
+  initial Closed;
+  final Closed;
+  state Closed {
+    open(self) -> Open;
+  }
+  state Open {
+    close(self) -> Closed;
+  }
+}
+struct File: FileState {
+  x: i32,
+}
+impl File {
+  fn open(self) {}
+  fn close(self) {}
+}
+fn main() {
+  let f = File::new();
+  let b = Box<File>::new(f.move());
+  let f2 = b.into_inner();
+  f2.open();
+  f2.close();
+}

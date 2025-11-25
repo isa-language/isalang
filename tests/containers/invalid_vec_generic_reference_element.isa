@@ -1,0 +1,4 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<Option<&i32 >>::new();
+}

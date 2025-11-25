@@ -1,0 +1,24 @@
+@import("std.vec", "std.box")
+protocol State {
+  initial Closed;
+  final Closed;
+  state Closed {
+    open(self) -> Open;
+  }
+  state Open {
+    close(self) -> Closed;
+  }
+}
+struct Resource: State {
+  value: i32,
+}
+impl Resource {
+  fn open(self) {}
+  fn close(self) {}
+}
+fn main() {
+  let v = Vec<Box<Resource >>::new();
+  let r = Resource::new();
+  v.push(Box<Resource>::new(r.move()));
+  v.clear();
+}

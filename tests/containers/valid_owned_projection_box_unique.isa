@@ -1,0 +1,16 @@
+@import "std.box"
+struct Owner {
+  text: String,
+  spare: String,
+}
+struct Holder {
+  value: BoxI32,
+}
+fn main() {
+  let h = Holder::new();
+  h.value = BoxI32::new(10);
+  let w = &mut h.value;
+  w.set(20);
+  let r = &h.value;
+  print(r.get());
+}

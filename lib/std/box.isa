@@ -13,3 +13,16 @@ impl BoxI32 {
     isac_rt_store_i32(self.ptr, value);
   }
 }
+
+@representation "generic_box"
+pub struct Box<T> {
+  value: T,
+}
+impl<T> Box<T> {
+  @intrinsic "box.generic.new"
+  pub fn new(value: T) -> Box<T>;
+  @intrinsic "box.generic.get"
+  pub fn get(shared self) -> &T;
+  @intrinsic "box.generic.into_inner"
+  pub fn into_inner(self) -> T;
+}

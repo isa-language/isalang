@@ -1,0 +1,31 @@
+@import("std.vec", "std.box")
+protocol FileState {
+  initial Closed;
+  final Closed;
+  state Closed {
+    open(self) -> Open;
+  }
+  state Open {
+    close(self) -> Closed;
+  }
+}
+struct File: FileState {
+  x: i32,
+}
+impl File {
+  fn open(self) {}
+  fn close(self) {}
+}
+fn main() {
+  let v = Vec<File>::new();
+  v.push(File::new());
+  let o = v.pop();
+  match o {
+    Some(f) => {
+      f.open();
+      f.close();
+    },
+    None => {}
+  }
+  v.push(File::new());
+}

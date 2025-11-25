@@ -92,3 +92,18 @@ ISAC_INTRINSIC(Env_argument, "isac_rt_env_argument", Platform, ExternalCall, tru
 
 ISAC_INTRINSIC(String_is_char_boundary, "string.is_char_boundary", Memory, StringRecord, false,
                false)
+
+ISAC_INTRINSIC(Box_new_generic, "box.generic.new", Memory, ContainerStorage, false, true)
+ISAC_INTRINSIC(Box_into_inner, "box.generic.into_inner", Memory, ContainerStorage, false, false)
+ISAC_INTRINSIC(Vec_new, "vec.new", Memory, ContainerStorage, false, true)
+ISAC_INTRINSIC(Vec_with_capacity, "vec.with_capacity", Memory, ContainerStorage, false, true)
+ISAC_INTRINSIC(Vec_push, "vec.push", Memory, ContainerStorage, false, true)
+ISAC_INTRINSIC(Vec_pop, "vec.pop", Memory, ContainerStorage, false, false)
+ISAC_INTRINSIC(Vec_len, "vec.len", Memory, ContainerStorage, false, false)
+ISAC_INTRINSIC(Vec_capacity, "vec.capacity", Memory, ContainerStorage, false, false)
+ISAC_INTRINSIC(Vec_clear, "vec.clear", Memory, ContainerStorage, false, false)
+
+ISAC_INTRINSIC(Box_get, "box.generic.get", Memory, ContainerStorage, false, false)
+ISAC_INTRINSIC(Vec_get, "vec.get", Memory, ContainerStorage, false, false)
+ISAC_INTRINSIC(Vec_first, "vec.first", Memory, ContainerStorage, false, false)
+ISAC_INTRINSIC(Vec_last, "vec.last", Memory, ContainerStorage, false, false)

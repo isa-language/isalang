@@ -1,0 +1,5 @@
+struct Large {
+  cells: i32[65536],
+  value: String,
+}
+fn main() {}

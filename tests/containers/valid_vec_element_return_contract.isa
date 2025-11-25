@@ -1,0 +1,16 @@
+@import("std.vec", "std.box")
+fn first(v: &Vec<i32>) -> Option<&i32> {
+  return v.get(0);
+}
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(42);
+  let o = first(&v);
+  match o {
+    Some(r) => {
+      print(r);
+    },
+    None => {}
+  }
+  v.clear();
+}

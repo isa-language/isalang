@@ -1,0 +1,13 @@
+@import "std.buffer"
+struct Owner {
+  buffer: Buffer,
+  text: String,
+  spare: String,
+}
+fn main() {
+  let o = Owner::new();
+  o.text = String::from("42");
+  print(o.text.as_str().parse_i32().value());
+  o.text.push_str("!");
+  print(o.text.len());
+}

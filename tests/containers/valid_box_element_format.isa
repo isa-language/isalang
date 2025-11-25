@@ -1,0 +1,6 @@
+@import("std.box") fn main() {
+  let b = Box<String>::new(String::from("owned"));
+  @println("{} {}", b.get(), b.get().len());
+  let text = b.into_inner();
+  @println("{}", text);
+}

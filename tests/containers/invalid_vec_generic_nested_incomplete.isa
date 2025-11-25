@@ -1,0 +1,17 @@
+@import "std.vec"
+struct Inner {
+  text: String,
+}
+struct Outer {
+  inner: Inner,
+}
+fn main() {
+  let o = Outer::new();
+  let i = Inner::new();
+  i.text = String::from("a");
+  o.inner = i.move();
+  let r = &mut o.inner;
+  let taken = r.text.move();
+  let v = Vec<Outer>::new();
+  v.push(o.move());
+}

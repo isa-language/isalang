@@ -1,0 +1,14 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn consume(h: Holder<Buffer>) {
+  let b = h.value.move();
+  print(b.len());
+  b.release();
+}
+fn main() {
+  let h = Holder<Buffer>::new();
+  h.value = Buffer::new(3);
+  consume(h.move());
+}

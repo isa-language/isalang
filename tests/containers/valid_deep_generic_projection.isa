@@ -1,0 +1,15 @@
+struct Inner<T> {
+  value: T,
+}
+struct Outer<T> {
+  prefix: i32,
+  value: T,
+}
+fn main() {
+  let i = Inner<String>::new();
+  i.value = String::from("generic");
+  let o = Outer<Inner<String >>::new();
+  o.value = i.move();
+  o.value.value.push_str("!");
+  print(o.value.value.len());
+}

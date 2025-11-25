@@ -1,0 +1,8 @@
+@import "std.box"
+fn inspect(value: &Box<i32>) {}
+fn main() {
+  let b = Box<i32>::new(3);
+  let r = &b;
+  inspect(r);
+  print(b.into_inner());
+}

@@ -1,0 +1,24 @@
+struct Inner {
+  prefix: i32,
+  text: String,
+}
+struct Outer {
+  prefix: i32,
+  inner: Inner,
+}
+impl Inner {
+  fn count(shared self) -> usize {
+    return self.text.len();
+  }
+  fn modify(unique self) {
+    self.text.push_str("!");
+  }
+}
+fn main() {
+  let i = Inner::new();
+  i.text = String::from("42");
+  let o = Outer::new();
+  o.inner = i.move();
+  o.inner.modify();
+  print(o.inner.count());
+}

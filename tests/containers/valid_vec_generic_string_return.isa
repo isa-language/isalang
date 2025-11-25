@@ -1,0 +1,18 @@
+@import "std.vec"
+fn make() -> Vec<String> {
+  let v = Vec<String>::new();
+  v.push(String::from("one"));
+  v.push(String::from("two"));
+  return v.move();
+}
+fn main() {
+  let v = make();
+  let last = v.pop();
+  match last.move() {
+    Some(text) => {
+      print(text);
+    },
+    None => {}
+  }
+  v.clear();
+}

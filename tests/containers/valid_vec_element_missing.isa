@@ -1,0 +1,26 @@
+@import("std.vec", "std.box")
+fn main() {
+  let v = Vec<i32>::new();
+  let a = v.first();
+  let b = v.last();
+  let c = v.get(18446744073709551615usize);
+  match a {
+    Some(_) => {},
+    None => {
+      print(1);
+    }
+  }
+  match b {
+    Some(_) => {},
+    None => {
+      print(2);
+    }
+  }
+  match c {
+    Some(_) => {},
+    None => {
+      print(3);
+    }
+  }
+  v.push(10);
+}

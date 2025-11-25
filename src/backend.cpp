@@ -1,11 +1,11 @@
 #include "isac/backend.hpp"
 #include "isac/target.hpp"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
-#include "mlir/Conversion/LLVMCommon/MemRefBuilder.h"
-#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
+#include "mlir/Conversion/LLVMCommon/MemRefBuilder.h"
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -97,11 +97,12 @@ LogicalResult ViewOp::verify() {
 LogicalResult SubviewOp::verify() {
   auto from = dyn_cast<MemRefType>(getOperand(0).getType());
   auto to = dyn_cast<MemRefType>((*this)->getResult(0).getType());
-  return from && to && from.getRank() == 1 && to.getRank() == 1 && to.getDimSize(0) == 1 &&
+  return from && to && from.getRank() == 1 && to.getRank() == 1 && to.getDimSize(0) > 0 &&
+                 (from.isDynamicDim(0) || to.getDimSize(0) <= from.getDimSize(0)) &&
                  from.getElementType() == to.getElementType() &&
                  isa<IntegerType>(getOperand(1).getType())
              ? success()
-             : emitOpError("invalid element view");
+             : emitOpError("invalid subview");
 }
 LogicalResult AddressOp::verify() {
   auto source = dyn_cast<MemRefType>(getOperand().getType());
@@ -276,9 +277,10 @@ public:
         replacement = b.create<memref::CastOp>(loc, op->getResult(0).getType(), op->getOperand(0));
       else if (isa<SubviewOp>(op)) {
         auto index = b.create<arith::IndexCastOp>(loc, b.getIndexType(), op->getOperand(1));
+        auto target = cast<MemRefType>(op->getResult(0).getType());
         replacement = b.create<memref::SubViewOp>(
-            loc, cast<MemRefType>(op->getResult(0).getType()), op->getOperand(0),
-            ArrayRef<OpFoldResult>{index.getResult()}, ArrayRef<OpFoldResult>{b.getIndexAttr(1)},
+            loc, target, op->getOperand(0), ArrayRef<OpFoldResult>{index.getResult()},
+            ArrayRef<OpFoldResult>{b.getIndexAttr(target.getDimSize(0))},
             ArrayRef<OpFoldResult>{b.getIndexAttr(1)});
       } else if (isa<LengthOp, IndexCheckOp>(op)) {
         auto zero = b.create<arith::ConstantIndexOp>(loc, 0);
@@ -708,6 +710,14 @@ public:
     declare("isac_rt_input_result_f64", {ptr}, {builder.getF64Type()});
     declare("isac_rt_input_read_bool", {ptr}, {});
     declare("isac_rt_input_result_bool", {ptr}, {i32});
+    declare("isac_rt_vec_new", {size, size}, {ptr});
+    declare("isac_rt_vec_len", {ptr}, {size});
+    declare("isac_rt_vec_capacity", {ptr}, {size});
+    declare("isac_rt_vec_at", {ptr, size}, {ptr});
+    declare("isac_rt_vec_push_slot", {ptr}, {ptr});
+    declare("isac_rt_vec_pop_slot", {ptr}, {ptr});
+    declare("isac_rt_vec_clear_storage", {ptr}, {});
+    declare("isac_rt_vec_drop_storage", {ptr}, {});
     declare("isac_rt_env_init", {i32, ptr}, {});
     declare("isac_rt_env_destroy", {}, {});
     declare("isac_rt_env_argument_count", {}, {size});

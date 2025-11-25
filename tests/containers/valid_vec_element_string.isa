@@ -1,0 +1,14 @@
+@import("std.vec", "std.box")
+fn main() {
+  let v = Vec<String>::new();
+  v.push(String::from("hello"));
+  let o = v.get(0);
+  match o {
+    Some(r) => {
+      print(r);
+      print(r.len());
+    },
+    None => {}
+  }
+  v.clear();
+}

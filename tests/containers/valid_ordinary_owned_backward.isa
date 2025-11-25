@@ -1,0 +1,18 @@
+struct Inner {
+  value: String,
+}
+struct Outer {
+  prefix: i32,
+  value: Inner,
+  tail: i32,
+}
+fn main() {
+  let inner = Inner::new();
+  inner.value = String::from("nested");
+  let outer = Outer::new();
+  outer.value = inner.move();
+  let moved = outer.move();
+  let extracted = moved.value.move();
+  let text = extracted.value.move();
+  print(text);
+}

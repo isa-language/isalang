@@ -1,0 +1,25 @@
+@import "std.buffer"
+struct Owner {
+  buffer: Buffer,
+  text: String,
+  spare: String,
+}
+struct Holder {
+  buffer: Buffer,
+}
+fn read(h: &Holder) -> i32 {
+  return h.buffer.read(0);
+}
+fn write(h: &mut Holder) {
+  h.buffer.write(0, 20);
+}
+fn main() {
+  let h = Holder::new();
+  h.buffer = Buffer::new(3);
+  h.buffer.write(0, 10);
+  print(read(&h));
+  write(&mut h);
+  print(h.buffer.read(0));
+  let b = h.buffer.move();
+  b.release();
+}

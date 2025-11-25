@@ -732,9 +732,15 @@ public:
       if (peek().text == "async" || peek().text == "await")
         ident();
       if (peek().text == "@" && ts[pos + 1].text == "import") {
-        ++pos;
-        ++pos;
-        p.imports.push_back(stringLiteral());
+        auto origin = peek().loc;
+        pos += 2;
+        bool parenthesized = eat("(");
+        do {
+          p.importOrigins.push_back(origin);
+          p.imports.push_back(stringLiteral());
+        } while (parenthesized && eat(",") && peek().text != ")");
+        if (parenthesized)
+          need(")");
         eat(";");
         continue;
       }

@@ -1,0 +1,10 @@
+@import "std.vec"
+struct Holder {
+  values: Vec<String>,
+}
+fn main() {
+  let h = Holder::new();
+  h.values = Vec<String>::new();
+  h.values.push(String::from("field"));
+  print(h.values.len());
+}

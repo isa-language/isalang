@@ -1,0 +1,21 @@
+@import "std.vec"
+struct Data {
+  number: i32,
+  text: String,
+}
+fn main() {
+  let v = Vec<Data>::new();
+  let d = Data::new();
+  d.number = 42;
+  d.text = String::from("field");
+  v.push(d.move());
+  let item = v.pop();
+  match item.move() {
+    Some(d) => {
+      print(d.number);
+      let text = d.text.move();
+      print(text);
+    },
+    None => {}
+  }
+}

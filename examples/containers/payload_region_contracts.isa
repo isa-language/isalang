@@ -2,10 +2,12 @@ enum Input<T> {
   Missing,
   Present(i32, T),
 }
+
 enum Views<T> {
   Empty,
   Pair(T, T),
 }
+
 fn adapt(value: Input<&String>, discard: bool) -> Result<&String, i32> {
   if discard {
     return Result::Err(9);
@@ -19,6 +21,7 @@ fn adapt(value: Input<&String>, discard: bool) -> Result<&String, i32> {
     },
   }
 }
+
 fn duplicate(value: Result<&String, i32>) -> Views<&String> {
   match value {
     Result::Ok(view) => {

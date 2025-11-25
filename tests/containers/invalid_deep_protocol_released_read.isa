@@ -1,0 +1,21 @@
+@import "std.buffer"
+struct Inner {
+  buffer: Buffer,
+}
+struct Outer {
+  prefix: i32,
+  inner: Inner,
+}
+fn finish(i: &mut Inner) {
+  let b = i.buffer.move();
+  b.release();
+  i.buffer = b.move();
+}
+fn main() {
+  let i = Inner::new();
+  i.buffer = Buffer::new(2);
+  let o = Outer::new();
+  o.inner = i.move();
+  finish(&mut o.inner);
+  print(o.inner.buffer.read(0));
+}

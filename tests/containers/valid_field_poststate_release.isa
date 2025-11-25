@@ -1,0 +1,16 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn main() {
+  let h = Holder<Buffer>::new();
+  h.value = Buffer::new(2);
+  finish(&mut h);
+}
+fn finish(h: &mut Holder<Buffer>) {
+  let b = h.value.move();
+  b.write(0, 42);
+  print(b.read(0));
+  b.release();
+  h.value = b.move();
+}

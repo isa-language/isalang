@@ -1,0 +1,16 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<i32>::with_capacity(1);
+  for i in 0..17 {
+    v.push(i);
+  }
+  print(v.len());
+  let last = v.pop();
+  print(last.unwrap());
+  print(v.len());
+  v.clear();
+  print(v.len());
+  v.push(99);
+  let n = v.pop();
+  print(n.unwrap());
+}

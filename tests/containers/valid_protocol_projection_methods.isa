@@ -1,0 +1,24 @@
+@import "std.buffer"
+struct Owner {
+  buffer: Buffer,
+  text: String,
+  spare: String,
+}
+fn main() {
+  let o = Owner::new();
+  o.buffer = Buffer::new(4);
+  o.text = String::from("owned");
+  o.buffer.write(0, 42);
+  print(o.buffer.read(0));
+  o.text.push_str("!");
+  print(o.text.len());
+  let r = &o.buffer;
+  let alias = &r;
+  print(alias.len());
+  let w = &mut o.buffer;
+  w.write(1, 20);
+  print(w.read(1));
+  let b = o.buffer.move();
+  b.release();
+  o.buffer = b.move();
+}

@@ -1,0 +1,14 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn main() {
+  let h = Holder<Buffer>::new();
+  let b = Buffer::new(3);
+  b.write(0, 42);
+  h.value = b.move();
+  let r = h.value.move();
+  print(r.read(0));
+  r.release();
+  h.value = r.move();
+}

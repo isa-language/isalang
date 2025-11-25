@@ -1,0 +1,11 @@
+struct Owner {
+  text: String,
+  spare: String,
+}
+fn main() {
+  let o = Owner::new();
+  o.text = String::from("a");
+  let r = &o.text;
+  let moved = o.text.move();
+  print(r);
+}

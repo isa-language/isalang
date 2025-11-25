@@ -1,0 +1,12 @@
+@import("std.vec", "std.box") fn main() {
+  let v = Vec<Box<String >>::new();
+  v.push(Box<String>::new(String::from("nested")));
+  let o = v.get(0);
+  match o {
+    Some(b) => {
+      @println("{} {}", b.get(), b.get().len());
+    },
+    None => {}
+  }
+  v.clear();
+}

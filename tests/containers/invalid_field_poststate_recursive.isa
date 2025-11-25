@@ -1,0 +1,8 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn finish(h: &mut Holder<Buffer>) {
+  finish(h);
+}
+fn main() {}

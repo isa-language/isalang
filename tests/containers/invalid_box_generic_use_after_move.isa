@@ -1,0 +1,6 @@
+@import "std.box"
+fn main() {
+  let a = Box<i32>::new(3);
+  let b = a.move();
+  a.into_inner();
+}

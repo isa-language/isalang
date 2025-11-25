@@ -1,0 +1,29 @@
+struct Outer {
+  prefix: i32,
+  pair: Pair,
+  tail: i32,
+}
+
+struct Pair {
+  first: String,
+  number: i32,
+  second: String,
+}
+
+fn main() {
+  let pair = Pair::new();
+  pair.first = String::from("first");
+  pair.second = String::from("second");
+  pair.number = 17;
+
+  let outer = Outer::new();
+  outer.prefix = 1;
+  outer.tail = 2;
+  outer.pair = pair.move();
+
+  let extracted = outer.pair.move();
+  let text = extracted.second.move();
+  print(text);
+  print(extracted.number);
+  print(outer.tail);
+}

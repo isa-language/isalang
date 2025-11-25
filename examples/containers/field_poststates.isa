@@ -1,0 +1,29 @@
+@import "std.buffer"
+
+struct Inner<T> {
+  value: T,
+}
+
+struct Outer<T> {
+  prefix: i32,
+  inner: T,
+}
+
+fn main() {
+  let inner = Inner<Buffer>::new();
+  inner.value = Buffer::new(4);
+  let outer = Outer<Inner<Buffer >>::new();
+  outer.inner = inner.move();
+
+  outer.inner.value.write(0, 42);
+  print(outer.inner.value.read(0));
+
+  finish(&mut outer.inner);
+
+}
+
+fn finish(inner: &mut Inner<Buffer>) {
+  let buffer = inner.value.move();
+  buffer.release();
+  inner.value = buffer.move();
+}

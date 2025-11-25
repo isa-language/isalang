@@ -1,0 +1,7 @@
+@import "std.vec"
+@import "std.buffer" struct Data {
+  b: Buffer,
+}
+fn main() {
+  let v = Vec<Data>::new();
+}

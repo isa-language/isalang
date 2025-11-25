@@ -775,3 +775,60 @@ const IsacStr *isac_rt_env_argument(size_t index) {
     isac_rt_panic("command-line argument index out of bounds");
   return &env_arguments[index];
 }
+
+typedef struct {
+  uint8_t *data;
+  size_t len, capacity, element_size;
+} IsacVecStorage;
+static size_t vec_bytes(size_t element_size, size_t count) {
+  if (!element_size || count > SIZE_MAX / element_size)
+    isac_rt_panic("vector capacity overflow");
+  return count * element_size;
+}
+void *isac_rt_vec_new(size_t element_size, size_t capacity) {
+  size_t bytes = vec_bytes(element_size, capacity);
+  IsacVecStorage *vec = isac_rt_alloc(sizeof(*vec));
+  *vec = (IsacVecStorage){NULL, 0, capacity, element_size};
+  if (bytes)
+    vec->data = isac_rt_alloc(bytes);
+  return vec;
+}
+size_t isac_rt_vec_len(const void *ptr) {
+  return ((const IsacVecStorage *)ptr)->len;
+}
+size_t isac_rt_vec_capacity(const void *ptr) {
+  return ((const IsacVecStorage *)ptr)->capacity;
+}
+void *isac_rt_vec_at(void *ptr, size_t index) {
+  IsacVecStorage *vec = ptr;
+  isac_rt_index_check(index, vec->len);
+  return vec->data + index * vec->element_size;
+}
+void *isac_rt_vec_push_slot(void *ptr) {
+  IsacVecStorage *vec = ptr;
+  if (vec->len == SIZE_MAX)
+    isac_rt_panic("vector length overflow");
+  if (vec->len == vec->capacity) {
+    size_t grown = vec->capacity > SIZE_MAX / 2 ? SIZE_MAX : vec->capacity * 2;
+    if (grown < 4)
+      grown = 4;
+    size_t bytes = vec_bytes(vec->element_size, grown);
+    vec->data = isac_rt_realloc(vec->data, bytes);
+    vec->capacity = grown;
+  }
+  return vec->data + vec->len++ * vec->element_size;
+}
+void *isac_rt_vec_pop_slot(void *ptr) {
+  IsacVecStorage *vec = ptr;
+  if (!vec->len)
+    return NULL;
+  return vec->data + --vec->len * vec->element_size;
+}
+void isac_rt_vec_clear_storage(void *ptr) {
+  ((IsacVecStorage *)ptr)->len = 0;
+}
+void isac_rt_vec_drop_storage(void *ptr) {
+  IsacVecStorage *vec = ptr;
+  isac_rt_free(vec->data);
+  isac_rt_free(vec);
+}

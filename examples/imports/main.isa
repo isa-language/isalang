@@ -1,0 +1,28 @@
+@macro dependencies {
+  () => {
+    @import("helpers/math.isa", "std.vec", "std.box")
+  }
+}
+@dependencies()
+
+fn first(values: &Vec<i32>) -> Option<&i32> {
+  return values.first();
+}
+
+fn main() -> i32 {
+  let values = Vec<i32>::new();
+  values.push(@doubled(21));
+
+  let item = first(&values);
+  match item {
+    Option::Some(value) => {
+      @println("value = {}", value);
+    },
+    Option::None => {},
+  }
+
+  values.push(10);
+  let boxed = Box<String>::new(String::from("Isalang"));
+  @println("{}: {} elements", boxed.get(), values.len());
+  return 0;
+}

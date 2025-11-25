@@ -1,0 +1,13 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn finish(h: &mut Holder<Buffer>, flag: bool) {
+  let b = h.value.move();
+  b.release();
+  if flag {
+    return;
+  }
+  h.value = b.move();
+}
+fn main() {}

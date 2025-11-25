@@ -1,0 +1,26 @@
+struct Outer {
+  middle: Middle,
+}
+struct Middle {
+  inner: Inner,
+}
+struct Inner {
+  first: String,
+  second: String,
+}
+fn consume(outer: Outer) {
+  let middle = outer.middle.move();
+  let inner = middle.inner.move();
+  let text = inner.second.move();
+  print(text);
+}
+fn main() {
+  let i = Inner::new();
+  i.first = String::from("first");
+  i.second = String::from("second");
+  let m = Middle::new();
+  m.inner = i.move();
+  let o = Outer::new();
+  o.middle = m.move();
+  consume(o.move());
+}

@@ -15,6 +15,64 @@ class Resolver {
   std::unordered_map<std::string, GenericDeclId> genericNames;
   std::map<std::pair<GenericDeclId, std::vector<TypeId>>, TypeId> instanceCache;
   TypeParamId nextTypeParam = 0;
+  std::map<TypeId, const ast::Struct *> structSources;
+  std::map<TypeId, unsigned> structLayoutState;
+  bool structLayoutsEnabled = false;
+  void ensureStructLayout(TypeId id, Loc origin) {
+    if (!structLayoutsEnabled || !structSources.contains(id))
+      return;
+    auto state = structLayoutState[id];
+    if (state == 2)
+      return;
+    if (state == 1)
+      fail(origin, DiagnosticCode::InvalidPlace,
+           "recursive by-value struct layout involving `" + p.types[id].name + "`");
+    structLayoutState[id] = 1;
+    const auto &source = *structSources.at(id);
+    auto savedPrivilege = privileged;
+    privileged = source.trusted;
+    std::set<std::string> names;
+    std::vector<hir::Field> fields;
+    uint32_t offset = 0;
+    for (const auto &field : source.fields) {
+      if (!names.insert(field.name).second)
+        duplicate(field.loc, field.name);
+      auto type = getType(field.type);
+
+      if (type == RawPtr && !p.heap(id))
+        fail(field.loc, DiagnosticCode::RestrictedOperation,
+             "RawPtr fields require a trusted heap representation");
+      if (type == Str)
+        fail(field.loc, DiagnosticCode::EscapingView,
+             "str fields require lifetime contracts, outside this PoC");
+      if (type == Unit || (p.types[type].kind == hir::Type::Structure && !p.ownedFieldType(type)) ||
+          p.types[type].kind == hir::Type::Enum ||
+          (p.ownedFieldType(type) && p.types[id].protocol != None))
+        fail(field.loc, DiagnosticCode::InvalidPlace,
+             "struct fields require scalars, scalar arrays, or non-protocol owners");
+      auto width = p.storageWidth(type);
+      if (width > 65536 || offset > 65536 - width)
+        fail(field.loc, DiagnosticCode::InvalidPlace,
+             "struct layout exceeds the PoC limit of 65536 storage cells");
+      fields.push_back({field.name, type, offset});
+      offset += width;
+    }
+    p.types[id].fields = std::move(fields);
+    p.types[id].width = std::max(1u, offset);
+    if (p.types[id].representation == hir::Representation::StringRecord) {
+      const auto &fs = p.types[id].fields;
+      if (fs.size() != 3 || fs[0].type != RawPtr || fs[1].type != USize || fs[2].type != USize)
+        fail(source.loc, DiagnosticCode::RestrictedOperation,
+             "String requires the runtime descriptor {ptr, len, capacity}");
+    }
+    if (p.heap(id) && p.types[id].representation != hir::Representation::StringRecord &&
+        p.types[id].representation != hir::Representation::InputRecord &&
+        (p.types[id].fields.size() != 1 || p.types[id].fields[0].type != RawPtr))
+      fail(source.loc, DiagnosticCode::RestrictedOperation,
+           "heap wrappers require one private RawPtr field");
+    structLayoutState[id] = 2;
+    privileged = savedPrivilege;
+  }
   std::unordered_map<std::string, GenericDeclId> genericStructNames;
   std::unordered_map<std::string, TypeParamId> activeTypeParameters;
   hir::Substitution activeSubstitution;
@@ -41,6 +99,11 @@ class Resolver {
     if (arguments.size() != decl.parameters.size())
       fail(loc, DiagnosticCode::TypeMismatch,
            "wrong number of type arguments for `" + decl.name + "`");
+    for (auto type : arguments)
+      ensureStructLayout(type, loc);
+    for (const auto &field : decl.fields)
+      if (!field.type.parameter)
+        ensureStructLayout(field.type.id, loc);
     auto key = std::make_pair(id, arguments);
     if (instanceCache.contains(key))
       return instanceCache.at(key);
@@ -56,6 +119,21 @@ class Resolver {
       instance.substitution.types.push_back({decl.parameters[i], arguments[i]});
     }
     hir::Type type{hir::Type::Structure, name + ">"};
+    if (decl.representation != hir::Representation::Stack) {
+      if (arguments.size() != 1 || !p.containerElement(arguments[0]))
+        fail(loc, DiagnosticCode::InvalidPayload,
+             "generic heap containers require reference-free owned elements with a final initial "
+             "protocol state");
+      type.representation = decl.representation;
+      type.dropGlue = hir::DropGlue::ContainerElements;
+      type.element = arguments[0];
+      auto tid = instance.type;
+      types[type.name] = tid;
+      p.types.push_back(std::move(type));
+      p.instances.push_back(std::move(instance));
+      instanceCache.emplace(std::move(key), tid);
+      return tid;
+    }
     uint32_t offset = 0;
     for (const auto &field : decl.fields) {
       auto tid = substitute(field.type, instance.substitution);
@@ -116,9 +194,9 @@ class Resolver {
   std::map<TypeId, TypeId> sharedReferenceTypes;
   TypeId storedReferenceType(TypeId element, Loc loc) {
     if (!p.supportsStoredSharedReference(element))
-      fail(
-          loc, DiagnosticCode::EscapingView,
-          "stored references require a scalar, plain fixed stack aggregate or non-protocol heap wrapper");
+      fail(loc, DiagnosticCode::EscapingView,
+           "stored references require a scalar, plain fixed stack aggregate or non-protocol heap "
+           "wrapper");
     if (sharedReferenceTypes.contains(element))
       return sharedReferenceTypes.at(element);
     auto id = static_cast<TypeId>(p.types.size());
@@ -175,6 +253,9 @@ class Resolver {
                            [&](auto pair) { return pair.first == payload.id; });
           tid = found->second;
         }
+        if (!p.heap(tid) && p.containsProtocolOwnedFields(tid))
+          fail(loc, DiagnosticCode::AllocationContract,
+               "enum payloads with protocolled fields require a payload state contract");
         if (!p.reference(tid) && p.containsReferences(tid))
           fail(loc, DiagnosticCode::EscapingView,
                "nested containers with borrowed payloads require recursive region contracts");
@@ -294,6 +375,7 @@ class Resolver {
     if (it == types.end())
       fail(s.loc, DiagnosticCode::UnknownName, "unknown type `" + s.name + "`");
     TypeId t = it->second;
+    ensureStructLayout(t, s.loc);
     if (t == RawPtr && !privileged)
       fail(s.loc, DiagnosticCode::RestrictedOperation,
            "RawPtr is restricted to bundled runtime bindings");
@@ -322,7 +404,11 @@ class Resolver {
     return id;
   }
   void declareFunction(const ast::Function &a, TypeId ownerOverride = None) {
-    if (ownerOverride != None && (a.external || !a.intrinsic.empty() || a.releases))
+    if (ownerOverride != None &&
+        (a.external || a.releases ||
+         (!a.intrinsic.empty() &&
+          (!a.trusted || intrinsicInfo(findIntrinsic(a.intrinsic)).lowering !=
+                             IntrinsicLowering::ContainerStorage))))
       fail(a.loc, DiagnosticCode::RestrictedOperation,
            "generic impl methods currently require ordinary checked bodies");
     privileged = a.trusted;
@@ -345,9 +431,12 @@ class Resolver {
     if (functions.contains(f.name) || f.name == "print")
       duplicate(a.loc, f.name);
     functions[f.name] = f.id;
-    if (ownerOverride != None)
+    if (ownerOverride != None) {
       f.owner = ownerOverride;
-    else if (!a.owner.empty()) {
+      if (p.dynamicContainer(f.owner) && !a.trusted)
+        fail(a.loc, DiagnosticCode::RestrictedOperation,
+             "bundled heap types cannot be extended by application impls");
+    } else if (!a.owner.empty()) {
       if (!types.contains(a.owner) || (p.types[types[a.owner]].kind != hir::Type::Structure &&
                                        types[a.owner] != Str && !scalar(types[a.owner])))
         fail(a.loc, DiagnosticCode::UnknownName, "unknown impl struct");
@@ -403,8 +492,10 @@ class Resolver {
         p.symbols.push_back(std::move(symbol));
         f.payloadParameterRegions.push_back({id, origin, region});
       }
-      if (ap.type.reference ||
-          (self && a.result.reference && access == Access::Shared && p.types[t].protocol == None)) {
+      if (ap.type.reference || (self &&
+                                (a.result.reference || (f.resultBorrowedContainer &&
+                                                        containerBorrowIntrinsic(f.intrinsicId))) &&
+                                access == Access::Shared && p.types[t].protocol == None)) {
         auto &symbol = p.symbols[id];
         symbol.reference = true;
         symbol.region = nextRegion++;
@@ -457,17 +548,26 @@ class Resolver {
             f.additionalPayloadSources.push_back({region.parameter, *path});
           }
         }
-      if (f.resultOrigin == None || f.external || !f.intrinsic.empty() ||
-          (f.owner != None && (f.resultBorrowedContainer || p.types[f.owner].protocol != None)))
+      if (f.resultOrigin == None || f.external ||
+          (!f.intrinsic.empty() && !containerBorrowIntrinsic(f.intrinsicId)) ||
+          (f.owner != None &&
+           ((f.resultBorrowedContainer && !containerBorrowIntrinsic(f.intrinsicId)) ||
+            p.types[f.owner].protocol != None)))
         fail(a.result.loc, DiagnosticCode::EscapingView,
              "reference return requires a compatible shared input-region contract; local owners "
              "cannot escape");
       f.resultRegion = nextRegion++;
     }
     scopes.pop_back();
-    f.consumesSelf = f.owner != None && p.types[f.owner].kind == hir::Type::Enum &&
+    f.consumesSelf = f.owner != None &&
+                     (p.types[f.owner].kind == hir::Type::Enum ||
+                      f.intrinsicId == IntrinsicId::Box_into_inner) &&
                      !f.params.empty() && p.symbols[f.params[0]].receiver &&
                      f.access == Access::Own;
+    if (intrinsicInfo(f.intrinsicId).lowering == IntrinsicLowering::ContainerStorage &&
+        !validContainerIntrinsic(p, f))
+      fail(a.loc, DiagnosticCode::RestrictedOperation,
+           "invalid generic container intrinsic contract");
     p.functions.push_back(f);
     functionSources.push_back({&a, activeTypeParameters, activeSubstitution, ownerOverride});
   }
@@ -537,6 +637,11 @@ class Resolver {
     return e.kind == hir::Expr::Variable || e.kind == hir::Expr::Field ||
            e.kind == hir::Expr::Index;
   }
+  bool fieldPlace(const hir::Expr &e) {
+    if (e.kind == hir::Expr::Variable)
+      return true;
+    return e.kind == hir::Expr::Field && !p.heap(e.args[0].type) && fieldPlace(e.args[0]);
+  }
   hir::Expr expr(const ast::Expr &a, TypeId expected = None) {
     hir::Expr e{};
     e.loc = a.loc;
@@ -590,12 +695,14 @@ class Resolver {
       e.kind = H::Borrow;
       e.args.push_back(expr(a.args.at(0)));
       const auto &source = e.args[0];
-      bool projection = (source.kind == H::Field || source.kind == H::Index) &&
-                        source.args[0].kind == H::Variable && scalar(source.type);
+      bool projection =
+          (source.kind == H::Field && fieldPlace(source) &&
+           (scalar(source.type) || p.ownedFieldType(source.type))) ||
+          (source.kind == H::Index && source.args[0].kind == H::Variable && scalar(source.type));
       if (source.kind != H::Variable && !projection)
         fail(a.loc, DiagnosticCode::InvalidPlace,
-             "borrow requires a named owner or a direct scalar field/element projection");
-      if (projection && a.text == "unique")
+             "borrow requires a named owner or a supported direct field/element projection");
+      if (projection && a.text == "unique" && !p.ownedFieldType(source.type))
         fail(a.loc, DiagnosticCode::InvalidPlace,
              "unique projection borrows require exclusive place contracts");
       e.type = e.args[0].type;
@@ -928,7 +1035,8 @@ class Resolver {
           fail(a.loc, DiagnosticCode::FormatType, "format append requires String and one argument");
         auto &value = e.args[1];
         if (p.types[value.type].representation == hir::Representation::StringRecord) {
-          if (value.kind != H::Variable) {
+
+          if (value.kind != H::Variable && value.kind != H::Borrow) {
             SymbolId id = p.symbols.size();
             p.symbols.push_back({id, "$format_value" + std::to_string(id), value.type, Access::Own,
                                  false, false, value.loc});
@@ -980,6 +1088,19 @@ class Resolver {
       e.kind = H::Method;
       e.type = f.result;
       args(e, f, 0);
+      if (e.args[0].kind == H::Field && fieldPlace(e.args[0]) && p.ownedFieldType(e.args[0].type)) {
+        if (f.access == Access::Own)
+          fail(a.loc, DiagnosticCode::BorrowConflict,
+               "owning method on a field requires extracting it with move()");
+        H adapted{};
+        adapted.kind = H::Borrow;
+        adapted.loc = e.args[0].loc;
+        adapted.type = e.args[0].type;
+        adapted.borrowKind = f.access == Access::Unique ? BorrowKind::Unique : BorrowKind::Shared;
+        adapted.region = nextRegion++;
+        adapted.args.push_back(std::move(e.args[0]));
+        e.args[0] = std::move(adapted);
+      }
       if (!formattingTemps.empty()) {
         H block{};
         block.kind = H::Block;
@@ -1667,7 +1788,37 @@ public:
         duplicate(a.loc, a.name);
       TypeId id = p.types.size();
       types[a.name] = id;
+      structSources[id] = &a;
       p.types.push_back({hir::Type::Structure, a.name, None, None, 0, 1, {}});
+    }
+
+    for (auto &a : ast.structs) {
+      if (!a.parameters.empty())
+        continue;
+      privileged = a.trusted;
+      auto id = types[a.name];
+      if (!a.representation.empty()) {
+        if (!a.trusted || (a.representation != "box_i32" && a.representation != "buffer_i32" &&
+                           a.representation != "string_utf8" && a.representation != "input_result"))
+          fail(a.loc, DiagnosticCode::RestrictedOperation, "unknown heap representation");
+        p.types[id].representation = a.representation == "box_i32"
+                                         ? hir::Representation::BoxPointer
+                                         : hir::Representation::BufferPointer;
+        p.types[id].dropGlue = hir::DropGlue::FreeAllocation;
+        if (a.representation == "input_result") {
+          p.types[id].representation = hir::Representation::InputRecord;
+          p.types[id].dropGlue = hir::DropGlue::InputAllocation;
+        }
+        if (a.representation == "string_utf8") {
+          p.types[id].representation = hir::Representation::StringRecord;
+          p.types[id].dropGlue = hir::DropGlue::StringAllocation;
+        }
+      }
+      if (!a.protocol.empty()) {
+        if (!protocols.contains(a.protocol))
+          fail(a.loc, DiagnosticCode::UnknownName, "unknown protocol `" + a.protocol + "`");
+        p.types[id].protocol = protocols[a.protocol];
+      }
     }
     for (auto &a : ast.enums) {
       if (!a.parameters.empty()) {
@@ -1745,7 +1896,9 @@ public:
       if (types.contains(a.name) || genericNames.contains(a.name) ||
           genericStructNames.contains(a.name) || protocols.contains(a.name))
         duplicate(a.loc, a.name);
-      if (!a.protocol.empty() || !a.representation.empty())
+      if (!a.protocol.empty() ||
+          (!a.representation.empty() && (!a.trusted || (a.representation != "generic_box" &&
+                                                        a.representation != "generic_vec"))))
         fail(a.loc, DiagnosticCode::InvalidPlace,
              "generic protocol/heap struct contracts are not implemented yet");
       GenericDeclId id = p.genericEnums.size() + p.genericStructs.size();
@@ -1770,78 +1923,18 @@ public:
                                                ? hir::GenericPayload{true, parameters.at(type.name)}
                                                : hir::GenericPayload{false, getType(type)}});
       }
+      if (!a.representation.empty()) {
+        if (decl.parameters.size() != 1 || decl.fields.size() != 1 ||
+            !decl.fields[0].type.parameter || decl.fields[0].type.id != decl.parameters[0])
+          fail(a.loc, DiagnosticCode::RestrictedOperation, "invalid generic storage declaration");
+        decl.representation = a.representation == "generic_box" ? hir::Representation::GenericBox
+                                                                : hir::Representation::GenericVec;
+      }
       p.genericStructs.push_back(std::move(decl));
     }
-
-    for (auto &a : ast.structs) {
-      if (!a.parameters.empty())
-        continue;
-      privileged = a.trusted;
-      auto id = types[a.name];
-      if (!a.representation.empty()) {
-        if (!a.trusted || (a.representation != "box_i32" && a.representation != "buffer_i32" &&
-                           a.representation != "string_utf8" && a.representation != "input_result"))
-          fail(a.loc, DiagnosticCode::RestrictedOperation, "unknown heap representation");
-        p.types[id].representation = a.representation == "box_i32"
-                                         ? hir::Representation::BoxPointer
-                                         : hir::Representation::BufferPointer;
-        p.types[id].dropGlue = hir::DropGlue::FreeAllocation;
-        if (a.representation == "input_result") {
-          p.types[id].representation = hir::Representation::InputRecord;
-          p.types[id].dropGlue = hir::DropGlue::InputAllocation;
-        }
-        if (a.representation == "string_utf8") {
-          p.types[id].representation = hir::Representation::StringRecord;
-          p.types[id].dropGlue = hir::DropGlue::StringAllocation;
-        }
-      }
-      if (!a.protocol.empty()) {
-        if (!protocols.contains(a.protocol))
-          fail(a.loc, DiagnosticCode::UnknownName, "unknown protocol `" + a.protocol + "`");
-        p.types[id].protocol = protocols[a.protocol];
-      }
-    }
-
-    for (auto &a : ast.structs) {
-      if (!a.parameters.empty())
-        continue;
-      privileged = a.trusted;
-      auto id = types[a.name];
-      std::set<std::string> names;
-      uint32_t offset = 0;
-      for (auto &f : a.fields) {
-        if (!names.insert(f.name).second)
-          duplicate(f.loc, f.name);
-        auto t = getType(f.type);
-
-        if (t == RawPtr && !p.heap(id))
-          fail(f.loc, DiagnosticCode::RestrictedOperation,
-               "RawPtr fields require a trusted heap representation");
-        if (t == Str)
-          fail(f.loc, DiagnosticCode::EscapingView,
-               "str fields require lifetime contracts, outside this PoC");
-        if (t == Unit || (p.types[t].kind == hir::Type::Structure && !p.ownedFieldType(t)) ||
-            p.types[t].kind == hir::Type::Enum ||
-            (p.ownedFieldType(t) && p.types[id].protocol != None))
-          fail(f.loc, DiagnosticCode::InvalidPlace,
-               "PoC struct fields require scalars, scalar arrays, or non-protocol heap owners");
-        p.types[id].fields.push_back({f.name, t, offset});
-        offset += p.storageWidth(t);
-      }
-      p.types[id].width = std::max(1u, offset);
-      if (p.types[id].representation == hir::Representation::StringRecord) {
-        auto &fs = p.types[id].fields;
-        if (fs.size() != 3 || fs[0].type != RawPtr || fs[1].type != USize || fs[2].type != USize)
-          fail(a.loc, DiagnosticCode::RestrictedOperation,
-               "String requires the runtime descriptor {ptr, len, capacity}");
-      }
-
-      if (p.heap(id) && p.types[id].representation != hir::Representation::StringRecord &&
-          p.types[id].representation != hir::Representation::InputRecord &&
-          (p.types[id].fields.size() != 1 || p.types[id].fields[0].type != RawPtr))
-        fail(a.loc, DiagnosticCode::RestrictedOperation,
-             "heap wrappers require one private RawPtr field");
-    }
+    structLayoutsEnabled = true;
+    for (const auto &[id, source] : structSources)
+      ensureStructLayout(id, source->loc);
     for (const auto &impl : ast.impls) {
       if (!impl.parameters.empty()) {
         size_t arity =
@@ -1878,6 +1971,11 @@ public:
         declareFunction(ast.functions[n]);
     for (auto &f : p.functions) {
       if (!f.intrinsic.empty()) {
+        if (intrinsicInfo(f.intrinsicId).lowering == IntrinsicLowering::ContainerStorage) {
+          if (!validContainerIntrinsic(p, f))
+            fail(f.loc, DiagnosticCode::RestrictedOperation, "invalid generic storage signature");
+          continue;
+        }
         if (f.intrinsicId == IntrinsicId::Env_argument ||
             f.intrinsicId == IntrinsicId::Env_argument_count) {
           std::vector<TypeId> signature{f.result};
@@ -2220,7 +2318,12 @@ void printHIR(const hir::Program &p, std::ostream &o) {
       o << "enum #E" << i << " variant #V" << v.id << " " << v.name
         << " payload=" << v.payload.size() << "\n";
     o << "type #T" << i << " " << p.types[i].name;
-    if (p.types[i].representation == hir::Representation::StringRecord)
+    if (p.dynamicContainer(i))
+      o << " representation="
+        << (p.types[i].representation == hir::Representation::GenericBox ? "BoxStorage"
+                                                                         : "VecStorage")
+        << "<" << p.types[p.types[i].element].name << "> DropGlue=Elements+Allocation";
+    else if (p.types[i].representation == hir::Representation::StringRecord)
       o << " representation={RawPtr,usize,usize} DropGlue=StringAllocation";
     else if (p.types[i].representation == hir::Representation::InputRecord)
       o << " representation=InputResultRecord DropGlue=InputAllocation";

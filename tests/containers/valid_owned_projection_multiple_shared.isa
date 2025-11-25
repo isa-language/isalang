@@ -1,0 +1,12 @@
+struct Owner {
+  text: String,
+  spare: String,
+}
+fn main() {
+  let o = Owner::new();
+  o.text = String::from("hello");
+  let a = &o.text;
+  let b = &o.text;
+  print(a);
+  print(b);
+}

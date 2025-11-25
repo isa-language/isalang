@@ -1,0 +1,10 @@
+struct Outer {
+  value: Inner,
+}
+struct Inner {
+  value: String,
+}
+fn main() {
+  let o = Outer::new();
+  o.value = Inner::new();
+}

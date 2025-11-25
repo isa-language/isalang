@@ -1,0 +1,6 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<i32>::new();
+  let o = v.pop();
+  print(o.is_none());
+}

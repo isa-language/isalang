@@ -318,5 +318,181 @@ int main() {
     if (e.code != "E9001")
       return 1;
   }
+  auto layoutCore = [&] {
+    return core::elaborate(
+        resolve(parse(lex("struct A { value: i32, } struct B { value: i32, } fn main() {}"))));
+  };
+  (void)core::verify(layoutCore());
+  for (int corruption = 0; corruption < 3; ++corruption) {
+    auto forged = layoutCore();
+    TypeId a = None, b = None;
+    for (TypeId id = 0; id < forged.semantics.types.size(); ++id) {
+      if (forged.semantics.types[id].name == "A")
+        a = id;
+      if (forged.semantics.types[id].name == "B")
+        b = id;
+    }
+    if (corruption == 0) {
+      forged.semantics.types[a].fields[0].type = b;
+      forged.semantics.types[b].fields[0].type = a;
+    } else if (corruption == 1)
+      forged.semantics.types[a].width = 9;
+    else
+      forged.semantics.types[a].fields[0].offset = 1;
+    try {
+      (void)core::verify(std::move(forged));
+      return 1;
+    } catch (const Error &e) {
+      if (e.code != "E9001")
+        return 1;
+    }
+  }
+  auto fieldContractCore = [] {
+    auto ast = parse(lex("struct Heap { ptr: RawPtr, } struct Holder { value: Heap, } "
+                         "fn reset(h: &mut Holder) { let v=h.value.move(); h.value=v.move(); } "
+                         "fn inspect(h: &Holder) { let r=&h.value; } fn main() {}"));
+    ast.structs[0].trusted = true;
+    ast.structs[0].representation = "box_i32";
+    return core::elaborate(resolve(ast));
+  };
+  auto fieldContracts = fieldContractCore();
+  for (auto &f : fieldContracts.functions)
+    f.fieldPostStates.push_back({UINT32_MAX, {{UINT32_MAX, {}}}, {}});
+  auto verifiedFields = core::verify(std::move(fieldContracts));
+  unsigned summaries = 0;
+  for (const auto &f : verifiedFields.get().functions)
+    for (const auto &post : f.fieldPostStates) {
+      ++summaries;
+      if (post.parameter == UINT32_MAX || post.fields.size() != 1 || !post.fields.at(0).allocation)
+        return 1;
+    }
+  if (summaries != 2)
+    return 1;
+  for (int mode = 0; mode < 3; ++mode) {
+    auto forged = fieldContractCore();
+    bool changed = false;
+    for (auto &f : forged.functions)
+      for (auto &i : f.body)
+        if (i.kind == core::Inst::BorrowShared && !i.fieldPath.empty()) {
+          if (mode == 0)
+            i.fieldPath[0] = UINT32_MAX;
+          if (mode == 1)
+            i.fieldPath.clear();
+          if (mode == 2)
+            i.fieldIndex = UINT32_MAX;
+          changed = true;
+        }
+    if (!changed)
+      return 1;
+    try {
+      (void)core::verify(std::move(forged));
+      return 1;
+    } catch (const Error &e) {
+      if (e.code != "E9001")
+        return 1;
+    }
+  }
+  auto storageCore = [] {
+    return core::elaborate(
+        resolve(loadImports(parse(lex("@import \"std.box\" @import \"std.vec\" fn main(){ "
+                                      "let b=Box<i32>::new(42); print(b.into_inner()); "
+                                      "let v=Vec<i32>::new(); v.push(7); let last=v.pop(); }")))));
+  };
+  (void)core::verify(storageCore());
+  for (int mode = 0; mode < 7; ++mode) {
+    auto forged = storageCore();
+    bool changed = false;
+    if (mode <= 1) {
+      for (auto &t : forged.semantics.types)
+        if (t.representation == hir::Representation::GenericVec) {
+          if (mode == 0)
+            t.element = RawPtr;
+          else
+            t.dropGlue = hir::DropGlue::FreeAllocation;
+          changed = true;
+        }
+    } else if (mode == 2) {
+      for (auto &f : forged.functions)
+        for (auto &i : f.body)
+          if (i.kind == core::Inst::ContainerCall) {
+            i.kind = core::Inst::HeapAlloc;
+            changed = true;
+          }
+    } else if (mode == 3 || mode == 4) {
+      for (auto &f : forged.semantics.functions)
+        if (f.intrinsicId == IntrinsicId::Box_into_inner) {
+          if (mode == 3)
+            f.consumesSelf = false;
+          else
+            f.access = Access::Shared;
+          changed = true;
+        }
+    } else if (mode == 5) {
+      for (auto &instance : forged.semantics.instances)
+        if (forged.semantics.dynamicContainer(instance.type)) {
+          instance.substitution.types[0].second = I64;
+          changed = true;
+        }
+    }
+    if (mode == 6) {
+      for (auto &f : forged.functions)
+        for (auto &i : f.body)
+          if (i.kind == core::Inst::ContainerCall && i.intrinsicId == IntrinsicId::Vec_new) {
+            i.kind = core::Inst::Create;
+            changed = true;
+          }
+    }
+    if (!changed)
+      return 1;
+    try {
+      (void)core::verify(std::move(forged));
+      return 1;
+    } catch (const Error &e) {
+      if (e.code != "E9001")
+        return 1;
+    }
+  }
+  auto accessCore = [] {
+    return core::elaborate(
+        resolve(loadImports(parse(lex("@import \"std.box\" @import \"std.vec\" fn main(){"
+                                      "let b=Box<i32>::new(42); let r=b.get(); print(r);"
+                                      "let v=Vec<i32>::new(); v.push(7); let o=v.get(0);"
+                                      "match o {Some(x)=>{print(x);},None=>{}} }")))));
+  };
+  (void)core::verify(accessCore());
+  for (int mode = 0; mode < 8; ++mode) {
+    auto forged = accessCore();
+    bool changed = false;
+    for (auto &f : forged.semantics.functions) {
+      if (f.intrinsicId != IntrinsicId::Box_get && f.intrinsicId != IntrinsicId::Vec_get)
+        continue;
+      if (mode == 0)
+        f.resultOrigin = None;
+      if (mode == 1)
+        f.resultRegion = None;
+      if (mode == 2)
+        f.parameterRegions.clear();
+      if (mode == 3)
+        f.parameterRegions[0].kind = BorrowKind::Unique;
+      if (mode == 4)
+        f.access = Access::Unique;
+      if (mode == 5)
+        f.consumesSelf = true;
+      if (mode == 6)
+        f.additionalResultOrigins.push_back(f.params[0]);
+      if (mode == 7 && f.intrinsicId == IntrinsicId::Vec_get)
+        f.resultBorrowedContainer = false;
+      changed = true;
+    }
+    if (!changed)
+      return 1;
+    try {
+      (void)core::verify(std::move(forged));
+      return 1;
+    } catch (const Error &e) {
+      if (e.code != "E9001")
+        return 1;
+    }
+  }
   std::cout << "Core gate rejects forged quantity, type and reference contracts\n";
 }

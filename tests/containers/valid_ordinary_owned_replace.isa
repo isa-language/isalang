@@ -1,0 +1,17 @@
+struct Outer {
+  value: Inner,
+}
+struct Inner {
+  value: String,
+}
+fn main() {
+  let a = Inner::new();
+  a.value = String::from("first");
+  let b = Inner::new();
+  b.value = String::from("second");
+  let o = Outer::new();
+  o.value = a.move();
+  o.value = b.move();
+  o.value = o.value.move();
+  o.value.drop();
+}

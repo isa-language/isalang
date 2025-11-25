@@ -93,6 +93,16 @@ double isac_rt_input_result_f64(const IsacInputResult *);
 void isac_rt_input_read_bool(IsacInputResult *);
 int32_t isac_rt_input_result_bool(const IsacInputResult *);
 void *isac_rt_realloc(void *ptr, size_t size);
+
+void *isac_rt_vec_new(size_t element_size, size_t capacity);
+size_t isac_rt_vec_len(const void *vec);
+size_t isac_rt_vec_capacity(const void *vec);
+void *isac_rt_vec_at(void *vec, size_t index);
+void *isac_rt_vec_push_slot(void *vec);
+void *isac_rt_vec_pop_slot(void *vec);
+void isac_rt_vec_clear_storage(void *vec);
+void isac_rt_vec_drop_storage(void *vec);
+
 void isac_rt_index_check(size_t index, size_t length);
 void isac_rt_string_new(IsacString *out);
 void isac_rt_string_from(IsacString *out, const IsacStr *text);

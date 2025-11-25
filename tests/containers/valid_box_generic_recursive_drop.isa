@@ -1,0 +1,6 @@
+@import "std.box"
+fn main() {
+  let text = String::from("inner");
+  let inner = Box<String>::new(text.move());
+  let outer = Box<Box<String >>::new(inner.move());
+}

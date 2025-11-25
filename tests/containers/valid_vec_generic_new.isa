@@ -1,0 +1,7 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<i32>::new();
+  print(v.len());
+  print(v.capacity());
+  print(v.is_empty());
+}

@@ -115,8 +115,9 @@ bool fragment(const std::string &kind, const Trees &value) {
 }
 using Builtin = BuiltinId;
 const std::map<std::string, Builtin> builtinRegistry = {
-    {"__format", Builtin::Format}, {"__print", Builtin::Print},  {"__println", Builtin::Println},
-    {"__input", Builtin::Input},   {"size_of", Builtin::SizeOf}, {"align_of", Builtin::AlignOf}};
+    {"__format", Builtin::Format}, {"__print", Builtin::Print}, {"__println", Builtin::Println},
+    {"__input", Builtin::Input},   {"import", Builtin::Import}, {"size_of", Builtin::SizeOf},
+    {"align_of", Builtin::AlignOf}};
 struct FormatSegment {
   enum Kind { Literal, Display, Debug } kind;
   std::string text;
@@ -452,7 +453,8 @@ class Expander {
       }
       if (is(t, "@") && i + 2 < trees.size() && builtinRegistry.contains(trees[i + 1].token.text) &&
           builtinRegistry.at(trees[i + 1].token.text) != Builtin::SizeOf &&
-          builtinRegistry.at(trees[i + 1].token.text) != Builtin::AlignOf) {
+          builtinRegistry.at(trees[i + 1].token.text) != Builtin::AlignOf &&
+          builtinRegistry.at(trees[i + 1].token.text) != Builtin::Import) {
         if (trees[i + 2].delimiter != '(')
           fail(t.token.loc, DiagnosticCode::MacroSyntax, "builtin requires parentheses");
         auto expanded =
@@ -508,9 +510,8 @@ class Expander {
     return out;
   }
 
-public:
-  Expanded run(const std::vector<Token> &tokens) {
-    auto trees = tokenTrees(tokens);
+  Trees collect(const ExpansionInput &input) {
+    auto trees = tokenTrees(input.tokens);
     Trees program;
     for (size_t i = 0; i < trees.size(); ++i) {
       if (is(trees[i], "@") && i + 1 < trees.size() && is(trees[i + 1], "macro")) {
@@ -521,7 +522,9 @@ public:
         m.id = result.declarations.size();
         m.name = trees[i + 2].token.text;
         m.origin = trees[i].token.loc;
-        m.module = m.origin.span.file == NoFile ? 0 : m.origin.span.file;
+        m.module = input.module;
+        if (m.name == "import")
+          fail(m.origin, DiagnosticCode::InvalidImport, "@import is a reserved module builtin");
         if (names.contains(m.name))
           fail(m.origin, DiagnosticCode::MacroSyntax, "duplicate macro `" + m.name + "`");
         auto &rules = trees[i + 3].children;
@@ -545,9 +548,23 @@ public:
       } else
         program.push_back(trees[i]);
     }
-    auto expanded = expandTrees(program, 0, 0);
-    flatten(expanded, result.tokens);
-    result.tokens.push_back(tokens.back());
+    return program;
+  }
+
+public:
+  Expanded run(const std::vector<ExpansionInput> &inputs) {
+    std::vector<Trees> programs;
+    for (const auto &input : inputs)
+      programs.push_back(collect(input));
+    for (size_t n = 0; n < inputs.size(); ++n) {
+      auto expanded = expandTrees(programs[n], 0, 0);
+      ExpansionInput module{inputs[n].module, inputs[n].trusted, {}};
+      flatten(expanded, module.tokens);
+      result.tokens.insert(result.tokens.end(), module.tokens.begin(), module.tokens.end());
+      module.tokens.push_back(inputs[n].tokens.back());
+      result.modules.push_back(std::move(module));
+    }
+    result.tokens.push_back(inputs.back().tokens.back());
     return std::move(result);
   }
 };
@@ -571,7 +588,10 @@ Expanded expand(const std::vector<Token> &tokens, SourceManager *sources) {
     token.loc.file = path;
   prelude.pop_back();
   prelude.insert(prelude.end(), tokens.begin(), tokens.end());
-  return Expander().run(prelude);
+  return Expander().run({ExpansionInput{0, false, std::move(prelude)}});
+}
+Expanded expandModules(const std::vector<ExpansionInput> &inputs) {
+  return Expander().run(inputs);
 }
 void print(const Expanded &e, std::ostream &out) {
   for (auto &x : e.expansions)

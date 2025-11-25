@@ -1,0 +1,25 @@
+@import "std.box"
+@import "std.vec"
+
+fn make_values() -> Vec<Box<String >> {
+  let values = Vec<Box<String >>::new();
+  let first = String::from("Isalang");
+  values.push(Box<String>::new(first.move()));
+  values.push(Box<String>::new(String::from("heap")));
+  return values.move();
+}
+
+fn main() -> i32 {
+  let values = make_values();
+  let last = values.pop();
+  match last.move() {
+    Option::Some(box) => {
+      let text = box.into_inner();
+      @println("{}", text);
+    },
+    Option::None => {},
+  }
+  @println("remaining = {}", values.len());
+  values.clear();
+  return 0;
+}

@@ -370,3 +370,36 @@ if(BUILD_TESTING)
                    $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
   set_tests_properties(owned_fields_sanitized_pipeline PROPERTIES LABELS "sanitizers")
 endif()
+if(BUILD_TESTING)
+  add_test(
+    NAME generic_storage_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/generic_storage_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME generic_storage_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/generic_storage_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(generic_storage_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+  endif()
+endif()
+if(BUILD_TESTING)
+  add_test(NAME imports_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/imports_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME container_access_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/container_access_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(NAME imports_sanitized_pipeline
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/imports_pipeline.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    add_test(
+      NAME container_access_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/container_access_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(imports_sanitized_pipeline container_access_sanitized_pipeline
+                         PROPERTIES LABELS "sanitizers")
+  endif()
+endif()

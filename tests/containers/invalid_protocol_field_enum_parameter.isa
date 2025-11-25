@@ -1,0 +1,6 @@
+@import "std.buffer"
+struct Inner {
+  data: Buffer,
+}
+fn inspect(value: Option<Inner>) {}
+fn main() {}

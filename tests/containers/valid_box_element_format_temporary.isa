@@ -1,0 +1,3 @@
+@import("std.box") fn main() {
+  @println("{}", Box<String>::new(String::from("temporary")).get());
+}

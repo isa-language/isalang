@@ -1,0 +1,7 @@
+struct A {
+  value: Holder<A>,
+}
+struct Holder<T> {
+  value: T,
+}
+fn main() {}

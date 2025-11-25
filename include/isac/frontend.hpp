@@ -162,6 +162,7 @@ struct Program {
   std::vector<Stmt> constants;
   std::vector<Enum> enums;
   std::vector<std::string> imports;
+  std::vector<Loc> importOrigins;
   std::vector<Impl> impls;
   std::vector<Struct> structs;
   std::vector<Protocol> protocols;
