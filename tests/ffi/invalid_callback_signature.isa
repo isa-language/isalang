@@ -1,0 +1,8 @@
+// error: E0200
+extern "C" type Callback = extern "C" fn(i32) -> i32;
+extern "C" fn f(x: f64) -> i32 {
+  return 0;
+}
+fn main() {
+  let cb: Callback = &f;
+}

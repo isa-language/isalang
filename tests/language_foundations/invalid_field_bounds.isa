@@ -1,0 +1,10 @@
+struct Machine {
+  prefix: i32,
+  pixels: u8[8],
+  suffix: i32,
+}
+fn main() {
+  let m = Machine::new();
+  let i: usize = 8;
+  m.pixels[i] = 1u8;
+}

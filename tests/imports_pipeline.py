@@ -102,7 +102,7 @@ with tempfile.TemporaryDirectory() as directory:
     check("reserved.isa", "@macro import { () => {} } fn main(){}", "E0110")
 
     for name, source in [
-        ("ffi", 'extern "C" fn injected()->i32;'),
+        ("ffi", 'extern "C" fn injected()->RawPtr;'),
         ("intrinsic", '@intrinsic "box.generic.new" fn injected(x:i32)->i32;'),
         ("representation", '@representation "generic_box" struct Injected<T>{value:T,}'),
     ]:

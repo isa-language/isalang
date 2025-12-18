@@ -1,0 +1,7 @@
+// error: E0511
+extern "C" union Number {
+  integer: i32,
+  decimal: f32,
+}
+extern "C" fn apply(value: Number);
+fn main() {}

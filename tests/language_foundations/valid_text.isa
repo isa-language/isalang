@@ -1,0 +1,9 @@
+fn main() {
+  let profile = String::from("modern");
+  @assert(profile == "modern");
+  @assert(profile != "legacy");
+  @assert("Olá\0" == String::from("Olá\0"));
+  @assert(String::from("one") != String::from("two"));
+  profile.push_str("!");
+  @println("{}", profile);
+}

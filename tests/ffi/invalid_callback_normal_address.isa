@@ -1,0 +1,7 @@
+// error: E0511
+fn f(x: i32) -> i32 {
+  return x;
+}
+fn main() {
+  let cb = &f;
+}

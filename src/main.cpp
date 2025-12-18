@@ -2,10 +2,27 @@
 #include "isac/erasure.hpp"
 #include "isac/liveness.hpp"
 #include "isac/modules.hpp"
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <set>
 #include <sstream>
+namespace {
+class PassTimer {
+  bool enabled;
+  std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+
+public:
+  explicit PassTimer(bool enabled) : enabled(enabled) {}
+  void mark(const char *name) {
+    auto end = std::chrono::steady_clock::now();
+    if (enabled)
+      std::cerr << "time: " << name << " "
+                << std::chrono::duration<double, std::milli>(end - start).count() << " ms\n";
+    start = end;
+  }
+};
+}
 int main(int argc, char **argv) {
   const char *usage =
       "usage: isac file.isa [--check | --emit-tokens | --emit-ast | --emit-hir | "
@@ -16,7 +33,9 @@ int main(int argc, char **argv) {
       "| --emit-std-mlir | "
       "--emit-llvm-dialect | --emit-llvm | --emit-asm | --emit-obj | -o executable "
       "[--sanitize] [--runtime-test-counters]]\nOptions: --target=TRIPLE --cpu=CPU "
-      "--features=+FEATURE -O0/-O1/-O2/-O3/-Os/-Oz --print-target --color=auto/always/never\n";
+      "--library --link-object PATH -lNAME -LPATH --emit-c-bridge\n"
+      "--features=+FEATURE -O0/-O1/-O2/-O3/-Os/-Oz --print-target --time-passes "
+      "--color=auto/always/never\n";
   if (argc == 2 && std::string(argv[1]) == "--help") {
     std::cout << usage;
     return 0;
@@ -25,30 +44,26 @@ int main(int argc, char **argv) {
   bool selected = false;
   isac::NativeOptions nativeOptions;
   isac::CompilerOptions options;
-  bool printTarget = false;
+  bool printTarget = false, library = false, timePasses = false;
   isac::SourceManager sources;
   isac::ColorMode color = isac::ColorMode::Auto;
   try {
-    std::set<std::string> modes = {"--emit-region-constraints",
-                                   "--emit-regions",
-                                   "--check",
-                                   "--emit-expanded",
-                                   "--emit-imports",
-                                   "--emit-liveness",
-                                   "--emit-tokens",
-                                   "--emit-ast",
-                                   "--emit-hir",
-                                   "--emit-core",
-                                   "--emit-erased",
-                                   "--emit-lir",
-                                   "--emit-mlir",
-                                   "--emit-std-mlir",
-                                   "--emit-llvm-dialect",
-                                   "--emit-llvm",
-                                   "--emit-asm",
+    std::set<std::string> modes = {"--emit-c-bridge", "--emit-region-constraints",
+                                   "--emit-regions",  "--check",
+                                   "--emit-expanded", "--emit-imports",
+                                   "--emit-liveness", "--emit-tokens",
+                                   "--emit-ast",      "--emit-hir",
+                                   "--emit-core",     "--emit-erased",
+                                   "--emit-lir",      "--emit-mlir",
+                                   "--emit-std-mlir", "--emit-llvm-dialect",
+                                   "--emit-llvm",     "--emit-asm",
                                    "--emit-obj"};
     for (int n = 1; n < argc; ++n) {
       std::string arg = argv[n];
+      if (arg == "--time-passes") {
+        timePasses = true;
+        continue;
+      }
       if (arg.starts_with("--color=")) {
         auto c = arg.substr(8);
         if (c != "auto" && c != "always" && c != "never")
@@ -56,6 +71,30 @@ int main(int argc, char **argv) {
         color = c == "always"  ? isac::ColorMode::Always
                 : c == "never" ? isac::ColorMode::Never
                                : isac::ColorMode::Auto;
+        continue;
+      }
+      if (arg == "--library") {
+        library = true;
+        continue;
+      }
+      if (arg == "--link-object" || arg == "-L" || arg == "-l") {
+        if (n + 1 == argc)
+          throw std::runtime_error(arg + " requires a value");
+        auto value = std::string(argv[++n]);
+        if (arg == "--link-object")
+          nativeOptions.linkInputs.push_back(value);
+        else if (arg == "-L")
+          nativeOptions.libraryPaths.push_back(value);
+        else
+          nativeOptions.libraries.push_back(value);
+        continue;
+      }
+      if (arg.starts_with("-l") && arg.size() > 2) {
+        nativeOptions.libraries.push_back(arg.substr(2));
+        continue;
+      }
+      if (arg.starts_with("-L") && arg.size() > 2) {
+        nativeOptions.libraryPaths.push_back(arg.substr(2));
         continue;
       }
       if (arg == "--print-target") {
@@ -119,18 +158,24 @@ int main(int argc, char **argv) {
       mode = "native";
     if ((mode == "--emit-obj" || mode == "--emit-asm") && output.empty())
       throw std::runtime_error("object/assembly emission requires -o path");
+    if (library && mode == "native")
+      throw std::runtime_error("--library requires --emit-obj/asm/llvm or inspection mode");
     if (input.empty()) {
       std::cerr << usage;
       return 1;
     }
-    if ((nativeOptions.sanitize || nativeOptions.counters) && mode != "native")
-      throw std::runtime_error("--sanitize/--runtime-test-counters require -o");
+    if ((nativeOptions.sanitize && mode != "native" && mode != "--emit-llvm") ||
+        (nativeOptions.counters && mode != "native"))
+      throw std::runtime_error("--sanitize requires native/LLVM emission; --runtime-test-counters "
+                               "requires native emission");
     std::ifstream f(input);
     if (!f)
       throw std::runtime_error("cannot open input: " + input);
     std::stringstream b;
     b << f.rdbuf();
+    PassTimer timer(timePasses);
     auto ts = isac::lex(b.str(), sources.add(input, b.str()));
+    timer.mark("lexer");
     if (mode == "--emit-tokens") {
       for (auto &t : ts)
         std::cout << t.loc.line << ":" << t.loc.column << " " << t.text << "\n";
@@ -139,6 +184,7 @@ int main(int argc, char **argv) {
     for (auto &t : ts)
       t.loc.file = input;
     auto compilation = isac::modules::compile(ts, &sources);
+    timer.mark("imports/macros/parser");
     if (mode == "--emit-imports") {
       isac::modules::print(compilation.modules, std::cout);
       return 0;
@@ -149,18 +195,23 @@ int main(int argc, char **argv) {
       return 0;
     }
     auto ast = std::move(compilation.ast);
+    ast.library = library;
     if (mode == "--emit-ast") {
       isac::printAST(ast, std::cout);
       return 0;
     }
     auto h = isac::resolve(ast, nativeOptions.target);
+    timer.mark("HIR");
     for (const auto &warning : h.warnings)
       isac::TerminalRenderer(sources, color).render(warning, std::cerr);
     if (mode == "--emit-hir") {
       isac::printHIR(h, std::cout);
       return 0;
     }
-    auto verified = isac::core::verify(isac::core::elaborate(std::move(h)));
+    auto core = isac::core::elaborate(std::move(h));
+    timer.mark("Core elaboration");
+    auto verified = isac::core::verify(std::move(core));
+    timer.mark("types/regions/resources");
     if (mode == "--check")
       return 0;
     if (mode == "--emit-region-constraints") {
@@ -176,11 +227,17 @@ int main(int argc, char **argv) {
       return 0;
     }
     auto erased = isac::erase(verified);
+    timer.mark("erasure");
+    if (mode == "--emit-c-bridge") {
+      std::cout << erased.cBridge;
+      return 0;
+    }
     if (mode == "--emit-erased") {
       isac::runtime::print(erased, std::cout);
       return 0;
     }
     auto lir = isac::runtime::lower(erased);
+    timer.mark("LIR");
     if (mode == "--emit-liveness") {
       isac::runtime::printLiveness(lir, std::cout);
       return 0;
@@ -194,8 +251,10 @@ int main(int argc, char **argv) {
                  : mode == "--emit-llvm-dialect" ? isac::BackendStage::LLVMDialect
                                                  : isac::BackendStage::LLVMIR;
     auto text = isac::generate(lir, stage, nativeOptions.sanitize);
+    timer.mark("MLIR/LLVM/C bridge");
     if (stage == isac::BackendStage::LLVMIR)
       text = isac::optimizeLLVM(text, nativeOptions.target, options.optimization);
+    timer.mark("LLVM optimization");
     if (mode == "--emit-obj" || mode == "--emit-asm")
       isac::emitMachine(text, output, nativeOptions.target, options.optimization,
                         mode == "--emit-asm");
@@ -208,6 +267,7 @@ int main(int argc, char **argv) {
         throw std::runtime_error("cannot write output");
     } else
       std::cout << text;
+    timer.mark("emission/native link");
     return 0;
   } catch (const isac::Error &e) {
     isac::TerminalRenderer(sources, color).render(e.diagnostic, std::cerr);

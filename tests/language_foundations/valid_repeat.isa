@@ -1,0 +1,13 @@
+const N: usize = 0x800;
+fn make() -> u8 {
+  @println("once");
+  return 0xffu8;
+}
+fn main() {
+    let pixels = [make();
+  N];
+  let memory: u8[0x1000];
+  let i: usize = 0b11111111111;
+  @assert([1u8; 4][2] == 1u8);
+  @println("{} {}", pixels[i], memory[4095]);
+}

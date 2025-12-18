@@ -1,0 +1,18 @@
+extern "C" fn isalang_add(a: i32, b: i32) -> i32 {
+  return a + b;
+}
+extern "C" fn isalang_half(value: f64) -> f64 {
+  return value / 2.0;
+}
+extern "C" unsafe fn isalang_increment(value: *mut i32) {
+  *value = *value + 1;
+}
+extern "C" fn isalang_bool(value: bool) -> bool {
+  return !value;
+}
+extern "C" fn isalang_i8(value: i8) -> i8 {
+  return value;
+}
+extern "C" fn isalang_u8(value: u8) -> u8 {
+  return value;
+}

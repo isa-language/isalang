@@ -161,12 +161,41 @@ std::vector<FormatSegment> formatString(const Token &token) {
 }
 class Expander {
   Expanded result;
-  std::map<std::string, size_t> names;
+  std::map<std::pair<ModuleId, std::string>, size_t> names;
+  std::map<ModuleId, ExpansionInput> modules;
+  ModuleId activeModule = 0;
   std::map<std::string, std::string> captureKinds;
   size_t budget = 100000;
-  std::optional<AtSymbol> resolveAt(const std::string &name) const {
-    if (names.contains(name))
-      return AtSymbol{AtSymbolKind::Macro, static_cast<uint32_t>(names.at(name))};
+  std::optional<AtSymbol> resolveAt(const std::string &name, Loc loc = {}) const {
+    auto module = activeModule;
+    if (loc.context && loc.context <= result.expansions.size())
+      module = result.declarations[result.expansions[loc.context - 1].macro].module;
+    else if (!loc.file.empty())
+      for (auto &[id, input] : modules)
+        if (input.tokens.front().loc.file == loc.file) {
+          module = id;
+          break;
+        }
+    auto split = name.find("::");
+    if (split != std::string::npos) {
+      auto alias = modules.at(module).aliases.find(name.substr(0, split));
+      if (alias == modules.at(module).aliases.end())
+        fail(loc, DiagnosticCode::UnknownName, "unknown macro module alias");
+      auto found = names.find({alias->second, name.substr(split + 2)});
+      if (found == names.end())
+        fail(loc, DiagnosticCode::UnknownName, "unknown qualified macro `" + name + "`");
+      return AtSymbol{AtSymbolKind::Macro, static_cast<uint32_t>(found->second)};
+    }
+    if (auto found = names.find({module, name}); found != names.end())
+      return AtSymbol{AtSymbolKind::Macro, static_cast<uint32_t>(found->second)};
+    std::set<size_t> candidates;
+    for (auto visible : modules.at(module).visible)
+      if (auto found = names.find({visible, name}); found != names.end())
+        candidates.insert(found->second);
+    if (candidates.size() > 1)
+      fail(loc, DiagnosticCode::AmbiguousImport, "ambiguous imported macro `" + name + "`");
+    if (!candidates.empty())
+      return AtSymbol{AtSymbolKind::Macro, static_cast<uint32_t>(*candidates.begin())};
     if (builtinRegistry.contains(name)) {
       auto id = builtinRegistry.at(name);
       return AtSymbol{id == Builtin::SizeOf || id == Builtin::AlignOf
@@ -440,7 +469,7 @@ class Expander {
                  .contains(type))
           fail(t.token.loc, DiagnosticCode::FormatType,
                "unsupported typed input target `" + type + "`");
-        auto &macro = result.declarations.at(names.at("input"));
+        auto &macro = result.declarations.at(resolveAt("input", t.token.loc)->id);
         ExpansionId expansion = result.expansions.size() + 1;
         t.token.loc.span.end = trees[i + 5].closing.loc.span.end;
         result.expansions.push_back({expansion, parent, macro.id, t.token.loc, macro.origin});
@@ -464,18 +493,24 @@ class Expander {
         i += 2;
         continue;
       }
+      size_t argument = i + 2;
+      std::string macroName = i + 1 < trees.size() ? trees[i + 1].token.text : "";
+      if (is(t, "@") && i + 4 < trees.size() && is(trees[i + 2], "::")) {
+        macroName += "::" + trees[i + 3].token.text;
+        argument = i + 4;
+      }
       auto symbol =
-          is(t, "@") && i + 1 < trees.size() ? resolveAt(trees[i + 1].token.text) : std::nullopt;
-      if (symbol && symbol->kind == AtSymbolKind::Macro && i + 2 < trees.size()) {
+          is(t, "@") && i + 1 < trees.size() ? resolveAt(macroName, t.token.loc) : std::nullopt;
+      if (symbol && symbol->kind == AtSymbolKind::Macro && argument < trees.size()) {
         if (depth >= 128)
           DiagnosticEngine()
               .error(DiagnosticCode::MacroRecursion, t.token.loc,
                      "macro expansion recursion limit reached")
               .note("limit: 128")
               .emit();
-        t.token.loc.span.end = trees[i + 2].closing.loc.span.end;
+        t.token.loc.span.end = trees[argument].closing.loc.span.end;
         auto &m = result.declarations.at(symbol->id);
-        if (trees[i + 2].delimiter != '(')
+        if (trees[argument].delimiter != '(')
           fail(t.token.loc, DiagnosticCode::MacroSyntax, "macro invocation requires parentheses");
         Captures captures;
         const Rule *selected = nullptr;
@@ -483,7 +518,7 @@ class Expander {
           Captures candidate;
           size_t end;
           budget = 100000;
-          if (match(r.pattern, 0, trees[i + 2].children, 0, candidate, end, true)) {
+          if (match(r.pattern, 0, trees[argument].children, 0, candidate, end, true)) {
             selected = &r;
             captures = std::move(candidate);
             break;
@@ -500,7 +535,7 @@ class Expander {
                                     depth + 1, id);
         expanded = expandTrees(expanded, depth + 1, parent);
         out.insert(out.end(), expanded.begin(), expanded.end());
-        i += 2;
+        i = argument;
         continue;
       }
       if (t.delimiter)
@@ -525,7 +560,7 @@ class Expander {
         m.module = input.module;
         if (m.name == "import")
           fail(m.origin, DiagnosticCode::InvalidImport, "@import is a reserved module builtin");
-        if (names.contains(m.name))
+        if (names.contains({m.module, m.name}))
           fail(m.origin, DiagnosticCode::MacroSyntax, "duplicate macro `" + m.name + "`");
         auto &rules = trees[i + 3].children;
         for (size_t n = 0; n < rules.size();) {
@@ -542,7 +577,7 @@ class Expander {
           m.rules.push_back({rules[n].children, rules[n + 2].children});
           n += 3;
         }
-        names[m.name] = m.id;
+        names[{m.module, m.name}] = m.id;
         result.declarations.push_back(std::move(m));
         i += 3;
       } else
@@ -555,8 +590,11 @@ public:
   Expanded run(const std::vector<ExpansionInput> &inputs) {
     std::vector<Trees> programs;
     for (const auto &input : inputs)
+      modules.emplace(input.module, input);
+    for (const auto &input : inputs)
       programs.push_back(collect(input));
     for (size_t n = 0; n < inputs.size(); ++n) {
+      activeModule = inputs[n].module;
       auto expanded = expandTrees(programs[n], 0, 0);
       ExpansionInput module{inputs[n].module, inputs[n].trusted, {}};
       flatten(expanded, module.tokens);

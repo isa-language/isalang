@@ -1,0 +1,8 @@
+// error: E0512
+fn main() {
+  let x = 42;
+  let r = &x;
+  unsafe {
+    let p = r as * mut i32;
+  }
+}

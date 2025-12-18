@@ -1,0 +1,5 @@
+// error: E0511
+extern "C" type Handle;
+fn main() {
+  print(@size_of<Handle>());
+}

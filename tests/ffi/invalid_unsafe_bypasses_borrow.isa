@@ -1,0 +1,10 @@
+// error: E0312
+fn main() {
+  let x = 42;
+  let r = &x;
+  unsafe {
+    let w = &mut x;
+    print(w);
+  }
+  print(r);
+}

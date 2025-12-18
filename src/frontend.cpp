@@ -1,6 +1,7 @@
 #include "isac/frontend.hpp"
 #include <algorithm>
 #include <cctype>
+#include <functional>
 namespace isac {
 const char *accessName(Access a) {
   return a == Access::Own ? "Own" : a == Access::Shared ? "Shared" : "Unique";
@@ -172,18 +173,23 @@ std::vector<Token> lex(const std::string &source, FileId file) {
       kind = Token::Number;
       do {
         advance();
-      } while (i < source.size() && std::isdigit((unsigned char)source[i]));
+      } while (i < source.size() && (std::isdigit((unsigned char)source[i]) || source[i] == '_'));
       if (i + 1 < source.size() && source[i] == '.' && std::isdigit((unsigned char)source[i + 1])) {
         advance();
-        while (i < source.size() && std::isdigit((unsigned char)source[i]))
+        while (i < source.size() && (std::isdigit((unsigned char)source[i]) || source[i] == '_'))
           advance();
       }
-      while (i < source.size() && std::isalnum((unsigned char)source[i]))
+      while (i < source.size() && (std::isalnum((unsigned char)source[i]) || source[i] == '_'))
         advance();
     } else {
       std::string two = source.substr(i, 2);
-      if (two == "->" || two == "::" || two == "==" || two == "!=" || two == "<=" || two == ">=" ||
-          two == "&&" || two == "||" || two == "<<" || two == ">>" || two == ".." || two == "=>") {
+      if (source.substr(i, 3) == "...") {
+        advance();
+        advance();
+        advance();
+      } else if (two == "->" || two == "::" || two == "==" || two == "!=" || two == "<=" ||
+                 two == ">=" || two == "&&" || two == "||" || two == "<<" || two == ">>" ||
+                 two == ".." || two == "=>") {
         advance();
         advance();
       } else if (std::string("@$?{}()[];:,.=+-*/%<>!&|^").find(c) != std::string::npos)
@@ -258,10 +264,43 @@ class Parser {
     need(">");
   }
   TypeSyntax type() {
+    if (eat("extern")) {
+      auto origin = ts[pos - 1].loc;
+      if (stringLiteral() != "C")
+        fail(origin, DiagnosticCode::InvalidCAbi, "function pointers require the C ABI");
+      need("fn");
+      TypeSyntax result{"", 0, origin};
+      result.functionPointer = true;
+      need("(");
+      if (!eat(")")) {
+        do {
+          result.arguments.push_back(type());
+        } while (eat(","));
+        need(")");
+      }
+      result.arguments.push_back(eat("->") ? type() : TypeSyntax{});
+      return result;
+    }
+    if (eat("*")) {
+      auto origin = ts[pos - 1].loc;
+      bool mutablePointer = eat("mut");
+      if (!mutablePointer)
+        need("const");
+      auto target = type();
+      if (target.reference || target.count)
+        fail(origin, DiagnosticCode::InvalidCAbi, "raw pointers require a sized referent");
+      TypeSyntax result{"", 0, origin};
+      result.rawPointer = true;
+      result.mutablePointer = mutablePointer;
+      result.arguments.push_back(std::move(target));
+      return result;
+    }
     bool reference = eat("&");
     bool unique = reference && eat("mut");
     auto n = ident();
     TypeSyntax t{n.text, 0, n.loc};
+    while (eat("::"))
+      t.name += "::" + ident().text;
     t.reference = reference;
     t.mutableReference = unique;
     if (eat("<")) {
@@ -285,8 +324,12 @@ class Parser {
         fail(v.loc, DiagnosticCode::UnexpectedToken, "static array size or constant required");
       ++pos;
       try {
-        t.count = std::stoi(v.text);
-      } catch (...) {
+        auto number = parseNumericLiteral(v.text, v.loc);
+        if (number.floating || (!number.suffix.empty() && number.suffix != "usize"))
+          fail(v.loc, DiagnosticCode::InvalidLiteral,
+               "array length requires an integer or usize literal");
+        t.count = std::stoi(number.value);
+      } catch (const std::out_of_range &) {
         fail(v.loc, DiagnosticCode::UnexpectedToken, "array size out of range");
       }
       if (t.count <= 0 || t.count > 65536)
@@ -339,7 +382,7 @@ class Parser {
     } else {
       p.name = ident().text;
       p.kind = ast::Pattern::Binding;
-      if (eat("::")) {
+      while (eat("::")) {
         p.kind = ast::Pattern::Variant;
         p.name += "::" + ident().text;
       }
@@ -358,7 +401,15 @@ class Parser {
   ast::Expr primary() {
     Token t = peek();
     ast::Expr e{ast::Expr::Name, t.loc, t.text, {}};
-    if (eat("@")) {
+    if (eat("unsafe")) {
+      e.kind = ast::Expr::Unsafe;
+      if (peek().text != "{")
+        fail(t.loc, DiagnosticCode::UnexpectedToken, "unsafe requires a block");
+      e.args.push_back(primary());
+    } else if (eat("*")) {
+      e.kind = ast::Expr::Dereference;
+      e.args.push_back(primary());
+    } else if (eat("@")) {
       e.kind = ast::Expr::AtCall;
       e.text = ident().text;
       if (eat("<")) {
@@ -398,6 +449,8 @@ class Parser {
       e.kind = ast::Expr::Block;
       e.text.clear();
       while (!eat("}")) {
+        if (eat(";"))
+          continue;
         if (peek().text == "const" || peek().text == "let" || peek().text == "if" ||
             peek().text == "while" || peek().text == "loop" || peek().text == "for" ||
             peek().text == "borrow" || peek().text == "return" || peek().text == "break" ||
@@ -427,9 +480,17 @@ class Parser {
       e.kind = ast::Expr::Array;
       e.text = "";
       if (!eat("]")) {
-        do {
+        e.args.push_back(expr());
+        if (eat(";")) {
+          e.kind = ast::Expr::ArrayRepeat;
           e.args.push_back(expr());
-        } while (eat(","));
+        } else {
+          while (eat(",")) {
+            if (peek().text == "]")
+              break;
+            e.args.push_back(expr());
+          }
+        }
         need("]");
       }
     } else if (eat("&")) {
@@ -458,6 +519,8 @@ class Parser {
             .help("provide an expression after `=`")
             .emit();
       ident();
+      while (eat("::"))
+        e.text += "::" + ident().text;
 
       if (peek().text == "<") {
         auto saved = pos;
@@ -476,7 +539,7 @@ class Parser {
           pos = saved;
         }
       }
-      if (eat("::"))
+      while (eat("::"))
         e.text += "::" + ident().text;
     }
     for (;;) {
@@ -486,8 +549,11 @@ class Parser {
       if (eat("(")) {
         ast::Expr c{ast::Expr::Call, e.loc, e.text, {}};
         c.typeArguments = e.typeArguments;
-        if (e.kind != ast::Expr::Name)
-          fail(e.loc, DiagnosticCode::UnexpectedToken, "call target must be a name");
+        if (e.kind != ast::Expr::Name) {
+          c.kind = ast::Expr::Invoke;
+          c.text.clear();
+          c.args.push_back(std::move(e));
+        }
         if (!eat(")")) {
           do {
             c.args.push_back(expr());
@@ -527,6 +593,7 @@ class Parser {
       if (t.count || t.reference)
         fail(t.loc, DiagnosticCode::InvalidCast, "cast target must be scalar");
       e = {ast::Expr::Cast, t.loc, t.name, {std::move(e)}};
+      e.typeArguments = {t};
     }
     while (peek().kind == Token::Punctuation && prec(peek().text) >= minimum) {
       auto op = ts[pos++];
@@ -573,8 +640,15 @@ class Parser {
       }
       if (s.kind == ast::Stmt::Const && !s.annotated)
         fail(s.loc, DiagnosticCode::UnexpectedToken, "const requires a type annotation");
-      need("=");
-      s.expr = expr();
+      if (eat("=")) {
+        s.expr = expr();
+      } else if (s.kind == ast::Stmt::Let && s.annotated &&
+                 (s.annotation.count > 0 || !s.annotation.countName.empty())) {
+
+        s.expr = {ast::Expr::ArrayRepeat, s.loc, "zero", {}};
+      } else {
+        need("=");
+      }
       need(";");
     } else if (eat("return")) {
       s.kind = ast::Stmt::Return;
@@ -667,16 +741,21 @@ class Parser {
     } else {
       s.kind = ast::Stmt::Expression;
       s.expr = expr();
-      need(";");
+      if (s.expr.kind == ast::Expr::Unsafe)
+        eat(";");
+      else
+        need(";");
     }
     return s;
   }
-  ast::Function function(std::string owner, bool pub, bool external = false,
-                         std::string attr = "") {
+  ast::Function function(std::string owner, bool pub, bool external = false, std::string attr = "",
+                         bool foreignC = false, bool unsafeFunction = false) {
     auto n = ident();
     ast::Function f;
     f.trusted = trusted;
     f.external = external;
+    f.foreignC = foreignC;
+    f.unsafeFunction = unsafeFunction;
     f.releases = attr == "releases";
     if (!attr.empty() && !f.releases)
       f.intrinsic = attr;
@@ -689,6 +768,13 @@ class Parser {
       do {
         ast::Param p;
         p.loc = peek().loc;
+        if (eat("...")) {
+          if (!foreignC || f.params.empty())
+            fail(p.loc, DiagnosticCode::InvalidCAbi,
+                 "variadic functions require extern C and at least one fixed parameter");
+          f.variadic = true;
+          break;
+        }
         if (eat("shared"))
           p.access = Access::Shared;
         else if (eat("unique"))
@@ -710,8 +796,12 @@ class Parser {
       f.result = type();
     if (external || !f.intrinsic.empty())
       need(";");
+    else if (foreignC && eat(";"))
+      f.external = true;
     else
       f.body = block();
+    if (f.variadic && !f.external)
+      fail(f.loc, DiagnosticCode::InvalidCAbi, "variadic C exports are not supported");
     return f;
   }
 
@@ -738,6 +828,7 @@ public:
         do {
           p.importOrigins.push_back(origin);
           p.imports.push_back(stringLiteral());
+          p.importAliases.push_back(eat("as") ? ident().text : "");
         } while (parenthesized && eat(",") && peek().text != ")");
         if (parenthesized)
           need(")");
@@ -749,18 +840,30 @@ public:
       if (peek().text == "async" || peek().text == "await")
         ident();
       auto start = peek().loc;
-      if (peek().text == "const") {
+      bool foreign = eat("extern");
+      if (foreign && stringLiteral() != "C")
+        fail(start, DiagnosticCode::InvalidCAbi, "only the C ABI is supported");
+      bool unsafeFunction = eat("unsafe");
+      if ((unsafeFunction && peek().text != "fn") ||
+          (foreign && peek().text != "fn" && peek().text != "struct" && peek().text != "union" &&
+           peek().text != "type"))
+        fail(start, DiagnosticCode::InvalidCAbi,
+             "extern C supports fn/struct/union/type; unsafe declarations require fn");
+      if (foreign && eat("type")) {
+        ast::ForeignType declaration;
+        auto name = ident();
+        declaration.name = name.text;
+        declaration.loc = name.loc;
+        declaration.alias = eat("=");
+        if (declaration.alias)
+          declaration.target = type();
+        need(";");
+        p.foreignTypes.push_back(std::move(declaration));
+      } else if (peek().text == "const" && !foreign && !unsafeFunction) {
         p.constants.push_back(stmt());
-      } else if (eat("extern")) {
-        if (!trusted)
-          fail(start, DiagnosticCode::RestrictedOperation,
-               "extern C is restricted to bundled runtime bindings");
-        if (stringLiteral() != "C")
-          fail(start, DiagnosticCode::RestrictedOperation, "only the C ABI is supported");
-        need("fn");
-        p.functions.push_back(function("", pub, true));
       } else if (eat("fn"))
-        p.functions.push_back(function("", pub, false, attr));
+        p.functions.push_back(
+            function("", pub, foreign && trusted, attr, foreign && !trusted, unsafeFunction));
       else if (eat("impl")) {
         std::vector<std::string> parameters;
         if (eat("<")) {
@@ -812,9 +915,13 @@ public:
           }
         }
         p.enums.push_back(std::move(e));
-      } else if (eat("struct")) {
+      } else if (peek().text == "struct" || (foreign && peek().text == "union")) {
         ast::Struct s;
+        s.foreignUnion = eat("union");
+        if (!s.foreignUnion)
+          need("struct");
         s.trusted = trusted;
+        s.foreignC = foreign;
         s.representation = attr;
         s.pub = pub;
         s.loc = start;
@@ -907,9 +1014,10 @@ bool parseFragment(const std::vector<Token> &ts, const std::string &kind) {
 static void printStmts(const std::vector<ast::Stmt> &, std::ostream &, int);
 static void printExpr(const ast::Expr &e, std::ostream &o) {
   static const char *names[] = {
-      "LiteralInt", "LiteralBool",   "Identifier", "Binary",     "Call",       "MethodCall",
-      "Member",     "Index",         "Array",      "Assignment", "Unary",      "Cast",
-      "Char",       "StringLiteral", "BlockExpr",  "AtCall",     "BorrowExpr", "MatchExpr"};
+      "LiteralInt", "LiteralBool",     "Identifier",      "Binary",     "Call",       "MethodCall",
+      "Member",     "Index",           "Array",           "Assignment", "Unary",      "Cast",
+      "Char",       "StringLiteral",   "BlockExpr",       "AtCall",     "BorrowExpr", "MatchExpr",
+      "UnsafeExpr", "DereferenceExpr", "ArrayRepeatExpr", "InvokeExpr"};
   o << "(" << names[e.kind] << " " << (e.kind == ast::Expr::String ? quoteText(e.text) : e.text);
   if (!e.body.empty())
     printStmts(e.body, o, 2);
@@ -942,6 +1050,36 @@ static void printStmts(const std::vector<ast::Stmt> &ss, std::ostream &o, int de
   }
 }
 void printAST(const ast::Program &p, std::ostream &o) {
+  std::function<std::string(const TypeSyntax &)> typeName = [&](const TypeSyntax &t) {
+    if (t.functionPointer) {
+      std::string name = "extern C fn(";
+      for (size_t n = 0; n + 1 < t.arguments.size(); ++n)
+        name += (n ? "," : "") + typeName(t.arguments[n]);
+      return name + ")->" + typeName(t.arguments.back());
+    }
+    if (t.rawPointer)
+      return std::string(t.mutablePointer ? "*mut " : "*const ") + typeName(t.arguments.at(0));
+    std::string name = t.reference ? (t.mutableReference ? "&mut " : "&") : "";
+    name += t.name;
+    if (!t.arguments.empty()) {
+      name += "<";
+      for (size_t n = 0; n < t.arguments.size(); ++n) {
+        if (n)
+          name += ",";
+        name += typeName(t.arguments[n]);
+      }
+      name += ">";
+    }
+    if (t.count)
+      name += "[" + std::to_string(t.count) + "]";
+    return name;
+  };
+  for (const auto &type : p.foreignTypes) {
+    o << "extern C type " << type.name;
+    if (type.alias)
+      o << " = " << typeName(type.target);
+    o << "\n";
+  }
   printStmts(p.constants, o, 0);
   for (auto &e : p.enums) {
     o << "EnumDecl " << e.name;
@@ -972,7 +1110,9 @@ void printAST(const ast::Program &p, std::ostream &o) {
     }
   }
   for (auto &s : p.structs) {
-    o << "struct " << s.name;
+    if (s.foreignC)
+      o << "extern C ";
+    o << (s.foreignUnion ? "union " : "struct ") << s.name;
     if (!s.parameters.empty()) {
       o << "<";
       for (size_t i = 0; i < s.parameters.size(); ++i) {
@@ -984,7 +1124,9 @@ void printAST(const ast::Program &p, std::ostream &o) {
     }
     o << ": " << s.protocol << "\n";
     for (auto &f : s.fields)
-      o << "  " << f.name << ": " << f.type.name << "[" << f.type.count << "]\n";
+      o << "  " << f.name << ": "
+        << (s.foreignC ? typeName(f.type) : f.type.name + "[" + std::to_string(f.type.count) + "]")
+        << "\n";
   }
   for (auto &impl : p.impls) {
     o << "impl";
@@ -1003,11 +1145,18 @@ void printAST(const ast::Program &p, std::ostream &o) {
     o << " }\n";
   }
   for (auto &f : p.functions) {
-    if (f.external)
+    if (f.external || f.foreignC)
       o << "extern C ";
+    if (f.unsafeFunction)
+      o << "unsafe ";
     if (!f.intrinsic.empty())
       o << "intrinsic " << f.intrinsic << " ";
-    o << "fn " << f.owner << "::" << f.name << " -> " << f.result.name << "\n";
+    o << "fn " << f.owner << "::" << f.name << " -> " << typeName(f.result) << "\n";
+    if (f.variadic)
+      o << "  variadic ...\n";
+    if (f.foreignC)
+      for (const auto &param : f.params)
+        o << "  param " << param.name << ": " << typeName(param.type) << "\n";
     printStmts(f.body, o, 2);
   }
 }

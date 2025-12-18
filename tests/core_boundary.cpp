@@ -494,5 +494,40 @@ int main() {
         return 1;
     }
   }
+  auto repeatedArrayCore = [] {
+    return core::elaborate(resolve(parse(lex("fn main() { let bytes = [0u8; 8]; }"))));
+  };
+  (void)core::verify(repeatedArrayCore());
+  for (int mode = 0; mode < 6; ++mode) {
+    auto forged = repeatedArrayCore();
+    bool changed = false;
+    for (auto &i : forged.functions[0].body) {
+      if (i.kind != core::Inst::ArrayRepeat)
+        continue;
+      auto &array = forged.semantics.types[i.type];
+      if (mode == 0)
+        array.count = 0;
+      if (mode == 1)
+        array.width = 7;
+      if (mode == 2)
+        array.element = I32;
+      if (mode == 3)
+        i.args.push_back(i.args[0]);
+      if (mode == 4)
+        i.quantity = Quantity::Omega;
+      if (mode == 5)
+        array.count = array.width = 65537;
+      changed = true;
+    }
+    if (!changed)
+      return 1;
+    try {
+      (void)core::verify(std::move(forged));
+      return 1;
+    } catch (const Error &e) {
+      if (e.code != "E9001")
+        return 1;
+    }
+  }
   std::cout << "Core gate rejects forged quantity, type and reference contracts\n";
 }

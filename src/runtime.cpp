@@ -104,24 +104,31 @@ public:
     f.blocks = std::move(reachable);
 
     std::vector<Instruction> slots;
-    for (auto &b : f.blocks)
-      for (auto it = b.instructions.begin(); it != b.instructions.end();) {
-        if ((it->kind == Instruction::Alloc || it->kind == Instruction::RecordAlloc)) {
-          slots.push_back(std::move(*it));
-          it = b.instructions.erase(it);
-        } else
-          ++it;
+    for (auto &b : f.blocks) {
+      size_t kept = 0;
+      for (size_t n = 0; n < b.instructions.size(); ++n) {
+        auto &instruction = b.instructions[n];
+        if (instruction.kind == Instruction::Alloc || instruction.kind == Instruction::RecordAlloc)
+          slots.push_back(std::move(instruction));
+        else {
+          if (kept != n)
+            b.instructions[kept] = std::move(instruction);
+          ++kept;
+        }
       }
+      b.instructions.resize(kept);
+    }
     f.blocks[0].instructions.insert(f.blocks[0].instructions.begin(), slots.begin(), slots.end());
     return std::move(f);
   }
 };
 void inst(const Instruction &i, std::ostream &o, int d) {
   static const char *names[] = {
-      "constant",   "alloc",  "load",        "store",   "call",     "binary",      "unary",
-      "if",         "return", "heap.alloc",  "free",    "load.ptr", "store.ptr",   "memcpy",
-      "memmove",    "cast",   "loop",        "break",   "continue", "static_str",  "record.alloc",
-      "slice.view", "length", "index.check", "subview", "address",  "address.view"};
+      "constant",  "alloc",      "load",         "store",         "call",   "binary",
+      "unary",     "if",         "return",       "heap.alloc",    "free",   "load.ptr",
+      "store.ptr", "memcpy",     "memmove",      "cast",          "loop",   "break",
+      "continue",  "static_str", "record.alloc", "slice.view",    "length", "index.check",
+      "subview",   "address",    "address.view", "pointer.offset"};
   o << std::string(d, ' ');
   if (i.result != NoValue)
     o << "%" << i.result << " = ";
@@ -160,6 +167,7 @@ void inst(const Instruction &i, std::ostream &o, int d) {
 LIR lower(const Erased &e) {
   LIR p;
   p.target = e.target;
+  p.cBridge = e.cBridge;
   p.values = e.values;
   for (auto &f : e.functions)
     p.functions.push_back(Lowerer().run(f));

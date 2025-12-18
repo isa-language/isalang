@@ -75,7 +75,11 @@ struct Type {
     Character,
     Enum,
     Reference,
-    Slice
+    Slice,
+    RawPointer,
+    ForeignRecord,
+    ForeignOpaque,
+    FunctionPointer
   } kind;
   std::string name;
   ProtocolId protocol = None;
@@ -85,6 +89,10 @@ struct Type {
   Representation representation = Representation::Stack;
   DropGlue dropGlue = DropGlue::Trivial;
   std::vector<Variant> variants = {};
+  bool mutablePointer = false;
+  std::string cName = {};
+  bool foreignUnion = false;
+  std::vector<TypeId> parameters = {};
 };
 struct Operation {
   OperationId id;
@@ -139,7 +147,14 @@ struct Expr {
     Match,
     PayloadTake,
     StoreReference,
-    Length
+    Length,
+    Unsafe,
+    RawPlace,
+    RawAddress,
+    PointerCast,
+    ArrayRepeat,
+    FunctionAddress,
+    IndirectCall
   } kind;
   Loc loc;
   bool inferredLiteral = false;
@@ -159,6 +174,7 @@ struct Expr {
   std::string text;
   std::vector<Expr> args;
   std::vector<Stmt> body;
+  std::vector<uint32_t> fieldPath;
 };
 struct Stmt {
   enum Kind {
@@ -249,6 +265,11 @@ struct Function {
   std::vector<OperationId> operations;
   std::vector<Stmt> body = {};
   Loc loc;
+  bool foreignC = false, unsafeFunction = false;
+  std::string cLinkName = {};
+  bool variadic = false;
+  uint32_t fixedParams = 0;
+  FunctionId variadicDeclaration = None;
 };
 struct ConstDecl {
   ConstId id;
@@ -309,6 +330,16 @@ struct Program {
   std::vector<Protocol> protocols;
   std::vector<Symbol> symbols;
   std::vector<Function> functions;
+  bool library = false;
+  bool rawPointer(TypeId t) const {
+    return types.at(t).kind == Type::RawPointer;
+  }
+  bool cScalar(TypeId t) const {
+    return (scalar(t) && t != Char) || rawPointer(t) || functionPointer(t);
+  }
+  bool functionPointer(TypeId t) const {
+    return types.at(t).kind == Type::FunctionPointer;
+  }
   uint32_t storageWidth(TypeId t) const {
     return heap(t) ? 1 : types[t].width;
   }
@@ -432,7 +463,9 @@ struct Program {
   }
 
   bool containerElement(TypeId t) const {
-    if (t == Unit || t == RawPtr || t == Str || reference(t) || types.at(t).kind == Type::Slice)
+    if (t == Unit || t == RawPtr || t == Str || reference(t) || rawPointer(t) ||
+        functionPointer(t) || types.at(t).kind == Type::ForeignRecord ||
+        types.at(t).kind == Type::ForeignOpaque || types.at(t).kind == Type::Slice)
       return false;
     if (types.at(t).protocol != None) {
       const auto &protocol = protocols.at(types[t].protocol);

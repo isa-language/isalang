@@ -1,0 +1,23 @@
+extern "C" union Number {
+  integer: u64,
+  decimal: f64,
+  padding: u8[56],
+}
+extern "C" struct Data {
+  tag: u8,
+  number: Number,
+  tail: i32,
+}
+extern "C" fn get_data() -> *mut Data;
+fn main() {
+  unsafe {
+    let data = get_data();
+    (*data).number.integer = 0x1234u64;
+    @assert((*data).number.integer == 0x1234u64);
+    (*data).number.decimal = 1.5;
+    @assert((*data).number.decimal == 1.5);
+    @assert((*data).tag == 7u8 &&(*data).tail == 9);
+    @assert(@size_of<Number>() == 56usize);
+    @println("{} {}", @size_of<Number>(), @align_of<Number>());
+  }
+}

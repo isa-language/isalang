@@ -1,0 +1,19 @@
+struct Cpu {
+  fault: i32,
+}
+fn step(c: &mut Cpu) -> bool {
+  c.fault = c.fault + 1;
+  return true;
+}
+fn combine(a: bool, b: bool) -> bool {
+  return a && b;
+}
+fn main() {
+  let c = Cpu::new();
+  @assert(step(&mut c) && c.fault == 1);
+  @assert(combine(step(&mut c), step(&mut c)));
+  @println("{}", c.fault);
+  let stepped = 1;
+  let stepped = stepped + 1;
+  @println("{}", stepped);
+}

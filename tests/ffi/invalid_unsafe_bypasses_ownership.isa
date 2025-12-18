@@ -1,0 +1,8 @@
+// error: E0301
+@import "std.box" fn main() {
+  let b = Box<i32>::new(42);
+  unsafe {
+    let other = b.move();
+    print(b.get());
+  }
+}

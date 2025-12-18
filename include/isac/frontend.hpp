@@ -14,6 +14,12 @@ struct Token {
   enum Kind { Identifier, Number, Punctuation, String, Character, End } kind;
 };
 std::vector<Token> lex(const std::string &, FileId file = NoFile);
+struct NumericLiteral {
+  std::string value, suffix;
+  bool floating = false;
+};
+
+NumericLiteral parseNumericLiteral(const std::string &, Loc);
 struct TypeSyntax {
   std::string name = "unit";
   int count = 0;
@@ -21,6 +27,8 @@ struct TypeSyntax {
   bool reference = false, mutableReference = false;
   std::string countName = {};
   std::vector<TypeSyntax> arguments = {};
+  bool rawPointer = false, mutablePointer = false;
+  bool functionPointer = false;
 };
 enum class Access { Own, Shared, Unique };
 const char *accessName(Access);
@@ -45,7 +53,11 @@ struct Expr {
     Block,
     AtCall,
     Borrow,
-    Match
+    Match,
+    Unsafe,
+    Dereference,
+    ArrayRepeat,
+    Invoke
   } kind;
   Loc loc;
   std::string text;
@@ -107,6 +119,9 @@ struct Function {
   std::vector<Param> params;
   TypeSyntax result;
   std::vector<Stmt> body = {};
+  bool foreignC = false, unsafeFunction = false;
+  std::string cLinkName = {};
+  bool variadic = false;
 };
 struct Field {
   std::string name;
@@ -122,6 +137,16 @@ struct Struct {
   Loc loc;
   bool pub = false;
   std::vector<Field> fields;
+  bool foreignC = false;
+  std::string cName = {};
+  bool foreignUnion = false;
+};
+struct ForeignType {
+  std::string name;
+  Loc loc;
+  bool alias = false;
+  TypeSyntax target;
+  std::string cName = {};
 };
 struct Operation {
   std::string name, target;
@@ -163,10 +188,13 @@ struct Program {
   std::vector<Enum> enums;
   std::vector<std::string> imports;
   std::vector<Loc> importOrigins;
+  std::vector<std::string> importAliases;
   std::vector<Impl> impls;
   std::vector<Struct> structs;
   std::vector<Protocol> protocols;
   std::vector<Function> functions;
+  std::vector<ForeignType> foreignTypes;
+  bool library = false;
 };
 }
 ast::Program parse(const std::vector<Token> &, bool trusted = false);

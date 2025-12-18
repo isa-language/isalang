@@ -1,0 +1,29 @@
+const BUFFER_SIZE: usize = 0x1000;
+const FLAG_COUNT: usize = 0x800;
+struct Storage {
+  offset: usize,
+  bytes: u8[BUFFER_SIZE],
+  flags: u8[FLAG_COUNT],
+}
+fn initialize(storage: &mut Storage) {
+  storage.offset = 0x200;
+  storage.bytes[0x200] = 0x60u8;
+  storage.bytes[0x201] = 0x2au8;
+  let index: usize = 0x7ff;
+  storage.flags[index] = 0b1u8;
+}
+fn clear(flags: &mut u8[]) {
+  for i in 0usize..flags.len() {
+    flags[i] = 0u8;
+  }
+}
+fn main() {
+  let storage = Storage::new();
+  initialize(&mut storage);
+  let word =(storage.bytes[storage.offset] as u16 << 8u16)
+  | storage.bytes[storage.offset + 1] as u16;
+  let profile = String::from("modern");
+  @assert(profile == "modern");
+  clear(&mut storage.flags);
+  @println("word = {}, flags = {}", word, storage.flags.len());
+}

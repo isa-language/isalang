@@ -72,7 +72,9 @@ class Builder {
       auto &i = *it;
       auto id = node(&i);
       facts(i, id);
-      if (i.kind == I::If) {
+      if (i.kind == I::UnsafeScope) {
+        graph.blocks[id].successors = {sequence(i.body, next)};
+      } else if (i.kind == I::If) {
         auto yes = sequence(i.body, next);
         auto no = sequence(i.otherwise, next);
         graph.blocks[id].terminator = Terminator::CondBranch;
@@ -162,6 +164,23 @@ public:
       for (auto next : graph.blocks[id].successors)
         work.push_back(next);
     }
+    ValueId first = None, end = 0;
+    for (const auto &b : graph.blocks) {
+      for (auto value : b.valueUses) {
+        first = std::min(first, value);
+        end = std::max(end, value + 1);
+      }
+      for (auto value : b.valueDefinitions) {
+        first = std::min(first, value);
+        end = std::max(end, value + 1);
+      }
+    }
+    if (first == None)
+      first = end = 0;
+    for (auto &b : graph.blocks) {
+      b.valuesIn = ValueLivenessSet(first, end);
+      b.valuesOut = ValueLivenessSet(first, end);
+    }
     bool changed = true;
     while (changed) {
       changed = false;
@@ -169,14 +188,18 @@ public:
         if (!b.reachable)
           continue;
         std::set<SymbolId> out;
-        std::set<ValueId> values;
+        ValueLivenessSet values(first, end);
         for (auto next : b.successors) {
           const auto &s = graph.blocks[next];
           out.insert(s.liveIn.begin(), s.liveIn.end());
-          values.insert(s.valuesIn.begin(), s.valuesIn.end());
+          values.merge(s.valuesIn);
         }
         auto in = incoming(b.uses, b.definitions, out);
-        auto vin = incoming(b.valueUses, b.valueDefinitions, values);
+        auto vin = values;
+        for (auto value : b.valueDefinitions)
+          vin.erase(value);
+        for (auto value : b.valueUses)
+          vin.insert(value);
         changed |= in != b.liveIn || out != b.liveOut || vin != b.valuesIn || values != b.valuesOut;
         b.liveIn = std::move(in);
         b.liveOut = std::move(out);

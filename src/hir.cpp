@@ -1,4 +1,5 @@
 #include "isac/hir.hpp"
+#include "isac/ffi.hpp"
 #include "isac/macros.hpp"
 #include <algorithm>
 #include <functional>
@@ -31,6 +32,47 @@ class Resolver {
     const auto &source = *structSources.at(id);
     auto savedPrivilege = privileged;
     privileged = source.trusted;
+    if (source.foreignC) {
+      std::set<std::string> names;
+      uint32_t bytes = 0, alignment = 1;
+      for (const auto &field : source.fields) {
+        if (!names.insert(field.name).second)
+          duplicate(field.loc, field.name);
+        if (field.type.reference || field.type.count == -1)
+          fail(field.loc, DiagnosticCode::InvalidCAbi,
+               "C fields require scalars, raw pointers, fixed scalar arrays or nested C records");
+        if (field.type.count || !field.type.countName.empty()) {
+          auto element = field.type;
+          element.count = 0;
+          element.countName.clear();
+          if (!scalar(getType(element)))
+            fail(field.loc, DiagnosticCode::InvalidCAbi, "C array fields require scalar elements");
+        }
+        auto tid = getType(field.type);
+        if (!p.cScalar(tid) && p.types[tid].kind != hir::Type::ForeignRecord &&
+            !(p.types[tid].kind == hir::Type::Array && p.cScalar(p.types[tid].element)))
+          fail(field.loc, DiagnosticCode::InvalidCAbi, "field has no C-compatible representation");
+        auto [size, align] = ffi::layout(p, tid);
+        if (source.foreignUnion) {
+          p.types[id].fields.push_back({field.name, tid, 0});
+          bytes = std::max(bytes, size);
+        } else {
+          bytes = (bytes + align - 1) / align * align;
+          p.types[id].fields.push_back({field.name, tid, bytes});
+          bytes += size;
+        }
+        alignment = std::max(alignment, align);
+        if (bytes > 1024 * 1024)
+          fail(field.loc, DiagnosticCode::InvalidCAbi, "C struct layout exceeds 1 MiB");
+      }
+      if (source.fields.empty() || !source.parameters.empty() || !source.protocol.empty())
+        fail(source.loc, DiagnosticCode::InvalidCAbi,
+             "C structs require fields, without generics/protocols; use an opaque type");
+      p.types[id].width = (bytes + alignment - 1) / alignment * alignment;
+      structLayoutState[id] = 2;
+      privileged = savedPrivilege;
+      return;
+    }
     std::set<std::string> names;
     std::vector<hir::Field> fields;
     uint32_t offset = 0;
@@ -38,6 +80,10 @@ class Resolver {
       if (!names.insert(field.name).second)
         duplicate(field.loc, field.name);
       auto type = getType(field.type);
+      if (p.types[type].kind == hir::Type::ForeignRecord ||
+          p.types[type].kind == hir::Type::ForeignOpaque)
+        fail(field.loc, DiagnosticCode::InvalidCAbi,
+             "C structs cannot be embedded in language aggregates; use a raw pointer");
 
       if (type == RawPtr && !p.heap(id))
         fail(field.loc, DiagnosticCode::RestrictedOperation,
@@ -45,7 +91,9 @@ class Resolver {
       if (type == Str)
         fail(field.loc, DiagnosticCode::EscapingView,
              "str fields require lifetime contracts, outside this PoC");
-      if (type == Unit || (p.types[type].kind == hir::Type::Structure && !p.ownedFieldType(type)) ||
+      if (type == Unit ||
+          (p.types[type].kind == hir::Type::Structure && !p.ownedFieldType(type) &&
+           !p.supportsStoredSharedReference(type)) ||
           p.types[type].kind == hir::Type::Enum ||
           (p.ownedFieldType(type) && p.types[id].protocol != None))
         fail(field.loc, DiagnosticCode::InvalidPlace,
@@ -85,6 +133,58 @@ class Resolver {
     TypeId owner;
   };
   std::vector<FunctionSource> functionSources;
+  std::map<std::pair<FunctionId, std::vector<TypeId>>, FunctionId> variadicInstances;
+  FunctionId instantiateVariadic(FunctionId declaration, hir::Expr &expression) {
+    const auto original = p.functions.at(declaration);
+    if (expression.args.size() < original.fixedParams)
+      fail(expression.loc, DiagnosticCode::ArgumentMismatch,
+           "too few fixed arguments to variadic C function `" + original.name + "`");
+    std::vector<TypeId> extra;
+    for (size_t n = original.fixedParams; n < expression.args.size(); ++n) {
+      auto &argument = expression.args[n];
+      auto type = argument.type;
+      bool reference = argument.kind == hir::Expr::Borrow ||
+                       (argument.kind == hir::Expr::Variable && p.symbols[argument.ref].reference);
+      if (reference || !p.cScalar(type))
+        fail(argument.loc, DiagnosticCode::InvalidCAbi,
+             "variadic C arguments require native scalars or typed pointers; convert buffers "
+             "explicitly inside unsafe");
+      auto promoted = type == F32 ? F64
+                      : type == Bool || type == I8 || type == U8 || type == I16 || type == U16
+                          ? I32
+                          : type;
+      if (promoted != type) {
+        hir::Expr cast{};
+        cast.kind = hir::Expr::Cast;
+        cast.type = promoted;
+        cast.loc = argument.loc;
+        cast.text = "c.default.promotion";
+        cast.args.push_back(std::move(argument));
+        argument = std::move(cast);
+      }
+      extra.push_back(promoted);
+    }
+    if (extra.empty())
+      return declaration;
+    auto key = std::make_pair(declaration, extra);
+    if (variadicInstances.contains(key))
+      return variadicInstances.at(key);
+    auto instance = original;
+    instance.id = p.functions.size();
+    instance.name += "__varargs_" + std::to_string(instance.id);
+    instance.cLinkName = original.cLinkName.empty() ? original.name : original.cLinkName;
+    instance.variadicDeclaration = declaration;
+    for (size_t n = 0; n < extra.size(); ++n) {
+      SymbolId id = p.symbols.size();
+      p.symbols.push_back({id, "$vararg" + std::to_string(n), extra[n], Access::Own, true, false,
+                           expression.args[n + original.fixedParams].loc});
+      instance.params.push_back(id);
+    }
+    p.functions.push_back(std::move(instance));
+    functionSources.push_back(functionSources.at(declaration));
+    variadicInstances[key] = p.functions.back().id;
+    return p.functions.back().id;
+  }
   std::set<std::pair<TypeId, std::string>> methodsDeclared;
   TypeId substitute(hir::GenericPayload payload, const hir::Substitution &sub) {
     if (!payload.parameter)
@@ -137,7 +237,8 @@ class Resolver {
     uint32_t offset = 0;
     for (const auto &field : decl.fields) {
       auto tid = substitute(field.type, instance.substitution);
-      if (!scalar(tid) && p.types[tid].kind != hir::Type::Array && !p.ownedFieldType(tid))
+      if (!scalar(tid) && p.types[tid].kind != hir::Type::Array && !p.ownedFieldType(tid) &&
+          !p.supportsStoredSharedReference(tid))
         fail(loc, DiagnosticCode::InvalidPlace,
              "generic struct field `" + field.name +
                  "` requires aggregate element ownership support");
@@ -317,6 +418,18 @@ class Resolver {
   }
   hir::Function *current = nullptr;
   bool privileged = false;
+  unsigned unsafeDepth = 0;
+  std::map<std::string, const ast::ForeignType *> foreignAliases;
+  std::set<std::string> resolvingAliases;
+  void requireUnsafe(Loc loc, const std::string &operation) {
+    if (current)
+      current->effects.unsafeEffect = true;
+    if (!unsafeDepth)
+      DiagnosticEngine()
+          .error(DiagnosticCode::UnsafeRequired, loc, operation + " requires unsafe")
+          .help("isolate this operation in unsafe { ... } and uphold its memory contract")
+          .emit();
+  }
   uint32_t nextLoop = 0;
   RegionId nextRegion = 0;
   std::vector<uint32_t> loops;
@@ -324,6 +437,67 @@ class Resolver {
     fail(l, DiagnosticCode::DuplicateDeclaration, "duplicate declaration `" + n + "`");
   }
   TypeId getType(const TypeSyntax &s, bool allowReference = false) {
+    if (s.functionPointer) {
+      std::vector<TypeId> parameters;
+      for (size_t n = 0; n < s.arguments.size(); ++n) {
+        const auto &syntax = s.arguments[n];
+        if (syntax.reference || syntax.count)
+          fail(syntax.loc, DiagnosticCode::InvalidCAbi,
+               "C callbacks require native scalars or raw pointers, without safe references");
+        auto tid = getType(syntax);
+        if (!(p.cScalar(tid) || (n + 1 == s.arguments.size() && tid == Unit)))
+          fail(syntax.loc, DiagnosticCode::InvalidCAbi, "invalid C callback signature");
+        parameters.push_back(tid);
+      }
+      auto result = parameters.back();
+      parameters.pop_back();
+      for (TypeId id = 0; id < p.types.size(); ++id)
+        if (p.functionPointer(id) && p.types[id].element == result &&
+            p.types[id].parameters == parameters)
+          return id;
+      std::string name = "extern C fn(";
+      for (auto tid : parameters)
+        name += p.types[tid].name + ",";
+      name += ")->" + p.types[result].name;
+      TypeId id = p.types.size();
+      hir::Type pointer{hir::Type::FunctionPointer, name};
+      pointer.element = result;
+      pointer.parameters = std::move(parameters);
+      p.types.push_back(std::move(pointer));
+      return id;
+    }
+    if (s.rawPointer) {
+      const auto &referent = s.arguments.at(0);
+      TypeId element =
+          !referent.rawPointer && referent.arguments.empty() && types.contains(referent.name)
+              ? types.at(referent.name)
+              : getType(referent);
+      if (!p.cScalar(element) && element != Unit &&
+          p.types[element].kind != hir::Type::ForeignRecord &&
+          p.types[element].kind != hir::Type::ForeignOpaque)
+        fail(s.loc, DiagnosticCode::InvalidRawPointer,
+             "raw pointers require C-compatible referents");
+      auto name = std::string(s.mutablePointer ? "*mut " : "*const ") + p.types[element].name;
+      if (types.contains(name))
+        return types.at(name);
+      TypeId id = p.types.size();
+      types[name] = id;
+      hir::Type pointer{hir::Type::RawPointer, name};
+      pointer.element = element;
+      pointer.mutablePointer = s.mutablePointer;
+      p.types.push_back(std::move(pointer));
+      return id;
+    }
+    if (foreignAliases.contains(s.name)) {
+      if (!resolvingAliases.insert(s.name).second)
+        fail(s.loc, DiagnosticCode::InvalidCAbi, "cyclic C type alias");
+      auto target = getType(foreignAliases.at(s.name)->target);
+      resolvingAliases.erase(s.name);
+      if (!p.cScalar(target))
+        fail(s.loc, DiagnosticCode::InvalidCAbi, "C aliases require scalar or pointer types");
+      types[s.name] = target;
+      return target;
+    }
     if (!s.countName.empty()) {
       auto resolved = s;
       auto entry = binding(s.countName, s.loc);
@@ -412,15 +586,24 @@ class Resolver {
       fail(a.loc, DiagnosticCode::RestrictedOperation,
            "generic impl methods currently require ordinary checked bodies");
     privileged = a.trusted;
+    if (a.foreignC && (a.name.starts_with("isac_") || a.name.starts_with("__isac_")))
+      fail(a.loc, DiagnosticCode::InvalidCAbi, "runtime and compiler C symbols are reserved");
     hir::Function f{};
     f.trusted = a.trusted;
     f.external = a.external;
+    f.foreignC = a.foreignC;
+    f.variadic = a.variadic;
+    f.fixedParams = a.params.size();
+    f.cLinkName = a.cLinkName;
+    f.unsafeFunction = a.unsafeFunction;
     f.intrinsic = a.intrinsic;
     f.kind = a.kind;
-    f.intrinsicId = findIntrinsic(a.external ? a.name : a.intrinsic);
+    f.intrinsicId =
+        a.foreignC ? IntrinsicId::None : findIntrinsic(a.external ? a.name : a.intrinsic);
     if (!a.intrinsic.empty() && f.intrinsicId == IntrinsicId::None)
       fail(a.loc, DiagnosticCode::RestrictedOperation, "unknown intrinsic `" + a.intrinsic + "`");
     f.effects = intrinsicInfo(f.intrinsicId).effects;
+    f.effects.unsafeEffect = a.foreignC || a.unsafeFunction;
     f.releases = a.releases;
     f.pub = a.pub;
     f.id = p.functions.size();
@@ -445,10 +628,17 @@ class Resolver {
         fail(a.loc, DiagnosticCode::RestrictedOperation,
              "bundled heap types cannot be extended by application impls");
     }
+    if (a.foreignC && a.result.reference)
+      fail(a.loc, DiagnosticCode::InvalidCAbi,
+           "C borrowed returns require an explicit origin contract");
     if (a.result.mutableReference)
       fail(a.result.loc, DiagnosticCode::EscapingView,
            "unique reference returns require exclusive result-region contracts");
     f.result = getType(a.result, a.result.reference);
+    if (p.types[f.result].kind == hir::Type::ForeignRecord ||
+        p.types[f.result].kind == hir::Type::ForeignOpaque)
+      fail(a.loc, DiagnosticCode::InvalidCAbi,
+           "C records and opaque types may only be used through raw pointers");
     if (f.result == Str && f.intrinsic.empty())
       fail(f.loc, DiagnosticCode::EscapingView,
            "returning str views requires lifetime contracts, outside this PoC");
@@ -467,8 +657,12 @@ class Resolver {
         fail(ap.loc, DiagnosticCode::InvalidPlace,
              "shared/unique parameters are supported only for self");
       auto t = getType(ap.type, ap.type.reference);
-      if (ap.type.reference && (f.external || !f.intrinsic.empty() || p.types[t].protocol != None ||
-                                t == Str || t == RawPtr))
+      if (p.types[t].kind == hir::Type::ForeignRecord ||
+          p.types[t].kind == hir::Type::ForeignOpaque || (ap.type.reference && p.rawPointer(t)))
+        fail(ap.loc, DiagnosticCode::InvalidCAbi,
+             "C types require a raw-pointer ABI, without safe references");
+      if (ap.type.reference && ((f.external && !f.foreignC) || !f.intrinsic.empty() ||
+                                p.types[t].protocol != None || t == Str || t == RawPtr))
         fail(ap.loc, DiagnosticCode::EscapingView,
              "this reference parameter requires an unsupported ABI or protocol contract");
       if (p.containsReferences(t) &&
@@ -568,13 +762,17 @@ class Resolver {
         !validContainerIntrinsic(p, f))
       fail(a.loc, DiagnosticCode::RestrictedOperation,
            "invalid generic container intrinsic contract");
+    if (f.foreignC && !ffi::signature(p, f))
+      fail(f.loc, DiagnosticCode::InvalidCAbi,
+           "unsupported C ABI signature; use scalars, raw pointers, borrowed scalar "
+           "arrays/slices, str or &String; owned values and borrowed results require wrappers");
     p.functions.push_back(f);
     functionSources.push_back({&a, activeTypeParameters, activeSubstitution, ownerOverride});
   }
   SymbolId add(std::string n, TypeId t, Loc l, Access a = Access::Own, bool param = false,
-               bool self = false) {
+               bool self = false, bool shadow = false) {
     auto key = n + "#" + std::to_string(l.context);
-    if (scopes.back().contains(key))
+    if (!shadow && scopes.back().contains(key))
       duplicate(l, n);
     SymbolId id = p.symbols.size();
     p.symbols.push_back({id, n, t, a, param, self, l});
@@ -648,6 +846,27 @@ class Resolver {
     e.text = a.text;
     using A = ast::Expr;
     using H = hir::Expr;
+    if (a.kind == A::Unsafe) {
+      ++unsafeDepth;
+      e.kind = H::Unsafe;
+      e.args.push_back(expr(a.args.at(0), expected));
+      e.type = e.args[0].type;
+      --unsafeDepth;
+      return e;
+    }
+    if (a.kind == A::Dereference) {
+      requireUnsafe(a.loc, "raw pointer dereference");
+      auto pointer = expr(a.args.at(0));
+      if (!p.rawPointer(pointer.type) || p.types[pointer.type].element == Unit ||
+          p.types[p.types[pointer.type].element].kind == hir::Type::ForeignOpaque)
+        fail(a.loc, DiagnosticCode::InvalidRawPointer,
+             "dereference requires a pointer to a sized C type");
+      e.kind = H::RawPlace;
+      e.type = p.types[pointer.type].element;
+      ensureStructLayout(e.type, a.loc);
+      e.args.push_back(std::move(pointer));
+      return e;
+    }
     if (a.kind == A::AtCall) {
       auto builtin = macros::findBuiltin(a.text);
       if (builtin != macros::BuiltinId::SizeOf && builtin != macros::BuiltinId::AlignOf)
@@ -669,6 +888,12 @@ class Resolver {
       unsigned alignment = 1;
       if (id == Unit)
         size = 0;
+      else if (p.rawPointer(id) || p.functionPointer(id) || t.kind == hir::Type::ForeignRecord) {
+        auto native = ffi::layout(p, id);
+        size = native.first;
+        alignment = native.second;
+      } else if (t.kind == hir::Type::ForeignOpaque)
+        fail(a.loc, DiagnosticCode::InvalidCAbi, "opaque C type has no known size or alignment");
       else if (id == Str || p.heap(id)) {
         size = word * (id == Str                                               ? 2
                        : t.representation == hir::Representation::StringRecord ? 3
@@ -692,22 +917,95 @@ class Resolver {
       return e;
     }
     if (a.kind == A::Borrow) {
+      if (a.args[0].kind == A::Name && functions.contains(a.args[0].text) &&
+          !binding(a.args[0].text, a.args[0].loc)) {
+        const auto &function = p.functions[functions.at(a.args[0].text)];
+        if (a.text != "shared" || !function.foreignC || function.variadic ||
+            !ffi::signature(p, function))
+          fail(a.loc, DiagnosticCode::InvalidCAbi,
+               "function addresses require an extern C function and shared address syntax");
+        for (auto id : function.params) {
+          const auto &param = p.symbols[id];
+          if (param.reference || !p.cScalar(param.type))
+            fail(a.loc, DiagnosticCode::InvalidCAbi,
+                 "callbacks cannot use adapted safe-reference parameters");
+        }
+
+        TypeId tid = None;
+        std::vector<TypeId> params;
+        for (auto id : function.params)
+          params.push_back(p.symbols[id].type);
+        for (TypeId id = 0; id < p.types.size(); ++id)
+          if (p.functionPointer(id) && p.types[id].element == function.result &&
+              p.types[id].parameters == params)
+            tid = id;
+        if (tid == None) {
+          tid = p.types.size();
+          hir::Type pointer{hir::Type::FunctionPointer, "extern C fn " + function.name};
+          pointer.element = function.result;
+          pointer.parameters = std::move(params);
+          p.types.push_back(std::move(pointer));
+        }
+        e.kind = H::FunctionAddress;
+        e.type = tid;
+        e.ref = function.id;
+        return e;
+      }
       e.kind = H::Borrow;
       e.args.push_back(expr(a.args.at(0)));
       const auto &source = e.args[0];
       bool projection =
           (source.kind == H::Field && fieldPlace(source) &&
-           (scalar(source.type) || p.ownedFieldType(source.type))) ||
+           (scalar(source.type) || p.ownedFieldType(source.type) ||
+            p.types[source.type].kind == hir::Type::Array)) ||
           (source.kind == H::Index && source.args[0].kind == H::Variable && scalar(source.type));
       if (source.kind != H::Variable && !projection)
         fail(a.loc, DiagnosticCode::InvalidPlace,
              "borrow requires a named owner or a supported direct field/element projection");
-      if (projection && a.text == "unique" && !p.ownedFieldType(source.type))
+      if (projection && a.text == "unique" && !p.ownedFieldType(source.type) &&
+          p.types[source.type].kind != hir::Type::Array)
         fail(a.loc, DiagnosticCode::InvalidPlace,
              "unique projection borrows require exclusive place contracts");
       e.type = e.args[0].type;
       e.borrowKind = a.text == "unique" ? BorrowKind::Unique : BorrowKind::Shared;
       e.region = nextRegion++;
+      return e;
+    }
+    if (a.kind == A::ArrayRepeat) {
+      e.kind = H::ArrayRepeat;
+      TypeId element = expected != None && p.types[expected].kind == hir::Type::Array
+                           ? p.types[expected].element
+                           : None;
+      uint32_t count = 0;
+      if (a.text == "zero") {
+        if (element == None || !scalar(element))
+          fail(a.loc, DiagnosticCode::TypeMismatch,
+               "default array initialization requires scalar elements");
+        hir::Expr zero{};
+        zero.kind = H::Constant;
+        zero.loc = a.loc;
+        zero.type = element;
+        zero.text = "0";
+        e.args = {zero};
+        count = p.types[expected].count;
+      } else {
+        auto value = expr(a.args.at(0), element);
+        if (element != None)
+          coerce(element, value);
+        element = value.type;
+        if (!scalar(element))
+          fail(a.loc, DiagnosticCode::ImplicitCopy,
+               "array repetition requires Copy scalar elements");
+        auto length = expr(a.args.at(1));
+        coerce(USize, length);
+        auto constant = evaluateConstant(length, p.target.pointerWidth);
+        auto size = std::stoull(constant.text);
+        if (!size || size > 65536)
+          fail(a.loc, DiagnosticCode::InvalidIndex, "array size must be in 1..65536");
+        count = size;
+        e.args = {std::move(value)};
+      }
+      e.type = getType({p.types[element].name, static_cast<int>(count), a.loc});
       return e;
     }
     if (a.kind == A::Match) {
@@ -752,15 +1050,19 @@ class Resolver {
     }
     if (a.kind == A::Int) {
       e.kind = H::Constant;
-      size_t suffix = e.text.find_first_not_of("0123456789.-");
-      std::string name = suffix == std::string::npos ? "" : e.text.substr(suffix);
+      auto literal = parseNumericLiteral(e.text, a.loc);
+      auto name = literal.suffix;
+      e.text = literal.value;
       if (!name.empty()) {
         if (!types.contains(name) || !numeric(types[name]))
           fail(a.loc, DiagnosticCode::InvalidLiteral, "unknown numeric suffix");
         e.type = types[name];
-        e.text.resize(suffix);
+
       } else {
-        e.type = e.text.find('.') == std::string::npos ? I32 : F64;
+        e.type = expected != None && numeric(expected) && floating(expected) == literal.floating
+                     ? expected
+                 : literal.floating ? F64
+                                    : I32;
         e.inferredLiteral = true;
       }
       validateLiteral(e.type, e.text, e.loc, p.target.pointerWidth);
@@ -772,7 +1074,7 @@ class Resolver {
       e.text = a.text == "true" ? "1" : "0";
       return e;
     }
-    if (!a.typeArguments.empty()) {
+    if (!a.typeArguments.empty() && a.kind != A::Cast) {
       auto sep = a.text.find("::");
       TypeSyntax owner{a.text.substr(0, sep), 0, a.loc};
       owner.arguments = a.typeArguments;
@@ -863,7 +1165,7 @@ class Resolver {
     if (a.kind == A::Unary && a.text == "-" && a.args[0].kind == A::Int) {
       auto n = a.args[0];
       n.text = "-" + n.text;
-      return expr(n);
+      return expr(n, expected);
     }
     if (a.kind == A::Assign && a.args[0].kind == A::Name) {
       auto found = binding(a.args[0].text, a.args[0].loc);
@@ -872,9 +1174,43 @@ class Resolver {
              "cannot assign to constant `" + a.args[0].text + "`");
     }
     for (auto &x : a.args)
-      e.args.push_back(expr(x));
+      e.args.push_back(expr(x, a.kind == A::Array && expected != None &&
+                                       p.types[expected].kind == hir::Type::Array
+                                   ? p.types[expected].element
+                                   : None));
     switch (a.kind) {
     case A::Cast: {
+      auto target =
+          a.typeArguments.empty() ? getType({a.text, 0, a.loc}) : getType(a.typeArguments[0]);
+      auto &source = e.args[0];
+      bool reference = source.kind == H::Borrow ||
+                       (source.kind == H::Variable && p.symbols[source.ref].reference);
+      if (p.rawPointer(target) || p.rawPointer(source.type)) {
+        requireUnsafe(a.loc, "raw pointer cast");
+        e.type = target;
+        if (reference && p.rawPointer(target)) {
+          if (!p.target.littleEndian || source.type != p.types[target].element ||
+              !scalar(source.type))
+            fail(a.loc, DiagnosticCode::InvalidRawPointer,
+                 "raw address conversion requires a same-type scalar reference on a little-endian "
+                 "target");
+          auto access =
+              source.kind == H::Borrow
+                  ? (source.borrowKind == BorrowKind::Unique ? Access::Unique : Access::Shared)
+                  : p.symbols[source.ref].access;
+          if (p.types[target].mutablePointer && access != Access::Unique)
+            fail(a.loc, DiagnosticCode::InvalidRawPointer,
+                 "mutable pointer requires a unique reference");
+          e.kind = H::RawAddress;
+        } else {
+          if (!((p.rawPointer(target) && (p.rawPointer(source.type) || source.type == USize)) ||
+                (target == USize && p.rawPointer(source.type))))
+            fail(a.loc, DiagnosticCode::InvalidRawPointer,
+                 "pointer casts require a raw pointer or usize");
+          e.kind = H::PointerCast;
+        }
+        return e;
+      }
       if (e.args[0].kind == H::Borrow ||
           (e.args[0].kind == H::Variable && p.symbols[e.args[0].ref].reference))
         fail(a.loc, DiagnosticCode::InvalidCast,
@@ -900,6 +1236,35 @@ class Resolver {
         fail(a.loc, DiagnosticCode::TypeMismatch, "negation requires signed integer or float");
       break;
     case A::Binary: {
+      auto text = [&](TypeId t) {
+        return t == Str || p.types[t].representation == hir::Representation::StringRecord;
+      };
+      if ((a.text == "==" || a.text == "!=") && text(e.args[0].type) && text(e.args[1].type)) {
+        for (auto &operand : e.args) {
+          if (operand.type == Str)
+            continue;
+          H view{};
+          view.kind = H::Method;
+          view.loc = operand.loc;
+          view.type = Str;
+          view.ref = functions.at("String::as_str");
+          view.args = {std::move(operand)};
+          operand = std::move(view);
+        }
+        e.kind = H::Call;
+        e.ref = functions.at("isac_rt_str_equal");
+        e.type = Bool;
+        if (a.text == "!=") {
+          auto equal = std::move(e);
+          e = {};
+          e.kind = H::Unary;
+          e.loc = a.loc;
+          e.text = "!";
+          e.type = Bool;
+          e.args = {std::move(equal)};
+        }
+        return e;
+      }
       e.kind = H::Binary;
       if (e.args[0].inferredLiteral && !e.args[1].inferredLiteral)
         coerce(e.args[1].type, e.args[0]);
@@ -942,6 +1307,19 @@ class Resolver {
     }
     case A::Member: {
       auto &t = p.types[e.args[0].type];
+      if (e.args[0].kind == H::RawPlace && t.kind == hir::Type::ForeignRecord) {
+        auto source = std::move(e.args[0]);
+        auto it = std::find_if(t.fields.begin(), t.fields.end(),
+                               [&](auto &f) { return f.name == a.text; });
+        if (it == t.fields.end())
+          fail(a.loc, DiagnosticCode::UnknownName, "unknown C field `" + a.text + "`");
+        e.kind = H::RawPlace;
+        e.type = it->type;
+        e.args = std::move(source.args);
+        e.fieldPath = std::move(source.fieldPath);
+        e.fieldPath.push_back(it - t.fields.begin());
+        return e;
+      }
       if (t.representation != hir::Representation::Stack && !privileged)
         fail(a.loc, DiagnosticCode::RestrictedOperation,
              "heap representation is private; use its methods");
@@ -964,8 +1342,10 @@ class Resolver {
       if (fixed) {
         if (!integer(e.args[1].type))
           fail(a.loc, DiagnosticCode::TypeMismatch, "array index must be an integer");
-        auto n = std::stoll(e.args[1].text);
-        if (n < 0 || n >= t.count)
+        if (e.args[1].text.starts_with('-'))
+          fail(a.loc, DiagnosticCode::InvalidIndex, "array index out of bounds");
+        auto n = std::stoull(e.args[1].text);
+        if (n >= t.count)
           fail(a.loc, DiagnosticCode::InvalidIndex, "array index out of bounds");
         e.ref = static_cast<uint32_t>(n);
       } else {
@@ -977,6 +1357,15 @@ class Resolver {
       break;
     }
     case A::Assign:
+      if (e.args[0].kind == H::RawPlace) {
+        requireUnsafe(a.loc, "raw pointer write");
+        if (!p.types[e.args[0].args[0].type].mutablePointer || !p.cScalar(e.args[0].type))
+          fail(a.loc, DiagnosticCode::InvalidRawPointer,
+               "raw writes require *mut and a scalar C place");
+        coerce(e.args[0].type, e.args[1]);
+        e.kind = H::Assign;
+        return e;
+      }
       e.kind = H::Assign;
       if (!place(e.args[0]))
         fail(a.loc, DiagnosticCode::TypeMismatch, "assignment requires a place");
@@ -1083,6 +1472,8 @@ class Resolver {
       auto &f = p.functions[e.ref];
       if (!privileged && f.trusted && !f.pub)
         fail(a.loc, DiagnosticCode::RestrictedOperation, "library-internal method is not public");
+      if (f.unsafeFunction)
+        requireUnsafe(a.loc, "call to unsafe method");
       if (f.params.empty() || !p.symbols[f.params[0]].receiver)
         fail(a.loc, DiagnosticCode::TypeMismatch, "method needs self");
       e.kind = H::Method;
@@ -1112,7 +1503,34 @@ class Resolver {
       }
       break;
     }
+    case A::Invoke: {
+      requireUnsafe(a.loc, "C function pointer call");
+      if (e.args.empty() || !p.functionPointer(e.args[0].type))
+        fail(a.loc, DiagnosticCode::InvalidCAbi, "expression is not a C function pointer");
+      const auto &signature = p.types[e.args[0].type];
+      if (e.args.size() != signature.parameters.size() + 1)
+        fail(a.loc, DiagnosticCode::ArgumentMismatch, "wrong number of callback arguments");
+      for (size_t n = 0; n < signature.parameters.size(); ++n)
+        coerce(signature.parameters[n], e.args[n + 1]);
+      e.kind = H::IndirectCall;
+      e.type = signature.element;
+      break;
+    }
     case A::Call: {
+      if (auto local = binding(a.text, a.loc);
+          local && !local->constant && p.functionPointer(p.symbols[local->id].type)) {
+        requireUnsafe(a.loc, "C function pointer call");
+        auto pointer = expr(ast::Expr{A::Name, a.loc, a.text, {}});
+        const auto &signature = p.types[pointer.type];
+        if (e.args.size() != signature.parameters.size())
+          fail(a.loc, DiagnosticCode::ArgumentMismatch, "wrong number of callback arguments");
+        for (size_t n = 0; n < e.args.size(); ++n)
+          coerce(signature.parameters[n], e.args[n]);
+        e.kind = H::IndirectCall;
+        e.type = signature.element;
+        e.args.insert(e.args.begin(), std::move(pointer));
+        break;
+      }
       if (a.text == "print") {
         if (e.args.size() != 1 ||
             (!scalar(e.args[0].type) && e.args[0].type != Str &&
@@ -1136,12 +1554,16 @@ class Resolver {
       if (!functions.contains(a.text))
         fail(a.loc, DiagnosticCode::UnknownName, "unknown function `" + a.text + "`");
       e.ref = functions[a.text];
+      if (p.functions[e.ref].variadic)
+        e.ref = instantiateVariadic(e.ref, e);
       auto &f = p.functions[e.ref];
       if (!f.params.empty() && p.symbols[f.params[0]].receiver)
         fail(a.loc, DiagnosticCode::InvalidPlace, "use receiver.method() for instance methods");
       if (!privileged && f.trusted && !f.pub)
         fail(a.loc, DiagnosticCode::RestrictedOperation,
              "internal runtime function is not part of the public API");
+      if ((f.foreignC && f.external) || f.unsafeFunction)
+        requireUnsafe(a.loc, "call to `" + f.name + "`");
       e.kind = H::Call;
       e.type = f.result;
       args(e, f, 0);
@@ -1223,7 +1645,8 @@ class Resolver {
                "reference binding requires matching & or &mut annotation");
         if (a.annotated)
           coerce(getType(a.annotation, true), borrowed.expr);
-        borrowed.symbol = add(a.name, borrowed.expr.type, a.loc, borrowed.access);
+        borrowed.symbol =
+            add(a.name, borrowed.expr.type, a.loc, borrowed.access, false, false, true);
         p.symbols[borrowed.symbol].reference = true;
         p.symbols[borrowed.symbol].inferredRegion = !keepScope;
         p.symbols[borrowed.symbol].region = borrowed.expr.region;
@@ -1406,6 +1829,14 @@ class Resolver {
                      "pattern type does not match scrutinee");
               rhs.type = tid;
               rhs.text = tid == Bool ? (pat.name == "true" ? "1" : "0") : pat.name;
+              if (pat.kind == ast::Pattern::Integer) {
+                auto literal = parseNumericLiteral(rhs.text, pat.loc);
+                if (literal.floating ||
+                    (!literal.suffix.empty() && types.at(literal.suffix) != tid))
+                  fail(pat.loc, DiagnosticCode::InvalidPattern,
+                       "numeric pattern type does not match scrutinee");
+                rhs.text = literal.value;
+              }
               if (tid != Bool)
                 validateLiteral(tid, rhs.text, pat.loc, p.target.pointerWidth);
               key = rhs.text;
@@ -1642,7 +2073,7 @@ class Resolver {
             throw;
           }
         }
-        s.symbol = add(a.name, s.expr.type, a.loc);
+        s.symbol = add(a.name, s.expr.type, a.loc, Access::Own, false, false, true);
       }
       if (a.kind == ast::Stmt::Return) {
         if (current->returnsReference() &&
@@ -1781,15 +2212,37 @@ public:
       }
       p.protocols.push_back(q);
     }
+    p.library = ast.library;
+    for (const auto &a : ast.foreignTypes) {
+      if (types.contains(a.name) || foreignAliases.contains(a.name))
+        duplicate(a.loc, a.name);
+      if (a.alias)
+        foreignAliases[a.name] = &a;
+      else {
+        types[a.name] = p.types.size();
+        p.types.push_back({hir::Type::ForeignOpaque, a.name});
+        p.types.back().cName = a.cName;
+      }
+    }
     for (auto &a : ast.structs) {
+      if (a.foreignC && !a.parameters.empty())
+        fail(a.loc, DiagnosticCode::InvalidCAbi, "C structs cannot be generic");
       if (!a.parameters.empty())
         continue;
-      if (types.contains(a.name) || protocols.contains(a.name))
+      if (types.contains(a.name) || protocols.contains(a.name) || foreignAliases.contains(a.name))
         duplicate(a.loc, a.name);
       TypeId id = p.types.size();
       types[a.name] = id;
       structSources[id] = &a;
-      p.types.push_back({hir::Type::Structure, a.name, None, None, 0, 1, {}});
+      p.types.push_back({a.foreignC ? hir::Type::ForeignRecord : hir::Type::Structure,
+                         a.name,
+                         None,
+                         None,
+                         0,
+                         1,
+                         {}});
+      p.types.back().cName = a.cName;
+      p.types.back().foreignUnion = a.foreignUnion;
     }
 
     for (auto &a : ast.structs) {
@@ -2064,7 +2517,7 @@ public:
                 (box ? hir::Representation::BoxPointer : hir::Representation::BufferPointer))
           fail(f.loc, DiagnosticCode::RestrictedOperation, "invalid heap constructor intrinsic");
       }
-      if (f.external) {
+      if (f.external && !f.foreignC) {
 
         std::vector<TypeId> signature{f.result};
         for (auto param : f.params)
@@ -2074,7 +2527,7 @@ public:
           fail(f.loc, DiagnosticCode::RestrictedOperation,
                "runtime C ABI signature mismatch for `" + f.name + "`");
       }
-      if (f.external) {
+      if (f.external && !f.foreignC) {
         if (!f.trusted || f.owner != None || p.linear(f.result))
           fail(f.loc, DiagnosticCode::RestrictedOperation, "unsupported C ABI signature");
         for (auto id : f.params)
@@ -2120,6 +2573,7 @@ public:
       activeOwner = source.source->owner;
       current = &f;
       privileged = f.trusted;
+      unsafeDepth = f.unsafeFunction ? 1 : 0;
       if (f.external || !f.intrinsic.empty())
         continue;
       scopes.emplace_back();
@@ -2167,19 +2621,21 @@ public:
         changed |= before != f.effects;
       }
     }
-    auto main = functions.find("main");
-    if (main == functions.end())
-      fail({}, DiagnosticCode::UnknownName, "missing fn main() -> i32");
-    auto &f = p.functions[main->second];
-    if ((f.result != I32 && f.result != Unit) || !f.params.empty())
-      DiagnosticEngine()
-          .error(DiagnosticCode::TypeMismatch, f.loc, "invalid entrypoint signature")
-          .note("supported signatures: fn main() -> i32; fn main()")
-          .help(
-              "use std.env.argument_count() and std.env.argument(index) for command-line arguments")
-          .emit();
-    p.entryPoint = {f.id, f.result == Unit ? hir::MainSignatureKind::NoArgsUnit
-                                           : hir::MainSignatureKind::NoArgsI32};
+    if (!p.library) {
+      auto main = functions.find("main");
+      if (main == functions.end())
+        fail({}, DiagnosticCode::UnknownName, "missing fn main() -> i32");
+      auto &f = p.functions[main->second];
+      if ((f.result != I32 && f.result != Unit) || !f.params.empty() || f.unsafeFunction)
+        DiagnosticEngine()
+            .error(DiagnosticCode::TypeMismatch, f.loc, "invalid entrypoint signature")
+            .note("supported signatures: fn main() -> i32; fn main()")
+            .help("use std.env.argument_count() and std.env.argument(index) for command-line "
+                  "arguments")
+            .emit();
+      p.entryPoint = {f.id, f.result == Unit ? hir::MainSignatureKind::NoArgsUnit
+                                             : hir::MainSignatureKind::NoArgsI32};
+    }
     ExprId nextExpression = 0;
     std::function<void(hir::Expr &)> numberExpression;
     std::function<void(std::vector<hir::Stmt> &)> numberBlock;
@@ -2208,11 +2664,37 @@ public:
 };
 void printS(const std::vector<hir::Stmt> &, std::ostream &, int);
 void printE(const hir::Expr &e, std::ostream &o) {
-  static const char *names[] = {"constant", "symbol",         "binary",          "unary", "call",
-                                "method",   "field",          "index",           "array", "assign",
-                                "move",     "drop",           "construct",       "print", "unit",
-                                "cast",     "enum.construct", "static_str",      "block", "borrow",
-                                "match",    "payload.take",   "reference.store", "length"};
+  static const char *names[] = {"constant",
+                                "symbol",
+                                "binary",
+                                "unary",
+                                "call",
+                                "method",
+                                "field",
+                                "index",
+                                "array",
+                                "assign",
+                                "move",
+                                "drop",
+                                "construct",
+                                "print",
+                                "unit",
+                                "cast",
+                                "enum.construct",
+                                "static_str",
+                                "block",
+                                "borrow",
+                                "match",
+                                "payload.take",
+                                "reference.store",
+                                "length",
+                                "unsafe",
+                                "raw.place",
+                                "raw.address",
+                                "pointer.cast",
+                                "array.repeat",
+                                "function.address",
+                                "foreign.call.indirect"};
   o << names[e.kind] << "<T" << e.type << ">";
   if (e.id != None)
     o << " expr=#E" << e.id;
@@ -2269,9 +2751,13 @@ hir::Program resolve(const ast::Program &a, TargetInfo target) {
   return Resolver(a, std::move(target)).run();
 }
 void printHIR(const hir::Program &p, std::ostream &o) {
-  o << "entrypoint #F" << p.entryPoint.function
-    << (p.entryPoint.signature == hir::MainSignatureKind::NoArgsUnit ? " NoArgsUnit" : " NoArgsI32")
-    << "\n";
+  if (p.library)
+    o << "library (no native entrypoint)\n";
+  else
+    o << "entrypoint #F" << p.entryPoint.function
+      << (p.entryPoint.signature == hir::MainSignatureKind::NoArgsUnit ? " NoArgsUnit"
+                                                                       : " NoArgsI32")
+      << "\n";
   for (const auto &decl : p.genericStructs) {
     o << "generic struct #G" << decl.id << " " << decl.name;
     for (auto parameter : decl.parameters)
@@ -2318,7 +2804,22 @@ void printHIR(const hir::Program &p, std::ostream &o) {
       o << "enum #E" << i << " variant #V" << v.id << " " << v.name
         << " payload=" << v.payload.size() << "\n";
     o << "type #T" << i << " " << p.types[i].name;
-    if (p.dynamicContainer(i))
+    if (p.types[i].kind == hir::Type::ForeignRecord) {
+      auto [size, align] = ffi::layout(p, i);
+      o << (p.types[i].foreignUnion ? " representation=CUnion size="
+                                    : " representation=CRecord size=")
+        << size << " align=" << align << " offsets=bytes";
+    } else if (p.types[i].kind == hir::Type::ForeignOpaque)
+      o << " representation=COpaque unsized";
+    else if (p.rawPointer(i))
+      o << " representation=RawPointer referent=#T" << p.types[i].element
+        << " bits=" << p.target.pointerWidth;
+    else if (p.functionPointer(i)) {
+      o << " representation=CFunctionPointer parameters={";
+      for (auto parameter : p.types[i].parameters)
+        o << " #T" << parameter;
+      o << " } result=#T" << p.types[i].element << " bits=" << p.target.pointerWidth;
+    } else if (p.dynamicContainer(i))
       o << " representation="
         << (p.types[i].representation == hir::Representation::GenericBox ? "BoxStorage"
                                                                          : "VecStorage")
@@ -2340,8 +2841,14 @@ void printHIR(const hir::Program &p, std::ostream &o) {
       << " access=" << accessName(s.access) << "\n";
   for (auto &f : p.functions) {
     o << "fn #F" << f.id << " " << f.name << " -> #T" << f.result;
-    if (f.external)
+    if (f.external || f.foreignC)
       o << " extern=C";
+    if (f.variadic)
+      o << " variadic fixed=" << f.fixedParams;
+    if (f.variadicDeclaration != None)
+      o << " declaration=#F" << f.variadicDeclaration;
+    if (f.unsafeFunction)
+      o << " unsafe";
     o << " kind=Normal effects={" << f.effects.describe() << " }";
     if (!f.intrinsic.empty())
       o << " intrinsic=#" << static_cast<unsigned>(f.intrinsicId) << ":" << f.intrinsic;

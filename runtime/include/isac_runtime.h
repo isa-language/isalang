@@ -29,6 +29,7 @@ void isac_rt_env_init(int32_t argc, char **argv);
 void isac_rt_env_destroy(void);
 size_t isac_rt_env_argument_count(void);
 const IsacStr *isac_rt_env_argument(size_t index);
+int32_t isac_rt_str_equal(const IsacStr *left, const IsacStr *right);
 void isac_rt_stdout_write(const IsacStr *);
 void isac_rt_stderr_write(const IsacStr *);
 void isac_rt_string_fmt_i8(IsacString *, int8_t);
@@ -119,6 +120,7 @@ void isac_rt_print_str(const uint8_t *ptr, size_t len);
 void isac_rt_print_view(const IsacStr *text);
 void isac_rt_panic_str(const IsacStr *text);
 void isac_rt_string_print(const IsacString *text);
+void isac_rt_ffi_utf8(const uint8_t *ptr, size_t len);
 #ifdef __cplusplus
 [[noreturn]]
 #else

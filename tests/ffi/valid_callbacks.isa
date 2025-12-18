@@ -1,0 +1,28 @@
+extern "C" type Callback = extern "C" fn(i32) -> i32;
+extern "C" fn add_one(value: i32) -> i32 {
+  return value + 1;
+}
+extern "C" fn apply(callback: Callback, value: i32) -> i32;
+extern "C" fn get_callback() -> Callback;
+extern "C" fn export_callback() -> Callback {
+  return &add_one;
+}
+extern "C" unsafe fn call_export(callback: Callback, value: i32) -> i32 {
+  return callback(value);
+}
+fn call(callback: Callback, value: i32) -> i32 {
+  unsafe {
+    return callback(value);
+  }
+}
+fn main() {
+  let callback: Callback = &add_one;
+  unsafe {
+    @assert(apply(callback, 41) == 42);
+    @assert(call(callback, 20) == 21);
+    let native = get_callback();
+    @assert(get_callback()(5) == 10);
+    @assert(native(4) == 8);
+    @println("{} {}", callback(41), native(21));
+  }
+}

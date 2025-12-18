@@ -77,7 +77,16 @@ struct Inst {
     FieldStore,
     FieldTake,
     FieldDrop,
-    ContainerCall
+    ContainerCall,
+    UnsafeScope,
+    ForeignCall,
+    RawAddress,
+    PointerCast,
+    RawLoad,
+    RawStore,
+    ArrayRepeat,
+    FunctionAddress,
+    IndirectForeignCall
   } kind;
   Loc loc;
   uint32_t semanticPoint = None;

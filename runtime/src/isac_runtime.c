@@ -256,6 +256,9 @@ static void append_bytes(IsacString *out, const char *ptr, size_t len) {
   IsacStr view = {(const uint8_t *)ptr, len};
   isac_rt_string_push_str(out, &view);
 }
+int32_t isac_rt_str_equal(const IsacStr *left, const IsacStr *right) {
+  return left->len == right->len && (!left->len || memcmp(left->ptr, right->ptr, left->len) == 0);
+}
 void isac_rt_stdout_write(const IsacStr *view) {
   if (view->len && fwrite(view->ptr, 1, view->len, stdout) != view->len)
     isac_rt_panic("stdout write failed");
@@ -412,6 +415,11 @@ static int input_utf8(const uint8_t *p, size_t len) {
   }
   return 1;
 }
+void isac_rt_ffi_utf8(const uint8_t *ptr, size_t len) {
+  if ((len && !ptr) || !input_utf8(ptr, len))
+    isac_rt_panic("invalid UTF-8 at C boundary");
+}
+
 void isac_rt_input_read_String(IsacInputResult *out) {
   *out = (IsacInputResult){0};
   fflush(stdout);

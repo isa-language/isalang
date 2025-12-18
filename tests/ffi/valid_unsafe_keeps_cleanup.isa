@@ -1,0 +1,9 @@
+@import "std.box" fn main() -> i32 {
+  let b = Box<i32>::new(42);
+  unsafe {
+    if true {
+      return 0;
+    }
+  }
+  return 1;
+}

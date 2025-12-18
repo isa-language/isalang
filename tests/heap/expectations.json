@@ -85,7 +85,7 @@
     "allocations": 0
   },
   "invalid_public_ffi": {
-    "code": "E0500",
+    "code": "E0511",
     "stdout": "",
     "allocations": 0
   },

@@ -1,0 +1,13 @@
+struct Machine {
+  pixels: u8[8],
+}
+fn inspect(x: &u8[]) {
+  @println("{}", x[0]);
+}
+fn main() {
+  let m = Machine::new();
+  let r: &u8[] = &m.pixels;
+  let i: usize = 0;
+  m.pixels[i] = 1u8;
+  inspect(r);
+}

@@ -1,0 +1,3 @@
+// error: E6003
+extern "C" fn change(x: i32[]);
+fn main() {}

@@ -38,6 +38,8 @@ struct ExpansionInput {
   ModuleId module;
   bool trusted;
   std::vector<Token> tokens;
+  std::vector<ModuleId> visible = {};
+  std::map<std::string, ModuleId> aliases = {};
 };
 struct Expanded {
   std::vector<ExpansionInput> modules;

@@ -1,0 +1,10 @@
+// error: E0206
+extern "C" fn f(x: i32) -> i32 {
+  return x;
+}
+fn main() {
+  unsafe {
+    let cb = &f;
+    let address = cb as usize;
+  }
+}

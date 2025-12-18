@@ -1,0 +1,18 @@
+extern "C" fn update_pixels(pixels: &mut u8[]);
+struct Machine {
+  prefix: i32,
+  pixels: u8[8],
+  suffix: i32,
+}
+fn update(machine: &mut Machine) {
+  unsafe {
+    update_pixels(&mut machine.pixels);
+  }
+}
+fn main() {
+  let machine = Machine::new();
+  machine.prefix = 11;
+  machine.suffix = 22;
+  update(&mut machine);
+  @println("{} {} {}", machine.prefix, machine.pixels[7], machine.suffix);
+}

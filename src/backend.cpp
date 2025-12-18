@@ -26,8 +26,11 @@
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
+#include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Linker/Linker.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 #include <stdexcept>
 #include <unordered_map>
@@ -55,7 +58,7 @@ ISAC_OP(AllocOp, "isac.alloc", OpTrait::VariadicOperands, OpTrait::OneResult)
 ISAC_OP(LoadOp, "isac.load", OpTrait::VariadicOperands, OpTrait::OneResult)
 ISAC_OP(StoreOp, "isac.store", OpTrait::VariadicOperands, OpTrait::ZeroResults)
 ISAC_OP(AddressOp, "isac.address", OpTrait::OneOperand, OpTrait::OneResult)
-ISAC_OP(AddressViewOp, "isac.address_view", OpTrait::OneOperand, OpTrait::OneResult)
+ISAC_OP(AddressViewOp, "isac.address_view", OpTrait::VariadicOperands, OpTrait::OneResult)
 ISAC_OP(ViewOp, "isac.view", OpTrait::OneOperand, OpTrait::OneResult)
 ISAC_OP(LengthOp, "isac.length", OpTrait::OneOperand, OpTrait::OneResult)
 ISAC_OP(SubviewOp, "isac.subview", OpTrait::NOperands<2>::Impl, OpTrait::OneResult)
@@ -113,11 +116,14 @@ LogicalResult AddressOp::verify() {
 }
 LogicalResult AddressViewOp::verify() {
   auto target = dyn_cast<MemRefType>((*this)->getResult(0).getType());
-  return isa<LLVM::LLVMPointerType>(getOperand().getType()) && target && target.getRank() == 1 &&
-                 target.hasStaticShape() && target.getDimSize(0) > 0 &&
-                 target.getElementType().isInteger(64)
+  return (getNumOperands() == 1 || getNumOperands() == 2) &&
+                 isa<LLVM::LLVMPointerType>((*this)->getOperand(0).getType()) && target &&
+                 target.getRank() == 1 && target.getElementType().isInteger(64) &&
+                 ((getNumOperands() == 1 && target.hasStaticShape() && target.getDimSize(0) > 0) ||
+                  (getNumOperands() == 2 && target.isDynamicDim(0) &&
+                   isa<IntegerType>((*this)->getOperand(1).getType())))
              ? success()
-             : emitOpError("expected a pointer and a fixed-size word view");
+             : emitOpError("expected a pointer and optional dynamic word count");
 }
 LogicalResult LengthOp::verify() {
   return buffer(getOperand().getType()) && isa<IntegerType>((*this)->getResult(0).getType())
@@ -135,7 +141,9 @@ LogicalResult LoadOp::verify() {
   auto t = getOperand(0).getType();
   auto result = (*this)->getResult(0).getType();
   if (isa<LLVM::LLVMPointerType>(t))
-    return result.isInteger(32) ? success() : emitOpError("raw load needs i32 result");
+    return isa<IntegerType, FloatType, LLVM::LLVMPointerType>(result)
+               ? success()
+               : emitOpError("invalid raw load type");
   if (!buffer(t) || cast<MemRefType>(t).getElementType() != result)
     return emitOpError("load element type mismatch");
   if (getNumOperands() == 2)
@@ -148,7 +156,9 @@ LogicalResult StoreOp::verify() {
   auto t = getOperand(0).getType();
   auto value = getOperand(1).getType();
   if (isa<LLVM::LLVMPointerType>(t))
-    return value.isInteger(32) ? success() : emitOpError("raw store needs i32 value");
+    return isa<IntegerType, FloatType, LLVM::LLVMPointerType>(value)
+               ? success()
+               : emitOpError("invalid raw store type");
   if (!buffer(t) || cast<MemRefType>(t).getElementType() != value)
     return emitOpError("store element type mismatch");
   if (getNumOperands() == 3)
@@ -181,7 +191,7 @@ LogicalResult CallOp::verify() {
   auto f = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(*this, ref);
   if (!f || f.getFunctionType().getInputs() != getOperandTypes() ||
       f.getFunctionType().getResults() != getResultTypes())
-    return emitOpError("callee signature mismatch");
+    return emitOpError("callee signature mismatch for ") << ref;
   return success();
 }
 LogicalResult ReturnOp::verify() {
@@ -266,8 +276,11 @@ public:
         descriptor.setAllocatedPtr(b, loc, op->getOperand(0));
         descriptor.setAlignedPtr(b, loc, op->getOperand(0));
         descriptor.setOffset(b, loc, zero);
-        auto count = b.create<LLVM::ConstantOp>(loc, indexType,
-                                                b.getIntegerAttr(indexType, target.getDimSize(0)));
+        Value count = op->getNumOperands() == 2
+                          ? op->getOperand(1)
+                          : b.create<LLVM::ConstantOp>(
+                                 loc, indexType, b.getIntegerAttr(indexType, target.getDimSize(0)))
+                                .getResult();
         descriptor.setSize(b, loc, 0, count);
         descriptor.setStride(b, loc, 0, one);
         replacement =
@@ -372,6 +385,10 @@ class Emitter {
     auto from = v.getType();
     if (from == to)
       return v;
+    if (isa<LLVM::LLVMPointerType>(from))
+      return builder.create<LLVM::PtrToIntOp>(loc, to, v);
+    if (isa<LLVM::LLVMPointerType>(to))
+      return builder.create<LLVM::IntToPtrOp>(loc, to, v);
     if (isa<FloatType>(from) && isa<FloatType>(to)) {
       if (from.getIntOrFloatBitWidth() < to.getIntOrFloatBitWidth())
         return builder.create<arith::ExtFOp>(loc, to, v);
@@ -548,6 +565,10 @@ class Emitter {
     }
     case I::Free:
       op("isac.free", {}, args);
+      break;
+    case I::PointerOffset:
+      result = builder.create<LLVM::GEPOp>(loc, type(i.type), builder.getI8Type(), args[0],
+                                           ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(i.offset)});
       break;
     case I::RawLoad:
       result = op("isac.load", TypeRange{type(i.type)}, args)->getResult(0);
@@ -831,6 +852,18 @@ public:
       auto llvmModule = translateModuleToLLVMIR(*module, llvmContext);
       if (!llvmModule || llvm::verifyModule(*llvmModule, &llvm::errs()))
         throw std::runtime_error("LLVM IR verification failed");
+      if (!input.cBridge.empty()) {
+        llvm::SMDiagnostic diagnostic;
+        auto bridge = llvm::parseAssemblyString(
+            compileCBridge(input.cBridge, input.target, sanitize), diagnostic, llvmContext);
+        if (!bridge) {
+          diagnostic.print("isac C bridge", llvm::errs());
+          throw std::runtime_error("cannot parse Clang C ABI bridge");
+        }
+        if (llvm::Linker::linkModules(*llvmModule, std::move(bridge)) ||
+            llvm::verifyModule(*llvmModule, &llvm::errs()))
+          throw std::runtime_error("C ABI bridge linking failed");
+      }
       if (sanitize)
         for (auto &function : *llvmModule)
           if (!function.isDeclaration())

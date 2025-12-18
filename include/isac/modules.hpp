@@ -5,6 +5,8 @@ namespace isac::modules {
 struct Dependency {
   uint32_t target;
   Loc origin;
+  std::string alias;
+  bool qualifiedOnly = false;
 };
 struct Module {
   uint32_t id;

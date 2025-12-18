@@ -1,0 +1,7 @@
+@import "left.isa" as left
+@import "right.isa" as right
+fn main() {
+  @println("{} {}", left::answer(), right::answer());
+  @left::show();
+  @right::show();
+}

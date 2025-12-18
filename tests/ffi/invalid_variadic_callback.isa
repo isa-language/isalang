@@ -1,0 +1,5 @@
+// error: E0511
+extern "C" fn sum(count: i32,...) -> i32;
+fn main() {
+  let f = &sum;
+}

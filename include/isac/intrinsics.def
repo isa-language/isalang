@@ -107,3 +107,5 @@ ISAC_INTRINSIC(Box_get, "box.generic.get", Memory, ContainerStorage, false, fals
 ISAC_INTRINSIC(Vec_get, "vec.get", Memory, ContainerStorage, false, false)
 ISAC_INTRINSIC(Vec_first, "vec.first", Memory, ContainerStorage, false, false)
 ISAC_INTRINSIC(Vec_last, "vec.last", Memory, ContainerStorage, false, false)
+
+ISAC_INTRINSIC(RT_str_equal, "isac_rt_str_equal", Memory, ExternalCall, false, false)

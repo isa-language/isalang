@@ -1,0 +1,21 @@
+extern "C" type Callback = extern "C" fn(i32) -> i32;
+extern "C" fn increment(value: i32) -> i32 {
+  return value + 1;
+}
+extern "C" fn apply(callback: Callback, value: i32) -> i32;
+extern "C" fn sum(count: i32,...) -> i64;
+extern "C" union Number {
+  integer: u64,
+  decimal: f64,
+  padding: u8[56],
+}
+extern "C" fn number() -> *mut Number;
+fn main() {
+  unsafe {
+    let callback: Callback = &increment;
+    let data = number();
+    (*data).integer = 42u64;
+      @println("callback={}, sum={}, union={}",
+    apply(callback, 41), sum(3, 10u8, 20i16, 12),(*data).integer);
+  }
+}

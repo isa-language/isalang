@@ -1,0 +1,8 @@
+pub fn answer() -> i32 {
+  return 10;
+}
+@macro show {
+  () => {
+    @println("left = {}", answer());
+  }
+}

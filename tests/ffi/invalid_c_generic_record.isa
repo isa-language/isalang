@@ -1,0 +1,5 @@
+// error: E0511
+extern "C" struct Data<T> {
+  value: T,
+}
+fn main() {}

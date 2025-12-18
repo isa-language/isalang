@@ -44,7 +44,8 @@ struct Instruction {
     IndexCheck,
     Subview,
     Address,
-    AddressView
+    AddressView,
+    PointerOffset
   } kind;
   Value result = NoValue;
   Type type;
@@ -73,6 +74,7 @@ struct Erased {
   TargetInfo target;
   std::vector<Function> functions;
   uint32_t values = 0;
+  std::string cBridge;
 };
 struct Terminator {
   enum Kind { Jump, Branch, Return, Unreachable } kind;
@@ -95,6 +97,7 @@ struct LIR {
   TargetInfo target;
   std::vector<CFGFunction> functions;
   uint32_t values = 0;
+  std::string cBridge;
 };
 LIR lower(const Erased &);
 void print(const Erased &, std::ostream &);

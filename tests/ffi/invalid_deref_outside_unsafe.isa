@@ -1,0 +1,8 @@
+// error: E0510
+extern "C" fn pointer() -> *mut i32;
+fn main() {
+  let p = unsafe {
+    pointer()
+  };
+  print(*p);
+}

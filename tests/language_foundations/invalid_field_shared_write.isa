@@ -1,0 +1,7 @@
+struct Machine {
+  pixels: u8[8],
+}
+fn mutate(m: &Machine, i: usize) {
+  m.pixels[i] = 1u8;
+}
+fn main() {}

@@ -1,0 +1,32 @@
+struct Inner {
+  pixels: u8[2048],
+}
+struct Machine {
+  prefix: i32,
+  inner: Inner,
+  suffix: i32,
+}
+fn create() -> Machine {
+  @println("factory");
+  return Machine::new();
+}
+fn fill(m: &mut Machine, i: usize) {
+  m.inner.pixels[i] = 0xffu8;
+}
+fn slices(data: &mut u8[]) {
+  data[0] = 42u8;
+}
+fn main() {
+  let m = Machine::new();
+  let i: usize = 2047;
+  @assert(create().inner.pixels[i] == 0u8);
+  m.prefix = 11;
+  m.suffix = 22;
+  m.inner.pixels[i] = 1u8;
+  fill(&mut m, i);
+  slices(&mut m.inner.pixels);
+  let j: usize = 1;
+  m.inner.pixels[j] = m.inner.pixels[i];
+  @assert(m.inner.pixels[j] == 255u8);
+  @println("{} {} {} {} {}", m.inner.pixels[0], m.inner.pixels[i], m.inner.pixels.len(), m.prefix, m.suffix);
+}

@@ -1,0 +1,10 @@
+extern "C" fn literal(x: str) -> usize;
+extern "C" fn text(x: &String) -> usize;
+fn main() {
+  let s = String::from("Olá");
+  unsafe {
+    print(literal("a\0b"));
+    print(text(&s));
+  }
+  print(s);
+}

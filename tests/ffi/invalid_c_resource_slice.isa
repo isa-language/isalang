@@ -1,0 +1,3 @@
+// error: E0103
+extern "C" fn change(x: &String[]);
+fn main() {}

@@ -1,0 +1,15 @@
+@macro access {
+  ($p: expr) => {
+    unsafe {
+      *$p
+    }
+  }
+}
+fn main() {
+  unsafe {
+    let p = 0usize as * const i32;
+    if false {
+      print(@access(p));
+    }
+  }
+}

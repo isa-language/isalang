@@ -1,4 +1,5 @@
 #include "isac/core.hpp"
+#include "isac/ffi.hpp"
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -39,6 +40,63 @@ void checkTypes(const Program &p) {
         }
       if (!instanceFound)
         badLayout();
+    } else if (type.kind == hir::Type::Array || type.kind == hir::Type::Slice) {
+      layout(type.element);
+      if (!scalar(type.element) || type.protocol != None || !type.fields.empty() ||
+          type.dropGlue != hir::DropGlue::Trivial || type.width != type.count ||
+          (type.kind == hir::Type::Array && (!type.count || type.count > 65536)) ||
+          (type.kind == hir::Type::Slice && type.count != 0))
+        badLayout();
+    } else if (type.kind == hir::Type::ForeignRecord) {
+      if (type.fields.empty() || type.protocol != None || type.dropGlue != hir::DropGlue::Trivial ||
+          type.representation != hir::Representation::Stack)
+        badLayout();
+      uint32_t bytes = 0, alignment = 1;
+      for (const auto &field : type.fields) {
+        const auto &member = p.semantics.types.at(field.type);
+        if (!p.semantics.cScalar(field.type) && member.kind != hir::Type::ForeignRecord &&
+            !(member.kind == hir::Type::Array && p.semantics.cScalar(member.element)))
+          badLayout();
+        layout(field.type);
+        auto [size, align] = ffi::layout(p.semantics, field.type);
+        if (type.foreignUnion) {
+          if (field.offset != 0)
+            badLayout();
+          bytes = std::max(bytes, size);
+        } else {
+          bytes = (bytes + align - 1) / align * align;
+          if (field.offset != bytes)
+            badLayout();
+          bytes += size;
+        }
+        alignment = std::max(alignment, align);
+      }
+      if (type.width != (bytes + alignment - 1) / alignment * alignment)
+        badLayout();
+    } else if (type.kind == hir::Type::FunctionPointer) {
+      if (type.element >= p.semantics.types.size() || type.width != 1 || type.protocol != None ||
+          type.dropGlue != hir::DropGlue::Trivial ||
+          type.representation != hir::Representation::Stack || type.foreignUnion ||
+          !type.fields.empty() || !type.variants.empty() ||
+          (type.element != Unit && !p.semantics.cScalar(type.element)))
+        badLayout();
+      layout(type.element);
+      for (auto parameter : type.parameters) {
+        if (!p.semantics.cScalar(parameter))
+          badLayout();
+        layout(parameter);
+      }
+    } else if (type.kind == hir::Type::RawPointer) {
+      if (type.element >= p.semantics.types.size() || type.width != 1 || type.protocol != None ||
+          type.dropGlue != hir::DropGlue::Trivial ||
+          type.representation != hir::Representation::Stack)
+        badLayout();
+      if (p.semantics.rawPointer(type.element))
+        layout(type.element);
+      auto k = p.semantics.types.at(type.element).kind;
+      if (type.element != Unit && !p.semantics.cScalar(type.element) &&
+          k != hir::Type::ForeignRecord && k != hir::Type::ForeignOpaque)
+        badLayout();
     } else if (type.kind == hir::Type::Structure && !p.semantics.heap(id)) {
       uint32_t width = 0;
       for (const auto &field : type.fields) {
@@ -70,6 +128,14 @@ void checkTypes(const Program &p) {
   };
   for (TypeId id = 0; id < p.semantics.types.size(); ++id)
     layout(id);
+  for (const auto &type : p.semantics.types)
+    if ((type.kind == hir::Type::ForeignRecord || type.kind == hir::Type::ForeignOpaque) &&
+        !ffi::validName(type.cName.empty() ? type.name : type.cName))
+      fail({}, DiagnosticCode::InvalidCore, "invalid C record tag");
+  for (const auto &symbol : p.semantics.symbols)
+    if (p.semantics.types.at(symbol.type).kind == hir::Type::ForeignRecord ||
+        p.semantics.types.at(symbol.type).kind == hir::Type::ForeignOpaque)
+      fail(symbol.loc, DiagnosticCode::InvalidCore, "C types cannot be carried by value");
   for (const auto &type : p.semantics.types) {
     if (type.kind == hir::Type::Enum)
       for (const auto &variant : type.variants)
@@ -85,6 +151,20 @@ void checkTypes(const Program &p) {
          type.representation != hir::Representation::Stack))
       fail({}, DiagnosticCode::InvalidCore, "invalid stored-reference representation");
   for (const auto &function : p.semantics.functions) {
+    if (!function.foreignC && (function.variadic || function.variadicDeclaration != None))
+      fail(function.loc, DiagnosticCode::InvalidCore, "variadics require the public C ABI");
+    if (function.foreignC && !ffi::signature(p.semantics, function))
+      fail(function.loc, DiagnosticCode::InvalidCore, "invalid C ABI contract");
+    if (function.external && !function.foreignC) {
+      std::vector<TypeId> abi{function.result};
+      for (auto id : function.params)
+        abi.push_back(p.semantics.symbols.at(id).type);
+      if (!function.trusted || function.owner != None ||
+          function.intrinsicId == IntrinsicId::None ||
+          findIntrinsic(function.name) != function.intrinsicId ||
+          intrinsicSignature(function.intrinsicId, function.owner, function.result) != abi)
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid trusted runtime ABI contract");
+    }
     bool consuming = function.owner != None &&
                      (p.semantics.types.at(function.owner).kind == hir::Type::Enum ||
                       function.intrinsicId == IntrinsicId::Box_into_inner) &&
@@ -185,13 +265,16 @@ void checkTypes(const Program &p) {
          (!p.semantics.heap(function.result) && p.semantics.needsDrop(function.result))))
       fail(function.loc, DiagnosticCode::InvalidCore, "unsupported result transfer contract");
   }
-  const auto &entry = p.semantics.entryPoint;
-  if (entry.function >= p.semantics.functions.size())
-    fail({}, DiagnosticCode::InvalidCore, "missing semantic entrypoint");
-  const auto &main = p.semantics.functions[entry.function];
-  auto result = entry.signature == hir::MainSignatureKind::NoArgsUnit ? Unit : I32;
-  if (!main.params.empty() || main.result != result || main.external)
-    fail(main.loc, DiagnosticCode::InvalidCore, "entrypoint contract does not match its function");
+  if (!p.semantics.library) {
+    const auto &entry = p.semantics.entryPoint;
+    if (entry.function >= p.semantics.functions.size())
+      fail({}, DiagnosticCode::InvalidCore, "missing semantic entrypoint");
+    const auto &main = p.semantics.functions[entry.function];
+    auto result = entry.signature == hir::MainSignatureKind::NoArgsUnit ? Unit : I32;
+    if (!main.params.empty() || main.result != result || main.external)
+      fail(main.loc, DiagnosticCode::InvalidCore,
+           "entrypoint contract does not match its function");
+  }
   for (const auto &f : p.functions) {
     const auto &signature = p.semantics.functions.at(f.id);
     std::map<ValueId, TypeId> values;
@@ -213,6 +296,7 @@ void checkTypes(const Program &p) {
     }
     for (size_t n = 0; n < f.parameters.size(); ++n)
       values.emplace(f.parameters[n], p.semantics.symbols.at(signature.params.at(n)).type);
+    unsigned unsafeDepth = signature.unsafeFunction ? 1 : 0;
     std::function<void(const std::vector<Inst> &)> block;
     block = [&](const std::vector<Inst> &ops) {
       for (const auto &i : ops) {
@@ -220,9 +304,9 @@ void checkTypes(const Program &p) {
           fail(i.loc, DiagnosticCode::InvalidCore, "invalid typed Core instruction");
         };
         for (auto value : i.args)
-          if (references.contains(value) && i.kind != Inst::Call &&
+          if (references.contains(value) && i.kind != Inst::Call && i.kind != Inst::ForeignCall &&
               i.kind != Inst::ProtocolTransition && i.kind != Inst::Return &&
-              i.kind != Inst::BorrowShared)
+              i.kind != Inst::BorrowShared && i.kind != Inst::RawAddress)
             bad();
         auto expect = [&](TypeId got, TypeId wanted) {
           if (got != wanted)
@@ -242,11 +326,74 @@ void checkTypes(const Program &p) {
           bad();
         if (i.kind == Inst::Loop)
           block(i.condition);
-        if (!i.fieldPath.empty() &&
+        if (i.kind == Inst::UnsafeScope) {
+          if (i.result != None || !i.args.empty() || !i.otherwise.empty() || !i.latch.empty() ||
+              !i.condition.empty())
+            bad();
+          ++unsafeDepth;
+          block(i.body);
+          --unsafeDepth;
+          continue;
+        }
+        if (!i.fieldPath.empty() && i.kind != Inst::RawLoad && i.kind != Inst::RawStore &&
             !(i.placeProjection == Inst::PlaceProjection::Field &&
               (i.kind == Inst::BorrowShared || i.kind == Inst::BorrowUnique)))
           bad();
         switch (i.kind) {
+        case Inst::FunctionAddress:
+          if (!i.args.empty() || i.function >= p.semantics.functions.size() ||
+              !ffi::callbackSignature(p.semantics, i.type, p.semantics.functions[i.function]))
+            bad();
+          break;
+        case Inst::IndirectForeignCall: {
+          if (!unsafeDepth || !p.semantics.functionPointer(arg(0)) || i.offset != arg(0))
+            bad();
+          const auto &target = p.semantics.types[arg(0)];
+          expect(i.type, target.element);
+          if (i.args.size() != target.parameters.size() + 1)
+            bad();
+          for (size_t n = 0; n < target.parameters.size(); ++n)
+            expect(arg(n + 1), target.parameters[n]);
+          break;
+        }
+        case Inst::RawLoad:
+        case Inst::RawStore: {
+          if (!unsafeDepth || !p.semantics.rawPointer(arg(0)) || !p.semantics.cScalar(i.type) ||
+              i.args.size() != (i.kind == Inst::RawLoad ? 1u : 2u))
+            bad();
+          const auto &pointer = p.semantics.types[arg(0)];
+          if (i.kind == Inst::RawStore && !pointer.mutablePointer)
+            bad();
+          auto tid = pointer.element;
+          for (auto index : i.fieldPath) {
+            const auto &record = p.semantics.types.at(tid);
+            if (record.kind != hir::Type::ForeignRecord || index >= record.fields.size())
+              bad();
+            tid = record.fields[index].type;
+          }
+          expect(tid, i.type);
+          if (i.kind == Inst::RawStore)
+            expect(arg(1), i.type);
+          break;
+        }
+        case Inst::PointerCast:
+          if (!unsafeDepth || i.args.size() != 1 ||
+              !((p.semantics.rawPointer(arg(0)) &&
+                 (p.semantics.rawPointer(i.type) || i.type == USize)) ||
+                (arg(0) == USize && p.semantics.rawPointer(i.type))))
+            bad();
+          break;
+        case Inst::RawAddress:
+          if (!unsafeDepth || i.args.size() != 1 || !p.semantics.rawPointer(i.type) ||
+              !scalar(arg(0)) || !p.semantics.target.littleEndian ||
+              !references.contains(i.args[0]) || p.semantics.types[i.type].element != arg(0) ||
+              (p.semantics.types[i.type].mutablePointer &&
+               references.at(i.args[0]) != Access::Unique))
+            bad();
+          break;
+        case Inst::UnsafeScope:
+          bad();
+          break;
         case Inst::StoreReference:
           if (!p.semantics.reference(i.type) || p.semantics.types[i.type].element != slot() ||
               !p.semantics.symbols.at(i.slot).reference ||
@@ -277,8 +424,12 @@ void checkTypes(const Program &p) {
                   bad();
                 type = container.fields[index].type;
               }
-              expect(type, i.type);
-              if (!(scalar(i.type) && i.kind == Inst::BorrowShared) &&
+              const auto &from = p.semantics.types[type];
+              const auto &to = p.semantics.types[i.type];
+              bool array = from.kind == hir::Type::Array && scalar(from.element);
+              if (!(array && to.kind == hir::Type::Slice && from.element == to.element))
+                expect(type, i.type);
+              if (!(scalar(i.type) && i.kind == Inst::BorrowShared) && !array &&
                   !p.semantics.ownedFieldType(i.type))
                 bad();
             } else {
@@ -366,6 +517,12 @@ void checkTypes(const Program &p) {
           expect(slot(), i.type);
           expect(arg(0), i.type);
           break;
+        case Inst::ArrayRepeat:
+          if (p.semantics.types[i.type].kind != hir::Type::Array || i.args.size() != 1 ||
+              !scalar(p.semantics.types[i.type].element))
+            bad();
+          expect(arg(0), p.semantics.types[i.type].element);
+          break;
         case Inst::Array:
           if (p.semantics.types[i.type].kind != hir::Type::Array ||
               i.args.size() != p.semantics.types[i.type].count)
@@ -423,7 +580,9 @@ void checkTypes(const Program &p) {
             if (const auto &f = p.semantics.types[slot()].fields[field];
                 i.offset >= f.offset && i.offset < f.offset + p.semantics.storageWidth(f.type))
               bad();
-          if (i.offset >= p.semantics.types[slot()].width || (!scalar(i.type) && i.type != RawPtr))
+          if (i.offset >= p.semantics.types[slot()].width ||
+              (!scalar(i.type) && i.type != RawPtr && !p.semantics.rawPointer(i.type) &&
+               !p.semantics.functionPointer(i.type)))
             bad();
           if (i.kind == Inst::Write) {
             if (p.semantics.types[slot()].kind == hir::Type::Enum)
@@ -450,6 +609,7 @@ void checkTypes(const Program &p) {
         case Inst::Cast: {
           auto from = arg(0);
           if (!(from == i.type || (from == Char && integer(i.type)) ||
+                (from == Bool && i.type == I32 && i.text == "c.default.promotion") ||
                 (numeric(from) && numeric(i.type) && !(floating(from) && integer(i.type)))))
             bad();
           break;
@@ -503,6 +663,7 @@ void checkTypes(const Program &p) {
           } else
             expect(arg(0), signature.result);
           break;
+        case Inst::ForeignCall:
         case Inst::ContainerCall:
         case Inst::InputCall:
         case Inst::StringCall:
@@ -516,6 +677,9 @@ void checkTypes(const Program &p) {
         case Inst::ProtocolTransition: {
           const auto &target = p.semantics.functions.at(i.function);
           expect(i.type, target.result);
+          if ((i.kind == Inst::ForeignCall) != (target.foreignC && target.external) ||
+              ((target.unsafeFunction || (target.foreignC && target.external)) && !unsafeDepth))
+            bad();
           if (target.returnsReference())
             references[i.result] = Access::Shared;
           if (i.intrinsicId != target.intrinsicId)
@@ -563,12 +727,15 @@ void checkTypes(const Program &p) {
         }
         if (i.result != None && !values.emplace(i.result, i.type).second)
           bad();
-        auto before = values;
-        block(i.body);
-        block(i.latch);
-        values = before;
-        block(i.otherwise);
-        values = std::move(before);
+
+        if (!i.body.empty() || !i.latch.empty() || !i.otherwise.empty()) {
+          auto before = values;
+          block(i.body);
+          block(i.latch);
+          values = before;
+          block(i.otherwise);
+          values = std::move(before);
+        }
       }
     };
     block(f.body);

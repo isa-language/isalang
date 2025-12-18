@@ -22,7 +22,8 @@ add_library(
   src/runtime.cpp
   src/liveness.cpp
   src/regions.cpp
-  src/consteval.cpp)
+  src/consteval.cpp
+  src/ffi.cpp)
 target_include_directories(isac_frontend PUBLIC include)
 set(ISAC_LIBRARY_ROOT
     "/usr/lib/isac/lib"
@@ -34,7 +35,7 @@ add_executable(isac src/main.cpp)
 target_link_libraries(isac PRIVATE isac_frontend)
 
 find_package(MLIR REQUIRED CONFIG HINTS /usr/local/lib/cmake/mlir)
-find_program(ISAC_CLANG NAMES clang REQUIRED)
+find_program(ISAC_CLANG NAMES clang-${LLVM_VERSION_MAJOR} clang REQUIRED)
 add_library(isac_runtime STATIC runtime/src/isac_runtime.c)
 target_include_directories(isac_runtime PUBLIC runtime/include)
 target_compile_options(isac_runtime PRIVATE -Wall -Wextra -Wpedantic)
@@ -69,7 +70,8 @@ target_link_libraries(
           MLIRBuiltinToLLVMIRTranslation
           MLIRLLVMToLLVMIRTranslation
           MLIRTargetLLVMIRExport)
-llvm_map_components_to_libnames(ISAC_LLVM_TARGET_LIBS ${LLVM_TARGETS_TO_BUILD} Passes AsmParser)
+llvm_map_components_to_libnames(ISAC_LLVM_TARGET_LIBS ${LLVM_TARGETS_TO_BUILD} Passes AsmParser
+                                Linker)
 target_link_libraries(isac_backend PRIVATE ${ISAC_LLVM_TARGET_LIBS})
 target_link_libraries(isac PRIVATE isac_backend)
 if(NOT LLVM_ENABLE_RTTI)
@@ -401,5 +403,80 @@ if(BUILD_TESTING)
               $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
     set_tests_properties(imports_sanitized_pipeline container_access_sanitized_pipeline
                          PROPERTIES LABELS "sanitizers")
+  endif()
+endif()
+
+if(BUILD_TESTING)
+  file(GLOB FFI_CASES CONFIGURE_DEPENDS tests/ffi/*.isa)
+  foreach(CASE IN LISTS FFI_CASES)
+    get_filename_component(NAME ${CASE} NAME_WE)
+    add_test(NAME ffi_${NAME}
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_case.py
+                     $<TARGET_FILE:isac> ${CASE})
+  endforeach()
+  add_executable(isac_ffi_boundary_test tests/ffi_boundary.cpp)
+  target_link_libraries(isac_ffi_boundary_test PRIVATE isac_frontend)
+  add_test(NAME ffi_core_boundary COMMAND isac_ffi_boundary_test)
+  add_test(NAME ffi_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(NAME ffi_pipeline_sanitized
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_pipeline.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG} sanitized)
+    set_tests_properties(ffi_pipeline_sanitized PROPERTIES LABELS "sanitizers")
+  endif()
+endif()
+
+if(BUILD_TESTING)
+  add_test(NAME ffi_sequences
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_sequences.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG})
+  add_test(NAME import_namespaces
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/import_namespaces.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(NAME ffi_sequences_sanitized
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_sequences.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG} sanitized)
+    add_test(NAME import_namespaces_sanitized
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/import_namespaces.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(ffi_sequences_sanitized import_namespaces_sanitized
+                         PROPERTIES LABELS "sanitizers")
+  endif()
+endif()
+
+if(BUILD_TESTING)
+  add_test(
+    NAME language_foundations
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/language_foundations/pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME language_foundations_sanitized
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/language_foundations/pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(language_foundations_sanitized PROPERTIES LABELS "sanitizers")
+  endif()
+endif()
+
+if(BUILD_TESTING)
+  add_test(NAME compilation_performance
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/compilation_performance.py $<TARGET_FILE:isac>)
+endif()
+
+if(BUILD_TESTING)
+  add_test(NAME ffi_advanced
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_advanced.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(NAME ffi_advanced_sanitized
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_advanced.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG} sanitized)
+    set_tests_properties(ffi_advanced_sanitized PROPERTIES LABELS "sanitizers")
   endif()
 endif()

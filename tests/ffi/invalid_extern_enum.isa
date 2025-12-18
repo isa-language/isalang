@@ -1,0 +1,6 @@
+// error: E0511
+extern "C" enum State {
+  A,
+  B,
+}
+fn main() {}

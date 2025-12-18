@@ -1,0 +1,11 @@
+extern "C" type Handle;
+extern "C" type Size = usize;
+extern "C" fn query(h: *const Handle) -> Size;
+fn main() {
+  unsafe {
+    let p = 0usize as * const Handle;
+    if false {
+      print(query(p));
+    }
+  }
+}

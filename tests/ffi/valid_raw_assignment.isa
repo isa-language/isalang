@@ -1,0 +1,8 @@
+fn main() {
+  let x = 1;
+  unsafe {
+    let p = &mut x as * mut i32;
+    *p = 42;
+  }
+  print(x);
+}

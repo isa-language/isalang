@@ -1,0 +1,4 @@
+// error: E0511
+extern "C" type Handle;
+extern "C" fn read(x: Handle);
+fn main() {}

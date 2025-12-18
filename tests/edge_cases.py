@@ -9,7 +9,8 @@ cases = [
     ("impl Missing {} fn main() -> i32 { return 0; }", "E0102"),
     ("fn main() -> i32 { /*", "E0001"),
     ("fn main() -> i32 { return 0;", "E0002"),
-    ("fn main() -> i32 { let a = 1; let a = 2; return 0; }", "E0101"),
+    ("fn main() -> i32 { let a = 1; let a = 2; return 0; }", None),
+    ("fn duplicated(a: i32, a: i32) {} fn main() {}", "E0101"),
     ("fn main() -> i32 { let a = 2147483648; return 0; }", "E0202"),
     (
         "protocol P { initial A; state A { next(shared self) -> B; } state B {} } fn main() -> i32 { return 0; }",

@@ -1,0 +1,19 @@
+const FONT: u16 = 0xF0_90;
+const N: usize = 0b100;
+fn main() {
+  let a: u32 = 0xFFFF_FFFF;
+  let b = 0Xffff_ffff_ffff_ffffu64;
+  let min = -0x80i8;
+  let octal = 0o755;
+    let bytes: u8[0x4] = [0u8;
+  N];
+  let font: u8[4] = [0xF0, 0x90, 0x90, 0xF0];
+  let negative: i64 = -0x8000_0001;
+  @assert(font[0] == 0xf0u8 && negative == -2147483649i64);
+  let kind = match FONT {
+    0xf090u16 => 1,
+    _ => 0,
+  };
+  @println("{} {} {} {} {} {} {}", a, b, min, octal, 1_024, 3.1_25f32, kind);
+  @println("{} {}", bytes.len(), 0B1010u8);
+}

@@ -1,0 +1,7 @@
+// error: E0512
+fn main() {
+  unsafe {
+    let p = 0usize as * const i32;
+    *p = 3;
+  }
+}

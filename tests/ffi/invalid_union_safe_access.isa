@@ -1,0 +1,12 @@
+// error: E0510
+extern "C" union Number {
+  integer: i32,
+  decimal: f32,
+}
+extern "C" fn get() -> *mut Number;
+fn main() {
+  let p = unsafe {
+    get()
+  };
+  print((*p).integer);
+}

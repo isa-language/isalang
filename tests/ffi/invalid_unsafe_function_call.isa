@@ -1,0 +1,10 @@
+// error: E0510
+unsafe fn read(p: *const i32) -> i32 {
+  return *p;
+}
+fn main() {
+  let p = unsafe {
+    0usize as * const i32
+  };
+  print(read(p));
+}

@@ -18,3 +18,5 @@ extern "C" fn isac_rt_print_bool(value: bool);
 
 extern "C" fn isac_rt_stdout_write(data: str);
 extern "C" fn isac_rt_stderr_write(data: str);
+
+extern "C" fn isac_rt_str_equal(left: str, right: str) -> bool;

@@ -11,6 +11,7 @@ class Builder {
   std::vector<SymbolId> temporaries;
   std::map<ValueId, SymbolId> referenceResults;
   bool referenceReturn = false;
+  RegionId nextRegion = 0;
   Inst make(Inst::Kind k, Loc l, TypeId t = Unit) {
     Inst i{};
     i.kind = k;
@@ -44,7 +45,7 @@ class Builder {
           binding.fieldPath.insert(binding.fieldPath.begin(), field - fields.begin());
           part = &part->args[0];
         }
-        binding.slot = part->ref;
+        binding.slot = receiver(*part);
         binding.fieldIndex = binding.fieldPath.back();
       } else {
         binding.placeProjection = Inst::PlaceProjection::Index;
@@ -58,7 +59,17 @@ class Builder {
     } else
       binding.slot = source.ref;
   }
-  SymbolId receiver(const hir::Expr &e) {
+  SymbolId receiver(const hir::Expr &e, Access access = Access::Shared) {
+    if (e.kind == hir::Expr::Field && p.semantics.types[e.type].kind == hir::Type::Array) {
+      hir::Expr borrow{};
+      borrow.kind = hir::Expr::Borrow;
+      borrow.loc = e.loc;
+      borrow.type = e.type;
+      borrow.args = {e};
+      borrow.borrowKind = access == Access::Unique ? BorrowKind::Unique : BorrowKind::Shared;
+      borrow.region = nextRegion++;
+      return receiver(borrow);
+    }
     if (e.kind == hir::Expr::Variable)
       return e.ref;
     auto value = e.kind == hir::Expr::Borrow ? None : expr(e);
@@ -92,6 +103,17 @@ class Builder {
     temporaries.push_back(id);
     return id;
   }
+  void endTemporaryReferences(size_t start, Loc loc) {
+    for (size_t n = temporaries.size(); n > start; --n) {
+      auto id = temporaries[n - 1];
+      if (!p.semantics.symbols[id].reference)
+        continue;
+      auto end = make(Inst::EndBorrow, loc);
+      end.slot = id;
+      emit(end, false);
+      temporaries.erase(temporaries.begin() + n - 1);
+    }
+  }
   void endTemporaries(Loc loc) {
     for (auto it = temporaries.rbegin(); it != temporaries.rend(); ++it) {
       if (p.semantics.symbols[*it].reference) {
@@ -121,6 +143,38 @@ class Builder {
     i.text = e.text;
     i.operatorClass = e.operatorClass;
     switch (e.kind) {
+    case E::Unsafe: {
+      i.kind = Inst::UnsafeScope;
+      auto *saved = out;
+      out = &i.body;
+      auto result = expr(e.args.at(0));
+      out = saved;
+      i.type = Unit;
+      i.quantity = Quantity::Omega;
+      emit(i, false);
+      return result;
+    }
+    case E::RawPlace:
+      if (!p.semantics.cScalar(e.type))
+        fail(e.loc, DiagnosticCode::InvalidCAbi, "C records cannot be loaded by value");
+      i.kind = Inst::RawLoad;
+      i.args = {expr(e.args.at(0))};
+      i.fieldPath = e.fieldPath;
+      return emit(i);
+    case E::RawAddress: {
+      auto argument = make(Inst::ReferenceArgument, e.loc, e.args.at(0).type);
+      argument.slot = receiver(e.args.at(0));
+      argument.access = p.semantics.types[e.type].mutablePointer ? Access::Unique : Access::Shared;
+      auto value = emit(argument);
+      referenceResults[value] = argument.slot;
+      i.kind = Inst::RawAddress;
+      i.args = {value};
+      return emit(i);
+    }
+    case E::PointerCast:
+      i.kind = Inst::PointerCast;
+      i.args = {expr(e.args.at(0))};
+      return emit(i);
     case E::Match:
     case E::Block: {
       auto instructions = block(e.body);
@@ -233,6 +287,16 @@ class Builder {
         i.args.push_back(expr(a));
       return emit(i);
     case E::Assign: {
+      if (e.args[0].kind == E::RawPlace) {
+        const auto &target = e.args[0];
+        i.kind = Inst::RawStore;
+        i.type = target.type;
+        i.quantity = Quantity::Omega;
+        i.fieldPath = target.fieldPath;
+        i.args = {expr(target.args.at(0)), expr(e.args.at(1))};
+        emit(i, false);
+        return None;
+      }
       const auto &target = e.args.at(0);
       if (target.kind == E::Field && p.semantics.ownedFieldType(target.type)) {
         i.kind = Inst::FieldStore;
@@ -249,10 +313,28 @@ class Builder {
       }
       if (target.kind == E::Index && target.ref == None) {
         i.kind = Inst::Write;
-        i.slot = receiver(target.args.at(0));
-        auto index = expr(target.args.at(1));
+        auto container = target.args.at(0);
+        if (container.kind == E::Field) {
+
+          auto *root = &container;
+          while (root->kind == E::Field)
+            root = &root->args.at(0);
+          auto owner = receiver(*root);
+          root->kind = E::Variable;
+          root->ref = owner;
+          root->args.clear();
+          auto start = temporaries.size();
+          auto index = expr(target.args.at(1));
+          auto value = expr(e.args.at(1));
+          endTemporaryReferences(start, e.loc);
+          i.slot = receiver(container, Access::Unique);
+          i.args = {value, index};
+        } else {
+          i.slot = receiver(container, Access::Unique);
+          auto index = expr(target.args.at(1));
+          i.args = {expr(e.args.at(1)), index};
+        }
         i.type = target.type;
-        i.args = {expr(e.args.at(1)), index};
         emit(i, false);
         return None;
       }
@@ -279,8 +361,9 @@ class Builder {
     case E::Construct:
       i.kind = Inst::Create;
       return emit(i);
+    case E::ArrayRepeat:
     case E::Array:
-      i.kind = Inst::Array;
+      i.kind = e.kind == E::ArrayRepeat ? Inst::ArrayRepeat : Inst::Array;
       for (auto &a : e.args)
         i.args.push_back(expr(a));
       return emit(i);
@@ -319,15 +402,26 @@ class Builder {
       i.args = {expr(e.args[0])};
       emit(i, false);
       return None;
+    case E::FunctionAddress:
+      i.kind = Inst::FunctionAddress;
+      i.function = e.ref;
+      return emit(i);
+    case E::IndirectCall:
+      i.kind = Inst::IndirectForeignCall;
+      i.offset = e.args[0].type;
+      for (const auto &argument : e.args)
+        i.args.push_back(expr(argument));
+      return emit(i, e.type != Unit);
     case E::Call:
     case E::Method: {
+      size_t temporaryStart = temporaries.size();
       i.kind = Inst::Call;
       i.function = e.ref;
       auto &f = p.semantics.functions[e.ref];
       i.intrinsicId = f.intrinsicId;
       size_t start = 0;
       if (e.kind == E::Method) {
-        i.slot = receiver(e.args[0]);
+        i.slot = receiver(e.args[0], f.access);
         i.access = f.access;
         start = 1;
         if (!f.operations.empty()) {
@@ -339,7 +433,7 @@ class Builder {
       for (size_t n = start; n < e.args.size(); ++n) {
         if (p.semantics.symbols[f.params[n]].reference) {
           auto argument = make(Inst::ReferenceArgument, e.args[n].loc, e.args[n].type);
-          argument.slot = receiver(e.args[n]);
+          argument.slot = receiver(e.args[n], p.semantics.symbols[f.params[n]].access);
           argument.access = p.semantics.symbols[f.params[n]].access;
           auto value = emit(argument);
           referenceResults[value] = argument.slot;
@@ -359,7 +453,9 @@ class Builder {
                      : Inst::HeapAlloc;
         i.text = f.intrinsic;
       }
-      if (f.external) {
+      if (f.foreignC && f.external)
+        i.kind = Inst::ForeignCall;
+      if (f.external && !f.foreignC) {
         if (f.name == "isac_rt_alloc" || f.name == "isac_rt_alloc_zeroed")
           i.kind = Inst::HeapAlloc;
         else if (f.name == "isac_rt_free")
@@ -381,6 +477,10 @@ class Builder {
         referenceResults[result] = i.slot != None && index == 0
                                        ? i.slot
                                        : referenceResults.at(i.args.at(index - (i.slot != None)));
+      }
+
+      if (!f.returnsReference() && !p.semantics.containsReferences(e.type) && e.type != Str) {
+        endTemporaryReferences(temporaryStart, e.loc);
       }
       return result;
     }
@@ -542,6 +642,31 @@ class Builder {
 public:
   explicit Builder(hir::Program h) {
     p.semantics = std::move(h);
+    for (const auto &s : p.semantics.symbols)
+      if (s.region != None)
+        nextRegion = std::max(nextRegion, s.region + 1);
+    std::function<void(const hir::Expr &)> expression;
+    std::function<void(const std::vector<hir::Stmt> &)> statements;
+    expression = [&](const hir::Expr &e) {
+      if (e.region != None)
+        nextRegion = std::max(nextRegion, e.region + 1);
+      for (const auto &a : e.args)
+        expression(a);
+      statements(e.body);
+    };
+    statements = [&](const auto &ss) {
+      for (const auto &s : ss) {
+        expression(s.expr);
+        statements(s.body);
+        statements(s.otherwise);
+        statements(s.latch);
+      }
+    };
+    for (const auto &f : p.semantics.functions) {
+      if (f.resultRegion != None)
+        nextRegion = std::max(nextRegion, f.resultRegion + 1);
+      statements(f.body);
+    }
   }
   Program run() {
     for (auto &f : p.semantics.functions) {
@@ -1287,6 +1412,16 @@ class Checker {
         i.from = i.to = None;
       }
       switch (i.kind) {
+      case Inst::UnsafeScope:
+        block(i.body, c);
+        break;
+      case Inst::RawAddress:
+      case Inst::FunctionAddress:
+      case Inst::IndirectForeignCall:
+      case Inst::PointerCast:
+      case Inst::RawLoad:
+      case Inst::RawStore:
+        break;
       case Inst::Constant:
         if (i.type == I64)
           c.constants[i.result] = std::stoll(i.text);
@@ -1429,6 +1564,7 @@ class Checker {
         break;
       }
       case Inst::Create:
+      case Inst::ArrayRepeat:
       case Inst::Array:
         c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
         c.values[i.result].absentFields = p.semantics.ownedFields(i.type);
@@ -1697,6 +1833,7 @@ class Checker {
       case Inst::EndBorrow:
         endBorrow(c, i.slot);
         break;
+      case Inst::ForeignCall:
       case Inst::ContainerCall:
       case Inst::Call:
       case Inst::ProtocolTransition: {
@@ -2044,7 +2181,16 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                                 "field.store",
                                 "field.take",
                                 "field.drop",
-                                "container.call"};
+                                "container.call",
+                                "unsafe.scope",
+                                "foreign.call",
+                                "raw.address",
+                                "pointer.cast",
+                                "raw.load",
+                                "raw.store",
+                                "array.repeat",
+                                "function.address",
+                                "foreign.call.indirect"};
   for (auto &i : ops) {
     if (i.kind == Inst::Loop)
       dump(i.condition, p, o, d + 2);

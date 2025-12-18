@@ -1,0 +1,7 @@
+// error: E0201
+extern "C" fn sum(count: i32,...) -> i32;
+fn main() {
+  unsafe {
+    sum();
+  }
+}

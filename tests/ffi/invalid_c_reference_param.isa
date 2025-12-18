@@ -1,0 +1,6 @@
+// error: E0511
+extern "C" struct Data {
+  value: i32,
+}
+extern "C" fn read(x: &Data);
+fn main() {}

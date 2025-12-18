@@ -1,0 +1,10 @@
+// error: E0102
+extern "C" struct Data {
+  x: i32,
+}
+fn main() {
+  unsafe {
+    let p = 0usize as * const Data;
+    print((*p).missing);
+  }
+}

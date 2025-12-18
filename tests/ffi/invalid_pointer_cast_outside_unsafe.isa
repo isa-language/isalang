@@ -1,0 +1,4 @@
+// error: E0510
+fn main() {
+  let p = 0usize as * mut i32;
+}

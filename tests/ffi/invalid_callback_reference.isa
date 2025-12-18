@@ -1,0 +1,4 @@
+// error: E0511
+extern "C" type Callback = extern "C" fn(&i32) -> i32;
+extern "C" fn apply(cb: Callback);
+fn main() {}

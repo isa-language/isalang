@@ -1,4 +1,5 @@
 #include "isac/erasure.hpp"
+#include "isac/ffi.hpp"
 #include <algorithm>
 #include <unordered_map>
 namespace isac {
@@ -7,6 +8,7 @@ class Eraser {
   const core::Program &core;
   runtime::Erased p;
   std::unordered_map<ValueId, runtime::Value> values;
+  std::unordered_map<ValueId, TypeId> coreTypes;
   std::unordered_map<SymbolId, runtime::Value> slots;
   std::unordered_map<runtime::Value, runtime::Type> runtimeTypes;
   runtime::Value returnStorage = runtime::NoValue;
@@ -19,7 +21,8 @@ class Eraser {
       return {T::Void, 0};
     if (t == USize)
       return {T::Size, 1, core.semantics.target.pointerWidth, false};
-    if (t == RawPtr || t == Str || core.semantics.heap(t) || core.semantics.reference(t))
+    if (core.semantics.rawPointer(t) || core.semantics.functionPointer(t) || t == RawPtr ||
+        t == Str || core.semantics.heap(t) || core.semantics.reference(t))
       return {T::Pointer, 1};
     return core.semantics.linear(t)
                ? T{T::Buffer, core.semantics.types[t].width, 64}
@@ -79,6 +82,36 @@ class Eraser {
     i.args = {buffer, v};
     i.offset = offset;
     emit(out, i, false);
+  }
+  void fill(std::vector<I> &out, runtime::Value buffer, runtime::Value value, uint32_t count) {
+    I alloc{};
+    alloc.kind = I::Alloc;
+    alloc.type = {T::Buffer, 1, 64};
+    auto counter = emit(out, alloc);
+    store(out, counter, constant(out, 0, true));
+    I loop{};
+    loop.kind = I::Loop;
+    loop.loop = cleanupLoop--;
+    T size{T::Size, 1, core.semantics.target.pointerWidth};
+    auto index = load(loop.condition, counter, 0, size);
+    I compare{};
+    compare.kind = I::Binary;
+    compare.callee = "<";
+    compare.unsignedOperands = true;
+    compare.type = {T::Scalar, 1, 32};
+    compare.args = {index, constant(loop.condition, count, true)};
+    loop.args = {emit(loop.condition, compare)};
+    I write{};
+    write.kind = I::Store;
+    write.args = {buffer, value, index};
+    emit(loop.body, write, false);
+    I next{};
+    next.kind = I::Binary;
+    next.callee = "+";
+    next.type = size;
+    next.args = {index, constant(loop.latch, 1, true)};
+    store(loop.latch, counter, emit(loop.latch, next));
+    emit(out, loop, false);
   }
   runtime::Value load(std::vector<I> &out, runtime::Value buffer, uint32_t offset, T t) {
     I i{};
@@ -444,6 +477,127 @@ class Eraser {
       if (c.freeTemporary)
         destroy(out, c.type, i.args.at(0), {}, c.temporaryAbsentFields, c.temporaryFieldPlan);
       switch (c.kind) {
+      case C::UnsafeScope: {
+        auto body = block(c.body);
+        out.insert(out.end(), body.begin(), body.end());
+        break;
+      }
+      case C::RawAddress:
+        i.kind = I::Address;
+        values[c.result] = emit(out, i);
+        break;
+      case C::PointerCast:
+        i.kind = I::Cast;
+        i.unsignedOperands = true;
+        values[c.result] = emit(out, i);
+        break;
+      case C::RawLoad:
+      case C::RawStore: {
+        auto pointer = i.args[0];
+
+        uint32_t bytes = 0;
+        if (!c.fieldPath.empty()) {
+          auto record = core.semantics.types.at(coreTypes.at(c.args[0])).element;
+          for (auto field : c.fieldPath) {
+            const auto &member = core.semantics.types.at(record).fields.at(field);
+            bytes += member.offset;
+            record = member.type;
+          }
+        }
+        if (bytes) {
+          I offset{};
+          offset.kind = I::PointerOffset;
+          offset.type = {T::Pointer, 1};
+          offset.args = {pointer};
+          offset.offset = bytes;
+          pointer = emit(out, offset);
+        }
+        i.args[0] = pointer;
+        if (c.kind == C::RawLoad) {
+          i.kind = I::RawLoad;
+          if (c.type == Bool)
+            i.type = {T::Scalar, 1, 8, false};
+          auto value = emit(out, i);
+          if (c.type == Bool) {
+            I widen{};
+            widen.kind = I::Cast;
+            widen.type = type(Bool);
+            widen.unsignedOperands = true;
+            widen.args = {value};
+            value = emit(out, widen);
+          }
+          values[c.result] = value;
+        } else {
+          i.kind = I::RawStore;
+          if (c.type == Bool) {
+            I narrow{};
+            narrow.kind = I::Cast;
+            narrow.type = {T::Scalar, 1, 8, false};
+            narrow.args = {i.args[1]};
+            i.args[1] = emit(out, narrow);
+          }
+          emit(out, i, false);
+        }
+        break;
+      }
+      case C::FunctionAddress:
+      case C::IndirectForeignCall:
+      case C::ForeignCall: {
+        bool indirect = c.kind == C::IndirectForeignCall;
+        bool functionAddress = c.kind == C::FunctionAddress;
+        I alloc{};
+        alloc.kind = I::Alloc;
+        alloc.type = {T::Buffer,
+                      indirect          ? static_cast<uint32_t>(i.args.size())
+                      : functionAddress ? 1u
+                                        : ffi::parameterCells(core.semantics,
+                                                              core.semantics.functions[c.function]),
+                      64};
+        auto input = emit(out, alloc);
+        uint32_t cell = 0;
+        for (uint32_t n = 0; n < i.args.size(); ++n) {
+          auto kind =
+              indirect
+                  ? ffi::ParameterKind::Scalar
+                  : ffi::parameterKind(
+                        core.semantics,
+                        core.semantics.symbols[core.semantics.functions[c.function].params[n]]);
+          auto value = i.args[n];
+          if (kind != ffi::ParameterKind::Scalar && kind != ffi::ParameterKind::Text) {
+            I address{};
+            address.kind = I::Address;
+            address.type = {T::Pointer, 1};
+            address.args = {value};
+            value = emit(out, address);
+          }
+          store(out, input, value, cell++);
+          if (kind == ffi::ParameterKind::Slice) {
+            I length{};
+            length.kind = I::Length;
+            length.type = type(USize);
+            length.args = {i.args[n]};
+            store(out, input, emit(out, length), cell++);
+          }
+        }
+        alloc.type.width = 1;
+        auto output = emit(out, alloc);
+        auto address = [&](runtime::Value v) {
+          I a{};
+          a.kind = I::Address;
+          a.type = {T::Pointer, 1};
+          a.args = {v};
+          return emit(out, a);
+        };
+        auto outPtr = address(output), inPtr = address(input);
+        abi(out,
+            indirect          ? ffi::indirectName(c.offset)
+            : functionAddress ? ffi::addressName(c.function)
+                              : ffi::importName(c.function),
+            {T::Void, 0}, {outPtr, inPtr});
+        if (c.type != Unit)
+          values[c.result] = load(out, output, 0, type(c.type));
+        break;
+      }
       case C::StoreReference:
         if (!core.semantics.heap(core.semantics.types[c.type].element)) {
           i.kind = I::Address;
@@ -600,6 +754,15 @@ class Eraser {
         }
         break;
       }
+      case C::ArrayRepeat: {
+        i.kind = I::Alloc;
+        i.args.clear();
+        auto buffer = emit(out, i);
+        values[c.result] = buffer;
+
+        fill(out, buffer, values.at(c.args.at(0)), core.semantics.types[c.type].count);
+        break;
+      }
       case C::Create:
       case C::Array: {
         i.kind = I::Alloc;
@@ -607,8 +770,11 @@ class Eraser {
         auto v = emit(out, i);
         values[c.result] = v;
         auto zero = c.kind == C::Create ? constant(out, 0) : runtime::NoValue;
-        for (uint32_t n = 0; n < i.type.width; ++n)
-          store(out, v, c.kind == C::Create ? zero : values.at(c.args[n]), n);
+        if (c.kind == C::Create && i.type.width >= 16)
+          fill(out, v, zero, i.type.width);
+        else
+          for (uint32_t n = 0; n < i.type.width; ++n)
+            store(out, v, c.kind == C::Create ? zero : values.at(c.args[n]), n);
         break;
       }
       case C::Bind:
@@ -682,6 +848,7 @@ class Eraser {
         if (c.placeProjection != C::PlaceProjection::None) {
           auto source = slots.at(c.slot);
           runtime::Value index;
+          TypeId projectedType = c.type;
           if (c.placeProjection == C::PlaceProjection::Field) {
             auto sourceType = core.semantics.symbols[c.slot].type;
             uint32_t offset = 0;
@@ -694,6 +861,7 @@ class Eraser {
               slots[c.offset] = load(out, source, offset, type(c.type));
               break;
             }
+            projectedType = sourceType;
             index = constant(out, offset, true);
           } else {
             index = i.args.at(0);
@@ -703,9 +871,11 @@ class Eraser {
             emit(out, check, false);
           }
           i.kind = I::Subview;
-          i.type = referenceType(c.type);
+          i.type = referenceType(projectedType);
           i.args = {source, index};
-          slots[c.offset] = emit(out, i);
+          auto projection = emit(out, i);
+          slots[c.offset] =
+              projectedType == c.type ? projection : referenceView(out, projection, c.type);
         } else if (!c.args.empty())
           slots[c.offset] = values.at(c.args[0]);
         else if (c.projection) {
@@ -858,17 +1028,52 @@ class Eraser {
 public:
   explicit Eraser(const core::Verified &v) : core(v.get()) {}
   runtime::Erased run() {
+    auto collect = [&](auto &&self, const std::vector<core::Inst> &ops) -> void {
+      for (const auto &op : ops) {
+        if (op.result != None)
+          coreTypes.emplace(op.result, op.type);
+        for (const auto *child : {&op.body, &op.otherwise, &op.condition, &op.latch})
+          self(self, *child);
+      }
+    };
+    for (const auto &fn : core.functions) {
+      const auto &signature = core.semantics.functions.at(fn.id);
+      for (size_t n = 0; n < fn.parameters.size(); ++n)
+        coreTypes.emplace(fn.parameters[n], core.semantics.symbols[signature.params[n]].type);
+      collect(collect, fn.body);
+    }
     p.target = core.semantics.target;
+    p.cBridge = ffi::bridge(core.semantics);
     for (const auto &hf : core.semantics.functions)
       if (hf.external) {
         runtime::Function f;
         f.external = true;
-        f.name = hf.name;
-        f.result = type(hf.result);
-        for (auto sid : hf.params)
-          f.params.push_back({p.values++, type(core.semantics.symbols[sid].type)});
+        f.name = hf.foreignC ? ffi::importName(hf.id) : hf.name;
+        f.result = hf.foreignC ? T{T::Void, 0} : type(hf.result);
+        if (hf.foreignC)
+          f.params = {{p.values++, {T::Pointer, 1}}, {p.values++, {T::Pointer, 1}}};
+        if (!hf.foreignC)
+          for (auto sid : hf.params)
+            f.params.push_back({p.values++, type(core.semantics.symbols[sid].type)});
         p.functions.push_back(std::move(f));
       }
+    auto declareAdapter = [&](const std::string &name) {
+      runtime::Function function;
+      function.external = true;
+      function.name = name;
+      function.result = {T::Void, 0};
+      function.params = {{p.values++, {T::Pointer, 1}}, {p.values++, {T::Pointer, 1}}};
+      p.functions.push_back(std::move(function));
+    };
+    for (TypeId id = 0; id < core.semantics.types.size(); ++id)
+      if (core.semantics.functionPointer(id))
+        declareAdapter(ffi::indirectName(id));
+    for (const auto &function : core.semantics.functions)
+      for (TypeId id = 0; id < core.semantics.types.size(); ++id)
+        if (ffi::callbackSignature(core.semantics, id, function)) {
+          declareAdapter(ffi::addressName(function.id));
+          break;
+        }
     for (auto &cf : core.functions) {
       values.clear();
       slots.clear();
@@ -897,7 +1102,9 @@ public:
         auto v = p.values++;
         f.params.push_back({v, t});
         runtimeTypes[v] = t;
-        if (t.kind == T::Buffer || t.kind == T::Pointer)
+        if (t.kind == T::Buffer ||
+            (t.kind == T::Pointer && !core.semantics.rawPointer(core.semantics.symbols[sid].type) &&
+             !core.semantics.functionPointer(core.semantics.symbols[sid].type)))
           slots[sid] = v;
         else {
           I alloc{};
@@ -917,6 +1124,50 @@ public:
       }
       p.functions.push_back(std::move(f));
     }
+    for (const auto &hf : core.semantics.functions) {
+      if (!hf.foreignC || hf.external)
+        continue;
+      runtime::Function adapter;
+      adapter.name = ffi::exportName(hf.id);
+      adapter.result = {T::Void, 0};
+      adapter.params = {{p.values++, {T::Pointer, 1}}, {p.values++, {T::Pointer, 1}}};
+      I view{};
+      view.kind = I::AddressView;
+      view.type = {T::Buffer, ffi::parameterCells(core.semantics, hf), 64};
+      view.args = {adapter.params[1].value};
+      auto input = emit(adapter.body, view);
+      std::vector<runtime::Value> args;
+      uint32_t cell = 0;
+      for (uint32_t n = 0; n < hf.params.size(); ++n) {
+        const auto &param = core.semantics.symbols[hf.params[n]];
+        auto kind = ffi::parameterKind(core.semantics, param);
+        if (kind == ffi::ParameterKind::Scalar || kind == ffi::ParameterKind::Text)
+          args.push_back(load(adapter.body, input, cell++, type(param.type)));
+        else {
+          auto pointer = load(adapter.body, input, cell++, {T::Pointer, 1});
+          I sequence{};
+          sequence.kind = I::AddressView;
+          sequence.type = referenceType(param.type);
+          sequence.args = {pointer};
+          if (kind == ffi::ParameterKind::Slice)
+            sequence.args.push_back(load(adapter.body, input, cell++, type(USize)));
+          args.push_back(emit(adapter.body, sequence));
+        }
+      }
+      auto result = abi(adapter.body, name(hf.id), type(hf.result), args);
+      if (hf.result != Unit) {
+        view.type.width = 1;
+        view.args = {adapter.params[0].value};
+        auto output = emit(adapter.body, view);
+        store(adapter.body, output, result);
+      }
+      I ret{};
+      ret.kind = I::Return;
+      emit(adapter.body, ret, false);
+      p.functions.push_back(std::move(adapter));
+    }
+    if (core.semantics.library)
+      return std::move(p);
 
     runtime::Function entry;
     entry.name = "main";

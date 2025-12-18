@@ -1,0 +1,5 @@
+// error: E0511
+extern "C" type A = B;
+extern "C" type B = A;
+extern "C" fn read() -> A;
+fn main() {}

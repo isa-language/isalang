@@ -178,6 +178,7 @@ std::vector<uint32_t> intrinsicSignature(IntrinsicId id, uint32_t owner, uint32_
       {"isac_rt_monotonic_ns", {U64}},
       {"isac_rt_env_argument_count", {USize}},
       {"isac_rt_env_argument", {Str, USize}},
+      {"isac_rt_str_equal", {Bool, Str, Str}},
       {"isac_rt_stdout_write", {Unit, Str}},
       {"isac_rt_stderr_write", {Unit, Str}},
       {"isac_rt_alloc", {RawPtr, USize}},

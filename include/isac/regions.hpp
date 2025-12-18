@@ -51,13 +51,38 @@ struct Loan {
   bool inferred = false;
   std::set<BasicBlockId> points;
 };
+
+class ValueLivenessSet {
+  ValueId base = 0;
+  std::vector<uint64_t> words;
+
+public:
+  ValueLivenessSet() = default;
+  ValueLivenessSet(ValueId first, ValueId end) : base(first), words((end - first + 63) / 64) {}
+  bool contains(ValueId value) const {
+    return value >= base && (value - base) / 64 < words.size() &&
+           (words[(value - base) / 64] & (uint64_t{1} << ((value - base) % 64)));
+  }
+  void insert(ValueId value) {
+    words.at((value - base) / 64) |= uint64_t{1} << ((value - base) % 64);
+  }
+  void erase(ValueId value) {
+    words.at((value - base) / 64) &= ~(uint64_t{1} << ((value - base) % 64));
+  }
+  void merge(const ValueLivenessSet &other) {
+    for (size_t n = 0; n < words.size(); ++n)
+      words[n] |= other.words.at(n);
+  }
+  bool operator==(const ValueLivenessSet &) const = default;
+};
 struct BasicBlock {
   BasicBlockId id;
   Loc origin;
   Terminator terminator = Terminator::Branch;
   std::vector<BasicBlockId> successors;
   std::set<SymbolId> uses, definitions, liveIn, liveOut;
-  std::set<ValueId> valueUses, valueDefinitions, valuesIn, valuesOut;
+  std::set<ValueId> valueUses, valueDefinitions;
+  ValueLivenessSet valuesIn, valuesOut;
   bool reachable = false;
 };
 struct FunctionGraph {

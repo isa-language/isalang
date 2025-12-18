@@ -1,0 +1,29 @@
+extern "C" type Count = usize;
+extern "C" type Context;
+extern "C" struct Inner {
+  small: i16,
+  active: bool,
+}
+extern "C" struct Sample {
+  tag: u8,
+  number: i64,
+  inner: Inner,
+  ratio: f64,
+  next: *mut Sample,
+}
+extern "C" fn sample_new() -> *mut Sample;
+extern "C" fn sample_free(value: *mut Sample);
+extern "C" fn sample_score(value: *const Sample) -> i64;
+fn main() -> i32 {
+  unsafe {
+    let value = sample_new();
+    @println("{} {} {}",(*value).tag,(*value).number,(*value).inner.active);
+    (*value).inner.small = 7;
+    (*value).inner.active = false;
+    (*value).ratio = 2.5;
+    @println("{} {}", sample_score(value as * const Sample),(*value).ratio);
+    sample_free(value);
+  }
+  @println("size={} align={}", @size_of<Sample>(), @align_of<Sample>());
+  return 0;
+}

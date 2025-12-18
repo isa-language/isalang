@@ -1,0 +1,7 @@
+// error: E0511
+extern "C" struct Pair {
+  x: i32,
+  y: i32,
+}
+extern "C" fn read() -> Pair;
+fn main() {}

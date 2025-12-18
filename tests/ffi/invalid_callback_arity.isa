@@ -1,0 +1,10 @@
+// error: E0201
+extern "C" fn f(x: i32) -> i32 {
+  return x;
+}
+fn main() {
+  let cb = &f;
+  unsafe {
+    cb();
+  }
+}

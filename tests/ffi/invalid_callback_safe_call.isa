@@ -1,0 +1,9 @@
+// error: E0510
+extern "C" type Callback = extern "C" fn(i32) -> i32;
+extern "C" fn get() -> Callback;
+fn main() {
+  let cb = unsafe {
+    get()
+  };
+  cb(1);
+}

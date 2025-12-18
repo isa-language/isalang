@@ -1,0 +1,10 @@
+extern "C" fn sum(x: &i32[]) -> i32;
+extern "C" fn mutate(x: &mut u8[2]);
+fn main() {
+  let a: i32[2] = [20, 22];
+  let b: u8[2] = [1u8, 2u8];
+  unsafe {
+    print(sum(&a));
+    mutate(&mut b);
+  }
+}
