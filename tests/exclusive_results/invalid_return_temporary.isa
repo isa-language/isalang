@@ -1,0 +1,5 @@
+@import "std.vec"
+fn bad(input: &mut Vec<i32>) -> Option<&mut i32> {
+  return Vec<i32>::new().get_mut(0);
+}
+fn main() {}

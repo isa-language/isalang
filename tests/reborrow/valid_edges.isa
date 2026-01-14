@@ -1,0 +1,42 @@
+fn inspect(value: &i32) {
+  print(value);
+}
+fn increment(value: &mut i32) {
+  value = value + 1;
+}
+fn run(condition: bool) -> i32 {
+  let data = 1;
+  let parent = &mut data;
+  let reader = &*parent;
+  if condition {
+    inspect(reader);
+    let child = &mut * parent;
+    increment(child);
+    return data;
+  } else {
+    match condition {
+      true => inspect(reader),
+      false => inspect(reader),
+    }
+  }
+  let i = 0;
+  while i < 4 {
+    let child = &mut * parent;
+    increment(child);
+    i = i + 1;
+    if i == 1 {
+      continue;
+    }
+    let view = &*parent;
+    inspect(view);
+    if i == 3 {
+      break;
+    }
+  }
+  increment(parent);
+  return data;
+}
+fn main() {
+  print(run(true));
+  print(run(false));
+}

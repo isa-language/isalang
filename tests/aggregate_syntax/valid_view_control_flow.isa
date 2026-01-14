@@ -1,0 +1,48 @@
+@import "std.vec"
+fn first() -> i32 {
+  let values = Vec<i32> {
+    9,
+    8
+  };
+  for value in values.view().elements() {
+    return value;
+  }
+  return 0;
+}
+fn main() {
+  let a: i32[2][2] = {
+    {
+      1,
+      2
+    },
+    {
+      3,
+      4
+    }
+  };
+  for value in a.view_mut().elements_mut().rev() {
+    if value == 4 {
+      continue;
+    }
+    if value == 2 {
+      break;
+    }
+    * value = 30;
+  }
+  for value in a.view().elements() {
+    print(value);
+  }
+  print(first());
+  let i = 1;
+  for i = 0;
+  i < 2;
+  i++ {
+    print(i);
+  }
+  for let j = 0;
+  j < 1;
+  {
+    print(j);
+    j++;
+  }
+}

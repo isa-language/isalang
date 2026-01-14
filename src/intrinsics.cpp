@@ -29,22 +29,74 @@ IntrinsicId findIntrinsic(std::string_view name) {
 
 bool containerBorrowIntrinsic(IntrinsicId id) {
   return id == IntrinsicId::Box_get || id == IntrinsicId::Vec_get || id == IntrinsicId::Vec_first ||
-         id == IntrinsicId::Vec_last;
+         id == IntrinsicId::Vec_last || containerMutableBorrowIntrinsic(id) ||
+         id == IntrinsicId::Vec_as_slice || elementSliceIntrinsic(id);
+}
+bool containerMutableBorrowIntrinsic(IntrinsicId id) {
+  return id == IntrinsicId::Box_get_mut || id == IntrinsicId::Vec_get_mut ||
+         id == IntrinsicId::Vec_first_mut || id == IntrinsicId::Vec_last_mut ||
+         id == IntrinsicId::Slice_get_mut || id == IntrinsicId::Slice_first_mut ||
+         id == IntrinsicId::Slice_last_mut || id == IntrinsicId::Vec_as_mut_slice;
+}
+bool containerSliceIntrinsic(IntrinsicId id) {
+  return id == IntrinsicId::Vec_as_slice || id == IntrinsicId::Vec_as_mut_slice;
+}
+bool elementSliceIntrinsic(IntrinsicId id) {
+  return id == IntrinsicId::Slice_get || id == IntrinsicId::Slice_get_mut ||
+         id == IntrinsicId::Slice_first || id == IntrinsicId::Slice_last ||
+         id == IntrinsicId::Slice_first_mut || id == IntrinsicId::Slice_last_mut;
+}
+
+bool validStringIntrinsic(const hir::Program &p, const hir::Function &f) {
+  if (!f.trusted || f.external || f.owner >= p.types.size() ||
+      p.types[f.owner].representation != hir::Representation::StringRecord ||
+      intrinsicInfo(f.intrinsicId).lowering != IntrinsicLowering::StringRecord ||
+      findIntrinsic(f.intrinsic) != f.intrinsicId)
+    return false;
+  auto signature = intrinsicSignature(f.intrinsicId, f.owner, f.result);
+  bool constructor =
+      f.intrinsicId == IntrinsicId::String_new || f.intrinsicId == IntrinsicId::String_from;
+  auto access = constructor ? Access::Own
+                : f.intrinsicId == IntrinsicId::String_push_str ||
+                        f.intrinsicId == IntrinsicId::String_clear ||
+                        f.intrinsicId == IntrinsicId::String_read_file ||
+                        f.intrinsicId == IntrinsicId::String_env_var ||
+                        f.intrinsic.starts_with("string.fmt_")
+                    ? Access::Unique
+                    : Access::Shared;
+  if (signature.empty() || signature[0] != f.result || signature.size() != f.params.size() + 1 ||
+      f.access != access || f.consumesSelf || f.resultOrigin != None)
+    return false;
+  for (size_t n = 0; n < f.params.size(); ++n) {
+    const auto &param = p.symbols.at(f.params[n]);
+    if (param.type != signature[n + 1] || param.reference ||
+        param.receiver != (!constructor && n == 0))
+      return false;
+  }
+  return true;
 }
 
 bool validContainerIntrinsic(const hir::Program &p, const hir::Function &f) {
-  if (!f.trusted || f.external || f.owner >= p.types.size() || !p.dynamicContainer(f.owner) ||
+  if (!f.trusted || f.external || f.owner >= p.types.size() ||
       intrinsicInfo(f.intrinsicId).lowering != IntrinsicLowering::ContainerStorage)
     return false;
   const auto &owner = p.types[f.owner];
+  if (elementSliceIntrinsic(f.intrinsicId)) {
+    if ((owner.kind != hir::Type::Array && owner.kind != hir::Type::Slice) ||
+        !scalar(owner.element))
+      return false;
+  } else if (!p.dynamicContainer(f.owner))
+    return false;
   auto element = owner.element;
+  auto borrowAccess =
+      containerMutableBorrowIntrinsic(f.intrinsicId) ? Access::Unique : Access::Shared;
   if (!p.containerElement(element))
     return false;
   std::vector<TypeId> parameters;
   for (auto id : f.params) {
     const auto &param = p.symbols.at(id);
     if (param.reference && !(containerBorrowIntrinsic(f.intrinsicId) && param.receiver &&
-                             param.access == Access::Shared))
+                             param.access == borrowAccess))
       return false;
     parameters.push_back(param.type);
   }
@@ -54,18 +106,21 @@ bool validContainerIntrinsic(const hir::Program &p, const hir::Function &f) {
            f.access == access && f.consumesSelf == (f.intrinsicId == IntrinsicId::Box_into_inner);
   };
   if (containerBorrowIntrinsic(f.intrinsicId)) {
-    if (!p.supportsStoredSharedReference(element) || f.params.empty() ||
-        f.resultOrigin != f.params[0] || f.resultRegion == None ||
-        !f.additionalResultOrigins.empty() || !f.payloadResultSources().empty() ||
-        f.parameterRegions.size() != 1 || f.parameterRegions[0].parameter != f.params[0] ||
-        f.parameterRegions[0].kind != BorrowKind::Shared || f.parameterRegions[0].region == None ||
+    if ((!containerSliceIntrinsic(f.intrinsicId) && !p.supportsStoredSharedReference(element)) ||
+        f.params.empty() || f.resultAccess != borrowAccess || f.resultOrigin != f.params[0] ||
+        f.resultRegion == None || !f.additionalResultOrigins.empty() ||
+        !f.payloadResultSources().empty() || f.parameterRegions.size() != 1 ||
+        f.parameterRegions[0].parameter != f.params[0] ||
+        f.parameterRegions[0].kind !=
+            (borrowAccess == Access::Shared ? BorrowKind::Shared : BorrowKind::Unique) ||
+        f.parameterRegions[0].region == None ||
         f.parameterRegions[0].region != p.symbols[f.params[0]].region ||
         !p.symbols[f.params[0]].reference)
       return false;
   }
   if (owner.representation == hir::Representation::GenericBox) {
-    if (f.intrinsicId == IntrinsicId::Box_get)
-      return !f.resultBorrowedContainer && matches(element, {f.owner}, Access::Shared, true);
+    if (f.intrinsicId == IntrinsicId::Box_get || f.intrinsicId == IntrinsicId::Box_get_mut)
+      return !f.resultBorrowedContainer && matches(element, {f.owner}, borrowAccess, true);
     if (f.intrinsicId == IntrinsicId::Box_new_generic)
       return matches(f.owner, {element}, Access::Own, false);
     if (f.intrinsicId == IntrinsicId::Box_into_inner)
@@ -73,20 +128,42 @@ bool validContainerIntrinsic(const hir::Program &p, const hir::Function &f) {
     return false;
   }
   switch (f.intrinsicId) {
+  case IntrinsicId::Vec_as_slice:
+  case IntrinsicId::Vec_as_mut_slice:
+    return !f.resultBorrowedContainer && scalar(element) &&
+           p.types[f.result].kind == hir::Type::Slice && p.types[f.result].element == element &&
+           matches(f.result, {f.owner}, borrowAccess, true);
   case IntrinsicId::Vec_new:
     return matches(f.owner, {}, Access::Own, false);
   case IntrinsicId::Vec_with_capacity:
     return matches(f.owner, {USize}, Access::Own, false);
   case IntrinsicId::Vec_push:
     return matches(Unit, {f.owner, element}, Access::Unique, true);
+  case IntrinsicId::Vec_insert:
+    return matches(Unit, {f.owner, USize, element}, Access::Unique, true);
+  case IntrinsicId::Vec_remove:
+    return matches(element, {f.owner, USize}, Access::Unique, true);
+  case IntrinsicId::Vec_replace:
+    return matches(element, {f.owner, USize, element}, Access::Unique, true);
+  case IntrinsicId::Vec_swap:
+    return matches(Unit, {f.owner, USize, USize}, Access::Unique, true);
   case IntrinsicId::Vec_clear:
     return matches(Unit, {f.owner}, Access::Unique, true);
   case IntrinsicId::Vec_len:
   case IntrinsicId::Vec_capacity:
     return matches(USize, {f.owner}, Access::Shared, true);
   case IntrinsicId::Vec_get:
+  case IntrinsicId::Vec_get_mut:
   case IntrinsicId::Vec_first:
   case IntrinsicId::Vec_last:
+  case IntrinsicId::Vec_first_mut:
+  case IntrinsicId::Vec_last_mut:
+  case IntrinsicId::Slice_get:
+  case IntrinsicId::Slice_get_mut:
+  case IntrinsicId::Slice_first:
+  case IntrinsicId::Slice_last:
+  case IntrinsicId::Slice_first_mut:
+  case IntrinsicId::Slice_last_mut:
   case IntrinsicId::Vec_pop: {
 
     TypeId payload = element;
@@ -96,7 +173,8 @@ bool validContainerIntrinsic(const hir::Program &p, const hir::Function &f) {
           result.variants[0].payload.size() != 1)
         return false;
       payload = result.variants[0].payload[0];
-      if (!p.reference(payload) || p.types[payload].element != element)
+      if (!p.reference(payload) || p.types[payload].element != element ||
+          p.types[payload].referenceAccess != borrowAccess)
         return false;
     }
     bool option = false;
@@ -117,10 +195,13 @@ bool validContainerIntrinsic(const hir::Program &p, const hir::Function &f) {
            (f.intrinsicId == IntrinsicId::Vec_pop
                 ? matches(f.result, {f.owner}, Access::Unique, true)
                 : matches(f.result,
-                          f.intrinsicId == IntrinsicId::Vec_get
+                          f.intrinsicId == IntrinsicId::Vec_get ||
+                                  f.intrinsicId == IntrinsicId::Vec_get_mut ||
+                                  f.intrinsicId == IntrinsicId::Slice_get ||
+                                  f.intrinsicId == IntrinsicId::Slice_get_mut
                               ? std::vector<TypeId>{f.owner, USize}
                               : std::vector<TypeId>{f.owner},
-                          Access::Shared, true));
+                          borrowAccess, true));
   }
   default:
     return false;
@@ -136,6 +217,9 @@ std::vector<uint32_t> intrinsicSignature(IntrinsicId id, uint32_t owner, uint32_
   auto name = std::string(info.name);
   if (info.lowering == IntrinsicLowering::StringRecord) {
     switch (id) {
+    case IntrinsicId::String_read_file:
+    case IntrinsicId::String_env_var:
+      return {I32, owner, Str};
     case IntrinsicId::String_char_at:
       return {Char, owner, USize};
     case IntrinsicId::String_is_char_boundary:
@@ -176,6 +260,13 @@ std::vector<uint32_t> intrinsicSignature(IntrinsicId id, uint32_t owner, uint32_
   static const std::unordered_map<std::string, std::vector<TypeId>> abi = {
       {"isac_rt_panic_str", {Unit, Str}},
       {"isac_rt_monotonic_ns", {U64}},
+      {"isac_rt_fs_write_text", {I32, Str, Str}},
+      {"isac_rt_fs_exists", {I32, Str}},
+      {"isac_rt_fs_remove_file", {I32, Str}},
+      {"isac_rt_fs_create_dir", {I32, Str}},
+      {"isac_rt_process_run", {I64, Str, Str, Bool}},
+      {"isac_rt_sleep_ns", {I32, U64}},
+      {"isac_rt_unix_ns", {U64}},
       {"isac_rt_env_argument_count", {USize}},
       {"isac_rt_env_argument", {Str, USize}},
       {"isac_rt_str_equal", {Bool, Str, Str}},

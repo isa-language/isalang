@@ -1,0 +1,65 @@
+{
+  "valid_slice_result": {
+    "stdout": "1\n0\n11\n42\n"
+  },
+  "valid_vec_result": {
+    "stdout": "Olá!\nIsalang?\n3\n",
+    "heap": true
+  },
+  "valid_none_result": {
+    "stdout": "1\n1\n10\n42\n",
+    "heap": true
+  },
+  "valid_branch_return": {
+    "stdout": "11\n22\n"
+  },
+  "valid_generic_method_result": {
+    "stdout": "42\n7\n9\n"
+  },
+  "valid_loop_cleanup": {
+    "stdout": "1\n1\n0\n1\n1\n1\n42\n20\n"
+  },
+  "valid_discard_result": {
+    "stdout": "42\n"
+  },
+  "valid_result_enum": {
+    "stdout": "7\n10\n"
+  },
+  "valid_nonreceiver_origin": {
+    "stdout": "42\n99\n1\n",
+    "heap": true
+  },
+  "invalid_parent_access": {
+    "error": "derived borrow"
+  },
+  "invalid_two_results": {
+    "error": "derived borrow"
+  },
+  "invalid_owner_drop": {
+    "error": "active unique borrow"
+  },
+  "invalid_return_local": {
+    "error": "escapes its local owner"
+  },
+  "invalid_return_temporary": {
+    "error": "escapes its local owner"
+  },
+  "invalid_ambiguous_origin": {
+    "error": "exactly one compatible unique input origin"
+  },
+  "invalid_shared_input": {
+    "error": "unique payload returns"
+  },
+  "invalid_growth": {
+    "error": "active unique borrow"
+  },
+  "invalid_implicit_input_escape": {
+    "error": "cannot end a parent borrow"
+  },
+  "invalid_nested_result": {
+    "error": "recursive region contracts"
+  },
+  "invalid_box_stored_result": {
+    "error": "reference-free owned elements"
+  }
+}

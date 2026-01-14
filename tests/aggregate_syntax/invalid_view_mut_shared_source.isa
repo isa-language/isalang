@@ -1,0 +1,5 @@
+fn main() {
+  let a = [1, 2];
+  let r = &a;
+  for v in r.view_mut().elements_mut() {}
+}

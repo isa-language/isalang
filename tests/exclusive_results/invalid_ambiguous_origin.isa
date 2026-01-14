@@ -1,0 +1,7 @@
+fn choose(a: &mut i32[], b: &mut i32[], left: bool) -> Option<&mut i32> {
+  if left {
+    return a.first_mut();
+  }
+  return b.last_mut();
+}
+fn main() {}

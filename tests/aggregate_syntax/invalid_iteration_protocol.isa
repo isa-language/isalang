@@ -1,0 +1,17 @@
+@import "std.option"
+@iteration("len", "get")
+struct Bad {
+  value: i32,
+}
+impl Bad {
+  pub fn len(shared self) -> i32 {
+    return 1;
+  }
+  pub fn get(shared self, i: usize) -> Option<&i32> {
+    return Option::Some(&self.value);
+  }
+}
+fn main() {
+  let a = Bad::new();
+  for v in a {}
+}

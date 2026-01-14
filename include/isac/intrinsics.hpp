@@ -31,6 +31,10 @@ struct Program;
 struct Function;
 }
 bool containerBorrowIntrinsic(IntrinsicId);
+bool containerMutableBorrowIntrinsic(IntrinsicId);
+bool containerSliceIntrinsic(IntrinsicId);
+bool elementSliceIntrinsic(IntrinsicId);
+bool validStringIntrinsic(const hir::Program &, const hir::Function &);
 bool validContainerIntrinsic(const hir::Program &, const hir::Function &);
 const IntrinsicInfo &intrinsicInfo(IntrinsicId);
 IntrinsicId findIntrinsic(std::string_view);

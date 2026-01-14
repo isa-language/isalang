@@ -1,0 +1,67 @@
+@import "std.collections"
+
+const ROWS: usize = 2;
+struct Point {
+  x: i32,
+  y: i32,
+}
+struct Board {
+  cells: i32[ROWS][3],
+  title: String,
+}
+
+fn main() -> i32 {
+  let names = Vec<String> {
+    "Isalang",
+    "native"
+  };
+  for name in &names {
+    @println("{}", name);
+  }
+  let point = Point {
+    y: 20,
+    x: 10
+  };
+  @println("point = {}, {}", point.x, point.y);
+
+  let board = Board {
+    title: "board",
+    cells: {
+      {
+        1,
+        2,
+        3
+      },
+      {
+        4,
+        5,
+        6
+      }
+    },
+  };
+  for i in 0usize..ROWS {
+    let row = &mut board.cells[i];
+    for cell in row {
+      cell = cell * 2;
+    }
+  }
+  @println("{}: last = {}", board.title.as_str(), board.cells[1][2]);
+
+  let scores = HashMap<String, i32> {
+    "first" => 10,
+    "second" => 20
+  };
+  @println("map len = {}", scores.len());
+  let unique = HashSet<String> {
+    "a",
+    "a",
+    "b"
+  };
+  @println("set len = {}", unique.len());
+  let list = List<String> {
+    "one",
+    "two"
+  };
+  @println("list len = {}", list.len());
+  return 0;
+}

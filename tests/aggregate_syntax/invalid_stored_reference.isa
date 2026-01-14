@@ -1,0 +1,6 @@
+@import "std.vec" fn main() {
+  let x = 1;
+  let v = Vec<&i32> {
+    &x
+  };
+}

@@ -1,0 +1,7 @@
+fn main() {
+  let a = [1, 2];
+  let r = &a[0];
+  let s = &mut a[1];
+  print(r);
+  print(s);
+}

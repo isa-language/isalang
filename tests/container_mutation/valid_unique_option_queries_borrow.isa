@@ -1,0 +1,21 @@
+@import "std.vec" fn main() {
+  let v = Vec<String>::new();
+  v.push(String::from("text"));
+  let a = v.last_mut();
+  borrow shared a as view {
+    print(view.is_some());
+    print(view.is_none());
+  }
+  match a {
+    Some(x) => {
+      x.push_str("!");
+    },
+    None => {}
+  }
+  match v.first() {
+    Some(x) => {
+      print(x);
+    },
+    None => {}
+  }
+}

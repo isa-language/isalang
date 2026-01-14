@@ -51,6 +51,75 @@ class Eraser {
            : representation == hir::Representation::InputRecord ? 6
                                                                 : 0;
   }
+
+  uint32_t resultRecordCells(TypeId tid) const {
+    if (auto words = recordWords(tid))
+      return words;
+    if (core.semantics.heap(tid))
+      return 0;
+    uint32_t cells = 0;
+    for (const auto &field : core.semantics.types[tid].fields)
+      cells += resultRecordCells(field.type);
+    for (const auto &variant : core.semantics.types[tid].variants)
+      for (auto payload : variant.payload)
+        cells += resultRecordCells(payload);
+    return cells;
+  }
+  T resultStorageType(TypeId tid) {
+    auto result = type(tid);
+    if (result.kind == T::Buffer)
+      result.width += resultRecordCells(tid);
+    return result;
+  }
+  void copyResultRecords(std::vector<I> &out, runtime::Value source, runtime::Value destination,
+                         TypeId tid, uint32_t offset, uint32_t &tail) {
+    if (auto words = recordWords(tid)) {
+      auto descriptor = load(out, source, offset, {T::Pointer, 1});
+      I view{};
+      view.kind = I::Subview;
+      view.type = {T::Buffer, words, 64, true, true};
+      view.args = {destination, constant(out, tail, true)};
+      I address{};
+      address.kind = I::Address;
+      address.type = {T::Pointer, 1};
+      address.args = {emit(out, view)};
+      auto target = emit(out, address);
+      I copy{};
+      copy.kind = I::MemCopy;
+      copy.type = {T::Pointer, 1};
+      copy.args = {target, descriptor,
+                   constant(out, words * (core.semantics.target.pointerWidth / 8), true)};
+      emit(out, copy);
+      store(out, destination, target, offset);
+      tail += words;
+      return;
+    }
+    if (core.semantics.heap(tid))
+      return;
+    const auto &shape = core.semantics.types[tid];
+    for (const auto &field : shape.fields)
+      copyResultRecords(out, source, destination, field.type, offset + field.offset, tail);
+    if (shape.kind == hir::Type::Enum) {
+      auto tag = load(out, source, offset, {T::Scalar, 1, 32});
+      for (const auto &variant : shape.variants) {
+        I branch{};
+        branch.kind = I::If;
+        auto start = tail;
+        for (size_t n = 0; n < variant.payload.size(); ++n)
+          copyResultRecords(branch.body, source, destination, variant.payload[n],
+                            offset + core.semantics.payloadOffset(tid, variant.id, n), tail);
+        if (start == tail)
+          continue;
+        I test{};
+        test.kind = I::Binary;
+        test.callee = "==";
+        test.type = {T::Scalar, 1, 32};
+        test.args = {tag, constant(out, variant.id)};
+        branch.args = {emit(out, test)};
+        emit(out, branch, false);
+      }
+    }
+  }
   std::string name(FunctionId id) {
     auto n = core.semantics.functions[id].name;
     if (core.semantics.functions[id].external)
@@ -281,7 +350,8 @@ class Eraser {
       writeElement(out, storageView(out, result, element), stored, element);
       return result;
     }
-    case IntrinsicId::Box_get: {
+    case IntrinsicId::Box_get:
+    case IntrinsicId::Box_get_mut: {
       auto view = storageView(out, owner, element);
       return core.semantics.heap(element) ? project(out, view, 0, element)
                                           : referenceView(out, view, element);
@@ -304,38 +374,91 @@ class Eraser {
       return abi(out, "isac_rt_vec_len", size, {owner});
     case IntrinsicId::Vec_capacity:
       return abi(out, "isac_rt_vec_capacity", size, {owner});
+    case IntrinsicId::Vec_as_slice:
+    case IntrinsicId::Vec_as_mut_slice: {
+      auto address = abi(out, "isac_rt_vec_data", pointer, {owner});
+      auto length = abi(out, "isac_rt_vec_len", size, {owner});
+      I view{};
+      view.kind = I::AddressView;
+      view.type = referenceType(c.type);
+      view.args = {address, length};
+      return emit(out, view);
+    }
     case IntrinsicId::Vec_push: {
       auto ptr = abi(out, "isac_rt_vec_push_slot", pointer, {owner});
       auto stored = transferElement(out, element, args[0], true);
       writeElement(out, storageView(out, ptr, element), stored, element);
       return runtime::NoValue;
     }
+    case IntrinsicId::Vec_insert: {
+      auto ptr = abi(out, "isac_rt_vec_insert_slot", pointer, {owner, args[0]});
+      auto stored = transferElement(out, element, args[1], true);
+      writeElement(out, storageView(out, ptr, element), stored, element);
+      return runtime::NoValue;
+    }
+    case IntrinsicId::Vec_remove:
+    case IntrinsicId::Vec_replace: {
+      auto ptr = abi(out, "isac_rt_vec_at", pointer, {owner, args[0]});
+      auto view = storageView(out, ptr, element);
+      auto value = project(out, view, 0, element);
+      auto result = transferElement(out, element, value, false);
+      if (c.intrinsicId == IntrinsicId::Vec_remove)
+        abi(out, "isac_rt_vec_remove_slot", {T::Void, 0}, {owner, args[0]});
+      else {
+        auto stored = transferElement(out, element, args[1], true);
+        writeElement(out, view, stored, element);
+      }
+      return result;
+    }
+    case IntrinsicId::Vec_swap:
+      abi(out, "isac_rt_vec_swap", {T::Void, 0}, {owner, args[0], args[1]});
+      return runtime::NoValue;
     case IntrinsicId::Vec_clear:
       destroyVector(out, function.owner, owner, true);
       return runtime::NoValue;
     case IntrinsicId::Vec_get:
+    case IntrinsicId::Vec_get_mut:
     case IntrinsicId::Vec_first:
-    case IntrinsicId::Vec_last: {
+    case IntrinsicId::Vec_last:
+    case IntrinsicId::Vec_first_mut:
+    case IntrinsicId::Vec_last_mut:
+    case IntrinsicId::Slice_get:
+    case IntrinsicId::Slice_get_mut:
+    case IntrinsicId::Slice_first:
+    case IntrinsicId::Slice_last:
+    case IntrinsicId::Slice_first_mut:
+    case IntrinsicId::Slice_last_mut: {
       I alloc{};
       alloc.kind = I::Alloc;
       alloc.type = type(c.type);
       auto result = emit(out, alloc);
-      auto len = abi(out, "isac_rt_vec_len", size, {owner});
+      runtime::Value len;
+      bool slice = elementSliceIntrinsic(c.intrinsicId);
+      if (slice) {
+        I length{};
+        length.kind = I::Length;
+        length.type = size;
+        length.args = {owner};
+        len = emit(out, length);
+      } else
+        len = abi(out, "isac_rt_vec_len", size, {owner});
       auto index = args.empty() ? constant(out, 0, true) : args[0];
       I compare{};
       compare.kind = I::Binary;
       compare.type = {T::Scalar, 1, 32};
-      compare.callee = c.intrinsicId == IntrinsicId::Vec_last ? "==" : ">=";
+      bool last =
+          c.intrinsicId == IntrinsicId::Vec_last || c.intrinsicId == IntrinsicId::Vec_last_mut ||
+          c.intrinsicId == IntrinsicId::Slice_last || c.intrinsicId == IntrinsicId::Slice_last_mut;
+      compare.callee = last ? "==" : ">=";
       compare.unsignedOperands = true;
-      compare.args = c.intrinsicId == IntrinsicId::Vec_last
-                         ? std::vector<runtime::Value>{len, constant(out, 0, true)}
-                         : std::vector<runtime::Value>{index, len};
+      compare.args = last ? std::vector<runtime::Value>{len, constant(out, 0, true)}
+                          : std::vector<runtime::Value>{index, len};
       I branch{};
       branch.kind = I::If;
       branch.args = {emit(out, compare)};
       const auto &variants = core.semantics.types[c.type].variants;
       store(branch.body, result, constant(branch.body, variants[1].id));
-      if (c.intrinsicId == IntrinsicId::Vec_last) {
+      if (last) {
         I subtract{};
         subtract.kind = I::Binary;
         subtract.type = size;
@@ -343,7 +466,19 @@ class Eraser {
         subtract.args = {len, constant(branch.otherwise, 1, true)};
         index = emit(branch.otherwise, subtract);
       }
-      auto address = abi(branch.otherwise, "isac_rt_vec_at", pointer, {owner, index});
+      runtime::Value address;
+      if (slice) {
+        I view{};
+        view.kind = I::Subview;
+        view.type = referenceType(element);
+        view.args = {owner, index};
+        I pointerValue{};
+        pointerValue.kind = I::Address;
+        pointerValue.type = pointer;
+        pointerValue.args = {emit(branch.otherwise, view)};
+        address = emit(branch.otherwise, pointerValue);
+      } else
+        address = abi(branch.otherwise, "isac_rt_vec_at", pointer, {owner, index});
 
       if (core.semantics.heap(element))
         address =
@@ -617,6 +752,11 @@ class Eraser {
         values[c.result] = emit(out, i);
         break;
       case C::Length:
+        if (core.semantics.types[core.semantics.symbols[c.slot].type].kind == hir::Type::Array) {
+          values[c.result] =
+              constant(out, core.semantics.types[core.semantics.symbols[c.slot].type].count, true);
+          break;
+        }
         i.kind = I::Length;
         i.args = {slots.at(c.slot)};
         values[c.result] = emit(out, i);
@@ -732,6 +872,25 @@ class Eraser {
               signedType(c.type) ? static_cast<uint64_t>(std::stoll(c.text)) : std::stoull(c.text);
         values[c.result] = emit(out, i);
         break;
+      case C::StructInit: {
+        i.kind = I::Alloc;
+        i.args.clear();
+        auto buffer = emit(out, i);
+        values[c.result] = buffer;
+        if (c.args.empty())
+          store(out, buffer, constant(out, 0));
+        for (size_t n = 0; n < c.args.size(); ++n) {
+          const auto &field = core.semantics.types[c.type].fields[c.fieldPath[n]];
+          auto value = values.at(c.args[n]);
+          auto shape = type(field.type);
+          if (shape.kind == T::Buffer)
+            for (uint32_t cell = 0; cell < shape.width; ++cell)
+              store(out, buffer, load(out, value, cell, {T::Scalar, 1, 64}), field.offset + cell);
+          else
+            store(out, buffer, value, field.offset);
+        }
+        break;
+      }
       case C::EnumConstruct: {
         i.kind = I::Alloc;
         i.args.clear();
@@ -760,7 +919,7 @@ class Eraser {
         auto buffer = emit(out, i);
         values[c.result] = buffer;
 
-        fill(out, buffer, values.at(c.args.at(0)), core.semantics.types[c.type].count);
+        fill(out, buffer, values.at(c.args.at(0)), core.semantics.types[c.type].width);
         break;
       }
       case C::Create:
@@ -772,9 +931,15 @@ class Eraser {
         auto zero = c.kind == C::Create ? constant(out, 0) : runtime::NoValue;
         if (c.kind == C::Create && i.type.width >= 16)
           fill(out, v, zero, i.type.width);
-        else
+        else if (c.kind == C::Create)
           for (uint32_t n = 0; n < i.type.width; ++n)
-            store(out, v, c.kind == C::Create ? zero : values.at(c.args[n]), n);
+            store(out, v, zero, n);
+        else {
+          auto element = core.semantics.types[c.type].element;
+          for (uint32_t n = 0; n < c.args.size(); ++n)
+            writeElement(out, v, values.at(c.args[n]), element,
+                         n * core.semantics.storageWidth(element));
+        }
         break;
       }
       case C::Bind:
@@ -865,10 +1030,30 @@ class Eraser {
             index = constant(out, offset, true);
           } else {
             index = i.args.at(0);
+            const auto &shape = core.semantics.types[core.semantics.symbols[c.slot].type];
+            auto bounds = source;
+            if (shape.kind == hir::Type::Array && core.semantics.storageWidth(shape.element) != 1) {
+
+              I prefix{};
+              prefix.kind = I::Subview;
+              prefix.type = {T::Buffer, shape.count, 64};
+              prefix.type.dynamicOffset = true;
+              prefix.args = {source, constant(out, 0, true)};
+              bounds = emit(out, prefix);
+            }
             I check{};
             check.kind = I::IndexCheck;
-            check.args = {source, index};
+            check.args = {bounds, index};
             emit(out, check, false);
+            if (shape.kind == hir::Type::Array && core.semantics.storageWidth(shape.element) != 1) {
+              I stride{};
+              stride.kind = I::Binary;
+              stride.callee = "*";
+              stride.type = type(USize);
+              stride.args = {index,
+                             constant(out, core.semantics.storageWidth(shape.element), true)};
+              index = emit(out, stride);
+            }
           }
           i.kind = I::Subview;
           i.type = referenceType(projectedType);
@@ -962,12 +1147,23 @@ class Eraser {
           I alloc{};
           alloc.kind = recordWords(c.type) ? I::RecordAlloc : I::Alloc;
           alloc.literal = recordWords(c.type);
-          alloc.type = i.type;
+          alloc.type = resultStorageType(c.type);
           auto destination = emit(out, alloc);
           values[c.result] = destination;
           i.args.insert(i.args.begin(), destination);
           i.type = {T::Void, 0};
           emit(out, i, false);
+          if (alloc.type.kind == T::Buffer && alloc.type != type(c.type)) {
+            I address{};
+            address.kind = I::Address;
+            address.type = {T::Pointer, 1};
+            address.args = {destination};
+            I view{};
+            view.kind = I::AddressView;
+            view.type = type(c.type);
+            view.args = {emit(out, address)};
+            values[c.result] = emit(out, view);
+          }
         } else if (c.type == Unit)
           emit(out, i, false);
         else
@@ -1006,6 +1202,8 @@ class Eraser {
           } else {
             for (uint32_t n = 0; n < type(returnType).width; ++n)
               store(out, returnStorage, load(out, source, n, {T::Scalar, 1, 64}), n);
+            auto tail = type(returnType).width;
+            copyResultRecords(out, source, returnStorage, returnType, 0, tail);
           }
           i.args.clear();
         }
@@ -1087,8 +1285,9 @@ public:
         f.result = referenceType(hf.result);
       } else if (f.result.kind == T::Buffer || recordWords(hf.result)) {
         returnStorage = p.values++;
-        runtimeTypes[returnStorage] = f.result;
-        f.params.push_back({returnStorage, f.result});
+        auto storage = resultStorageType(hf.result);
+        runtimeTypes[returnStorage] = storage;
+        f.params.push_back({returnStorage, storage});
         f.result = {T::Void, 0};
       }
       std::vector<I> prefix;

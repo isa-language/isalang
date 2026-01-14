@@ -1,0 +1,18 @@
+@import "std.vec"
+fn leave() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let p = &mut v;
+  let item = p.get_mut(0);
+  return;
+}
+fn main() {
+  leave();
+  {
+    let v = Vec<i32>::new();
+    v.push(1);
+    let p = &mut v;
+    let item = p.get_mut(0);
+  };
+  print(1);
+}

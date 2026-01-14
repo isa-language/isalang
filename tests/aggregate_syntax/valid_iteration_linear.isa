@@ -1,0 +1,38 @@
+@import "std.vec"
+fn make() -> Vec<String> {
+  print(42);
+  return Vec<String> {
+    String::from("once"),
+    String::from("two")
+  };
+}
+fn stop() -> i32 {
+  let v = Vec<String> {
+    String::from("cleanup")
+  };
+  for value in &v {
+    print(value);
+    return 7;
+  }
+  return 0;
+}
+fn main() {
+  for value in(make()) {
+    print(value);
+  }
+  let v = Vec<String> {
+    String::from("a"),
+    String::from("b")
+  };
+  for value in &mut v {
+    value.push_str("!");
+  }
+  for value in &v {
+    print(value);
+  }
+  print(stop());
+  let empty = Vec<i32> {};
+  for value in empty {
+    print(value);
+  }
+}

@@ -1,0 +1,246 @@
+@import("std.vec", "std.cmp")
+
+pub struct BTreeNode {
+  count: usize,
+  leaf: bool,
+  keys: usize[3],
+  children: usize[4],
+}
+impl BTreeNode {
+  pub fn snapshot(shared self) -> BTreeNode {
+    let node = BTreeNode::new();
+    node.count = self.count;
+    node.leaf = self.leaf;
+    for i in 0usize..3usize {
+      node.keys[i] = self.keys[i];
+    }
+    for i in 0usize..4usize {
+      node.children[i] = self.children[i];
+    }
+    return node.move();
+  }
+}
+@initializer("create", "insert")
+pub struct BTreeMap<K, V> {
+  keys: Vec<K>,
+  values: Vec<V>,
+  nodes: Vec<BTreeNode>,
+  root: usize,
+}
+impl<K, V> BTreeMap<K, V> {
+  pub fn create() -> BTreeMap<K, V> {
+    let map = BTreeMap<K, V>::new();
+    map.keys = Vec<K>::new();
+    map.values = Vec<V>::new();
+    map.nodes = Vec<BTreeNode>::new();
+    map.reset_tree();
+    return map.move();
+  }
+  fn node(shared self, index: usize) -> BTreeNode {
+    match self.nodes.get(index) {
+      Some(node) => {
+        return node.snapshot();
+      },
+      None => {
+        loop {
+          panic("invalid B-tree node");
+        }
+      },
+    }
+  }
+  fn reset_tree(unique self) {
+    self.nodes.clear();
+    let root = BTreeNode::new();
+    root.leaf = true;
+    self.nodes.push(root.move());
+    self.root = 0;
+  }
+  fn compare_key(shared self, key: &K, index: usize) -> i32 {
+    match self.keys.get(index) {
+      Some(current) => {
+        return key.compare(current);
+      },
+      None => {
+        loop {
+          panic("invalid B-tree key index");
+        }
+      },
+    }
+  }
+  fn compare_entries(shared self, left: usize, right: usize) -> i32 {
+    match self.keys.get(left) {
+      Some(key) => {
+        return self.compare_key(key, right);
+      },
+      None => {
+        loop {
+          panic("invalid B-tree key index");
+        }
+      },
+    }
+  }
+  fn entry(shared self, key: &K) -> Option<usize> {
+    key.compare(key);
+    let index = self.root;
+    loop {
+      let node = self.node(index);
+      let i = 0usize;
+      while i < node.count {
+        let order = self.compare_key(key, node.keys[i]);
+        if order == 0 {
+          return Option::Some(node.keys[i]);
+        }
+        if order < 0 {
+          break;
+        }
+        i = i + 1;
+      }
+      if node.leaf {
+        return Option::None;
+      }
+      index = node.children[i];
+    }
+  }
+  fn split_child(unique self, parent_index: usize, position: usize) {
+    let parent = self.node(parent_index);
+    let child_index = parent.children[position];
+    let child = self.node(child_index);
+    let right = BTreeNode::new();
+    right.leaf = child.leaf;
+    right.count = 1;
+    right.keys[0] = child.keys[2];
+    right.children[0] = child.children[2];
+    right.children[1] = child.children[3];
+    let right_index = self.nodes.len();
+    self.nodes.push(right.move());
+    let i = parent.count + 1;
+    while i > position + 1 {
+      parent.children[i] = parent.children[i - 1];
+      i = i - 1;
+    }
+    parent.children[position + 1] = right_index;
+    i = parent.count;
+    while i > position {
+      parent.keys[i] = parent.keys[i - 1];
+      i = i - 1;
+    }
+    parent.keys[position] = child.keys[1];
+    parent.count = parent.count + 1;
+    child.count = 1;
+    self.nodes.replace(child_index, child.move());
+    self.nodes.replace(parent_index, parent.move());
+  }
+  fn insert_entry(unique self, entry: usize) {
+    let root = self.node(self.root);
+    if root.count == 3 {
+      let parent = BTreeNode::new();
+      parent.children[0] = self.root;
+      let new_root = self.nodes.len();
+      self.nodes.push(parent.move());
+      self.root = new_root;
+      self.split_child(new_root, 0);
+    }
+    let index = self.root;
+    loop {
+      let node = self.node(index);
+      let i = node.count;
+      while i > 0 {
+        if self.compare_entries(entry, node.keys[i - 1]) >= 0 {
+          break;
+        }
+        i = i - 1;
+      }
+      if node.leaf {
+        let j = node.count;
+        while j > i {
+          node.keys[j] = node.keys[j - 1];
+          j = j - 1;
+        }
+        node.keys[i] = entry;
+        node.count = node.count + 1;
+        self.nodes.replace(index, node.move());
+        return;
+      }
+      let child = self.node(node.children[i]);
+      if child.count == 3 {
+        self.split_child(index, i);
+        let updated = self.node(index);
+        if self.compare_entries(entry, updated.keys[i]) > 0 {
+          i = i + 1;
+        }
+        index = updated.children[i];
+      } else {
+        index = node.children[i];
+      }
+    }
+  }
+  pub fn len(shared self) -> usize {
+    return self.keys.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.keys.is_empty();
+  }
+  pub fn contains_key(shared self, key: K) -> bool {
+    return self.entry(&key).is_some();
+  }
+  pub fn get(shared self, key: K) -> Option<&V> {
+    match self.entry(&key) {
+      Some(index) => {
+        return self.values.get(index);
+      },
+      None => {
+        return Option::None;
+      },
+    }
+  }
+  pub fn contains_key_ref(shared self, key: &K) -> bool {
+    return self.entry(key).is_some();
+  }
+  pub fn get_ref(shared self, key: &K) -> Option<&V> {
+    match self.entry(key) {
+      Some(index) => {
+        return self.values.get(index);
+      },
+      None => {
+        return Option::None;
+      },
+    }
+  }
+  pub fn insert(unique self, key: K, value: V) -> Option<V> {
+    match self.entry(&key) {
+      Some(index) => {
+        return Option::Some(self.values.replace(index, value.move()));
+      },
+      None => {},
+    }
+    let entry = self.keys.len();
+    self.keys.push(key.move());
+    self.values.push(value.move());
+    self.insert_entry(entry);
+    return Option::None;
+  }
+  pub fn remove(unique self, key: K) -> Option<V> {
+    return self.remove_ref(&key);
+  }
+  pub fn remove_ref(unique self, key: &K) -> Option<V> {
+    match self.entry(key) {
+      Some(index) => {
+        self.keys.remove(index);
+        let value = self.values.remove(index);
+        self.reset_tree();
+        for i in 0usize..self.keys.len() {
+          self.insert_entry(i);
+        }
+        return Option::Some(value.move());
+      },
+      None => {
+        return Option::None;
+      },
+    }
+  }
+  pub fn clear(unique self) {
+    self.keys.clear();
+    self.values.clear();
+    self.reset_tree();
+  }
+}

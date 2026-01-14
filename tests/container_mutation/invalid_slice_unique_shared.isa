@@ -1,0 +1,9 @@
+@import("std.vec", "std.box")
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let a = v.as_mut_slice();
+  let b = v.as_slice();
+  print(a[0]);
+  print(b[0]);
+}

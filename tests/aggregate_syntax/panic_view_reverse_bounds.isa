@@ -1,0 +1,6 @@
+fn main() {
+  let a = [1, 2];
+  for value in a.view().reverse_axis(0).slice(0, 2, 1).elements() {
+    print(value);
+  }
+}

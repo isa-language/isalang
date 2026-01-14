@@ -1,0 +1,6 @@
+fn main() {
+  let data = [1, 2];
+  let a = data.get(0);
+  data.drop();
+  print(a.is_some());
+}

@@ -1,0 +1,7 @@
+fn create() -> i32[2] {
+  return[1, 2];
+}
+fn main() {
+  let a = create().get(0);
+  print(a.is_some());
+}

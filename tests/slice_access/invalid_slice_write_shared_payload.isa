@@ -1,0 +1,9 @@
+fn main() {
+  let a = [1, 2];
+  match a.get(0) {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+}

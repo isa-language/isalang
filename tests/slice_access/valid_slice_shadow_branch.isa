@@ -1,0 +1,19 @@
+fn main() {
+  let data = [10, 20];
+  let view: &i32[] = &data;
+  let item = view.first();
+  {
+    let data = [100, 200];
+    print(data[0]);
+  };
+  if item.is_some() {
+    match item {
+      Some(value) => print(value),
+      None => {}
+    }
+  } else {
+    item.drop();
+  }
+  data[0] = 42;
+  print(data[0]);
+}

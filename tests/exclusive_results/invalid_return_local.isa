@@ -1,0 +1,5 @@
+fn bad(input: &mut i32[]) -> Option<&mut i32> {
+  let local = [1, 2];
+  return local.first_mut();
+}
+fn main() {}

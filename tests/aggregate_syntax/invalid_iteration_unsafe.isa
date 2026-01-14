@@ -1,0 +1,19 @@
+@import "std.option"
+@iteration("len", "get")
+struct Bad {
+  value: i32,
+}
+impl Bad {
+  pub fn len(shared self) -> usize {
+    return 1;
+  }
+  pub unsafe fn get(shared self, index: usize) -> Option<&i32> {
+    return Option::Some(&self.value);
+  }
+}
+fn main() {
+  let values = Bad::new();
+  for value in values {
+    print(value);
+  }
+}

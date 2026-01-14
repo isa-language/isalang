@@ -1,0 +1,12 @@
+@import "std.buffer"
+fn main() {
+  let data = Buffer::new(2);
+  let parent = &mut data;
+  let child = &mut * parent;
+  child.write(0, 42);
+  let reader = &*child;
+  print(reader.read(0));
+  parent.write(1, 7);
+  print(data.read(1));
+  data.release();
+}

@@ -1,0 +1,31 @@
+struct Storage {
+  data: i32[3],
+}
+fn edit(storage: &mut Storage) {
+  let view: &mut i32[] = &mut storage.data;
+  match view.first_mut() {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+  match view.last_mut() {
+    Some(value) => {
+      value = 30;
+    },
+    None => {}
+  }
+}
+fn main() {
+  let s = Storage::new();
+  edit(&mut s);
+  let view: &i32[] = &s.data;
+  match view.first() {
+    Some(value) => print(value),
+    None => {}
+  }
+  match view.last() {
+    Some(value) => print(value),
+    None => {}
+  }
+}

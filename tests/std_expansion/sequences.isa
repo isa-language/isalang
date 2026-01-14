@@ -1,0 +1,54 @@
+@import("std.collections", "std.box")
+struct Cell {
+  name: String,
+  id: i32,
+}
+fn cell(id: i32) -> Cell {
+  let c = Cell::new();
+  c.name = String::from("cell");
+  c.id = id;
+  return c.move();
+}
+fn main() {
+  let stack = Stack<String>::create();
+  @assert(stack.pop().is_none());
+  stack.push(String::from("first"));
+  stack.push(String::from("second"));
+  match stack.peek() {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+  print(stack.pop().unwrap());
+  print(stack.pop().unwrap());
+  let queue = Queue<Box<String >>::create();
+  queue.enqueue(Box<String>::new(String::from("fifo")));
+  let box = queue.dequeue().unwrap();
+  print(box.get());
+  @assert(queue.is_empty());
+  let deque = VecDeque<Cell>::create();
+  deque.push_front(cell(2));
+  deque.push_back(cell(3));
+  deque.push_front(cell(1));
+  let first = deque.pop_front().unwrap();
+  print(first.name.as_str());
+  @assert(first.id == 1);
+  let last = deque.pop_back().unwrap();
+  @assert(last.id == 3);
+  let middle = deque.pop_front().unwrap();
+  @assert(middle.id == 2);
+  @assert(deque.pop_front().is_none());
+  let v = Vec<i32[3]>::new();
+  v.push([1, 2, 3]);
+  v.insert(0, [4, 5, 6]);
+  v.insert(2, [7, 8, 9]);
+  let removed = v.remove(0);
+  @assert(removed[0] == 4);
+  let replaced = v.replace(1, [10, 11, 12]);
+  @assert(replaced[0] == 7);
+  v.swap(0, 1);
+  let value = v.remove(0);
+  @assert(value[0] == 10);
+  print("sequences ok");
+}

@@ -1,0 +1,17 @@
+@import "std.vec" impl<T> Option<T> {
+  fn inspect(shared self) {
+    match &self {
+      Some(x) => {
+        print(x);
+      },
+      None => {}
+    }
+  }
+}
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let a = v.first_mut();
+  a.inspect();
+  a.drop();
+}

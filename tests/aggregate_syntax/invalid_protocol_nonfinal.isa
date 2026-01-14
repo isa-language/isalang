@@ -1,0 +1,8 @@
+@import "std.buffer" struct Inner {
+  data: Buffer,
+}
+fn main() {
+  let active = Inner {
+    data: Buffer::new(1)
+  };
+}

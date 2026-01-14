@@ -42,8 +42,11 @@ void checkTypes(const Program &p) {
         badLayout();
     } else if (type.kind == hir::Type::Array || type.kind == hir::Type::Slice) {
       layout(type.element);
-      if (!scalar(type.element) || type.protocol != None || !type.fields.empty() ||
-          type.dropGlue != hir::DropGlue::Trivial || type.width != type.count ||
+      if ((!scalar(type.element) && !(type.kind == hir::Type::Array &&
+                                      p.semantics.types[type.element].kind == hir::Type::Array)) ||
+          type.protocol != None || !type.fields.empty() ||
+          type.dropGlue != hir::DropGlue::Trivial ||
+          type.width != type.count * p.semantics.storageWidth(type.element) || type.width > 65536 ||
           (type.kind == hir::Type::Array && (!type.count || type.count > 65536)) ||
           (type.kind == hir::Type::Slice && type.count != 0))
         badLayout();
@@ -137,20 +140,36 @@ void checkTypes(const Program &p) {
         p.semantics.types.at(symbol.type).kind == hir::Type::ForeignOpaque)
       fail(symbol.loc, DiagnosticCode::InvalidCore, "C types cannot be carried by value");
   for (const auto &type : p.semantics.types) {
+    if (type.kind == hir::Type::Structure)
+      for (const auto &field : type.fields)
+        if (p.semantics.containsReferences(field.type))
+          fail({}, DiagnosticCode::InvalidCore,
+               "stored-reference field requires a recursive region contract");
     if (type.kind == hir::Type::Enum)
       for (const auto &variant : type.variants)
         for (auto payload : variant.payload)
-          if (p.semantics.containsProtocolOwnedFields(payload))
+          if (!p.semantics.reference(payload) && p.semantics.containsReferences(payload))
+            fail({}, DiagnosticCode::InvalidCore,
+                 "nested reference payload requires a recursive region contract");
+          else if (p.semantics.containsProtocolOwnedFields(payload))
             fail({}, DiagnosticCode::InvalidCore,
                  "missing protocolled enum payload field contract");
   }
   for (const auto &type : p.semantics.types)
     if (type.kind == hir::Type::Reference &&
         (!p.semantics.supportsStoredSharedReference(type.element) || type.width != 1 ||
+         (type.referenceAccess != Access::Shared && type.referenceAccess != Access::Unique) ||
          type.dropGlue != hir::DropGlue::Trivial ||
          type.representation != hir::Representation::Stack))
       fail({}, DiagnosticCode::InvalidCore, "invalid stored-reference representation");
   for (const auto &function : p.semantics.functions) {
+    if (function.resultAccess != Access::Shared &&
+        !(function.resultAccess == Access::Unique &&
+          (containerMutableBorrowIntrinsic(function.intrinsicId) ||
+           p.semantics.exclusivePayloadResult(function))))
+      fail(function.loc, DiagnosticCode::InvalidCore, "unsupported exclusive result contract");
+    if (!p.semantics.referenceCapability(function.result, function.resultAccess))
+      fail(function.loc, DiagnosticCode::InvalidCore, "invalid result reference capability");
     if (!function.foreignC && (function.variadic || function.variadicDeclaration != None))
       fail(function.loc, DiagnosticCode::InvalidCore, "variadics require the public C ABI");
     if (function.foreignC && !ffi::signature(p.semantics, function))
@@ -165,6 +184,9 @@ void checkTypes(const Program &p) {
           intrinsicSignature(function.intrinsicId, function.owner, function.result) != abi)
         fail(function.loc, DiagnosticCode::InvalidCore, "invalid trusted runtime ABI contract");
     }
+    if (intrinsicInfo(function.intrinsicId).lowering == IntrinsicLowering::StringRecord &&
+        !validStringIntrinsic(p.semantics, function))
+      fail(function.loc, DiagnosticCode::InvalidCore, "invalid String intrinsic contract");
     bool consuming = function.owner != None &&
                      (p.semantics.types.at(function.owner).kind == hir::Type::Enum ||
                       function.intrinsicId == IntrinsicId::Box_into_inner) &&
@@ -184,15 +206,13 @@ void checkTypes(const Program &p) {
     if (function.resultOrigin != None) {
       if (function.resultOrigin >= p.semantics.symbols.size() || function.external ||
           (!function.intrinsic.empty() && !containerBorrowIntrinsic(function.intrinsicId)) ||
-          (function.owner != None &&
-           ((function.resultBorrowedContainer && !containerBorrowIntrinsic(function.intrinsicId)) ||
-            p.semantics.types[function.owner].protocol != None)) ||
+          (function.owner != None && p.semantics.types[function.owner].protocol != None) ||
           (!function.resultPayloadSource &&
            std::find(function.params.begin(), function.params.end(), function.resultOrigin) ==
                function.params.end()))
         fail(function.loc, DiagnosticCode::InvalidCore, "invalid reference result origin");
       const auto &origin = p.semantics.symbols[function.resultOrigin];
-      if (!origin.reference || origin.access != Access::Shared ||
+      if (!origin.reference || origin.access != function.resultAccess ||
           !(function.resultBorrowedContainer
                 ? p.semantics.borrowedPayloadResultCompatible(origin.type, function.result)
                 : p.semantics.borrowResultCompatible(origin.type, function.result)))
@@ -223,8 +243,10 @@ void checkTypes(const Program &p) {
         fail(function.loc, DiagnosticCode::InvalidCore, "invalid payload parameter contract");
       const auto &parameter = p.semantics.symbols[contract.parameter];
       const auto &origin = p.semantics.symbols[contract.origin];
-      if (parameter.reference || parameter.receiver || !origin.reference || !origin.parameter ||
-          origin.receiver || origin.access != Access::Shared || origin.region != contract.region ||
+
+      if (parameter.reference || (parameter.receiver && parameter.access != Access::Shared) ||
+          !origin.reference || !origin.parameter || origin.receiver ||
+          origin.access != Access::Shared || origin.region != contract.region ||
           p.semantics.borrowedPayloadInputType(parameter.type) != origin.type)
         fail(function.loc, DiagnosticCode::InvalidCore, "invalid payload origin contract");
     }
@@ -255,6 +277,16 @@ void checkTypes(const Program &p) {
       if (std::find(function.params.begin(), function.params.end(), id) == function.params.end() &&
           !resultPayloadOrigins.contains(id))
         fail(function.loc, DiagnosticCode::InvalidCore, "additional origin has no input contract");
+    for (auto id : function.payloadInspectionParameters) {
+      if (id >= p.semantics.symbols.size() || function.external || !function.intrinsic.empty() ||
+          std::find(function.params.begin(), function.params.end(), id) == function.params.end() ||
+          !payloadParameters.insert(id).second)
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid payload inspection contract");
+      const auto &parameter = p.semantics.symbols[id];
+      if (!parameter.receiver || parameter.reference || parameter.access != Access::Shared ||
+          !p.semantics.opaqueBorrowedPayload(parameter.type))
+        fail(function.loc, DiagnosticCode::InvalidCore, "invalid opaque payload receiver");
+    }
     for (auto id : function.params)
       if (p.semantics.containsReferences(p.semantics.symbols[id].type) !=
           payloadParameters.contains(id))
@@ -262,7 +294,9 @@ void checkTypes(const Program &p) {
     if (function.resultOrigin == None && !function.external && function.intrinsic.empty() &&
         (p.semantics.containsReferences(function.result) ||
          p.semantics.types.at(function.result).protocol != None ||
-         (!p.semantics.heap(function.result) && p.semantics.needsDrop(function.result))))
+         (!p.semantics.heap(function.result) && p.semantics.needsDrop(function.result) &&
+          p.semantics.types.at(function.result).kind != hir::Type::Structure &&
+          p.semantics.types.at(function.result).kind != hir::Type::Enum)))
       fail(function.loc, DiagnosticCode::InvalidCore, "unsupported result transfer contract");
   }
   if (!p.semantics.library) {
@@ -281,8 +315,10 @@ void checkTypes(const Program &p) {
     std::map<ValueId, Access> references;
     for (const auto &region : signature.parameterRegions) {
       const auto &symbol = p.semantics.symbols.at(region.parameter);
-      if (!symbol.parameter || !symbol.reference || symbol.region != region.region ||
-          (region.kind == BorrowKind::Shared) != (symbol.access == Access::Shared))
+      const auto reference = p.semantics.symbolReference(region.parameter);
+      if (!symbol.parameter || !symbol.reference || !reference ||
+          reference->region != region.region ||
+          (region.kind == BorrowKind::Shared) != (reference->capability == Access::Shared))
         fail(symbol.loc, DiagnosticCode::InvalidCore, "invalid parameter-region contract");
     }
     for (auto id : signature.params) {
@@ -306,7 +342,8 @@ void checkTypes(const Program &p) {
         for (auto value : i.args)
           if (references.contains(value) && i.kind != Inst::Call && i.kind != Inst::ForeignCall &&
               i.kind != Inst::ProtocolTransition && i.kind != Inst::Return &&
-              i.kind != Inst::BorrowShared && i.kind != Inst::RawAddress)
+              i.kind != Inst::BorrowShared && i.kind != Inst::BorrowUnique &&
+              i.kind != Inst::RawAddress)
             bad();
         auto expect = [&](TypeId got, TypeId wanted) {
           if (got != wanted)
@@ -335,7 +372,8 @@ void checkTypes(const Program &p) {
           --unsafeDepth;
           continue;
         }
-        if (!i.fieldPath.empty() && i.kind != Inst::RawLoad && i.kind != Inst::RawStore &&
+        if (!i.fieldPath.empty() && i.kind != Inst::StructInit && i.kind != Inst::RawLoad &&
+            i.kind != Inst::RawStore &&
             !(i.placeProjection == Inst::PlaceProjection::Field &&
               (i.kind == Inst::BorrowShared || i.kind == Inst::BorrowUnique)))
           bad();
@@ -394,19 +432,24 @@ void checkTypes(const Program &p) {
         case Inst::UnsafeScope:
           bad();
           break;
-        case Inst::StoreReference:
-          if (!p.semantics.reference(i.type) || p.semantics.types[i.type].element != slot() ||
-              !p.semantics.symbols.at(i.slot).reference ||
-              p.semantics.symbols.at(i.slot).access != Access::Shared)
+        case Inst::StoreReference: {
+          const auto stored = p.semantics.referenceInfo(i.type);
+          const auto source = p.semantics.symbolReference(i.slot);
+          if (!stored || stored->referent != slot() || stored->capability != Access::Shared ||
+              !p.semantics.symbols.at(i.slot).reference || !source ||
+              source->capability != Access::Shared)
             bad();
           break;
-        case Inst::ReferenceArgument:
+        }
+        case Inst::ReferenceArgument: {
           expect(slot(), i.type);
           references[i.result] = i.access;
-          if (!p.semantics.symbols.at(i.slot).reference ||
-              p.semantics.symbols.at(i.slot).access != i.access)
+          const auto reference = p.semantics.symbolReference(i.slot);
+          if (!p.semantics.symbols.at(i.slot).reference || !reference ||
+              reference->capability != i.access)
             bad();
           break;
+        }
         case Inst::BorrowShared:
         case Inst::BorrowUnique: {
           if (i.placeProjection != Inst::PlaceProjection::None) {
@@ -426,14 +469,14 @@ void checkTypes(const Program &p) {
               }
               const auto &from = p.semantics.types[type];
               const auto &to = p.semantics.types[i.type];
-              bool array = from.kind == hir::Type::Array && scalar(from.element);
+              bool array = from.kind == hir::Type::Array;
               if (!(array && to.kind == hir::Type::Slice && from.element == to.element))
                 expect(type, i.type);
               if (!(scalar(i.type) && i.kind == Inst::BorrowShared) && !array &&
                   !p.semantics.ownedFieldType(i.type))
                 bad();
             } else {
-              if (i.kind != Inst::BorrowShared || !scalar(i.type))
+              if (!scalar(i.type) && p.semantics.types[i.type].kind != hir::Type::Array)
                 bad();
               if ((source.kind != hir::Type::Array && source.kind != hir::Type::Slice) ||
                   i.args.size() != 1)
@@ -444,13 +487,20 @@ void checkTypes(const Program &p) {
                 bad();
             }
           } else if (!i.args.empty()) {
-            if (i.kind != Inst::BorrowShared || i.args.size() != 1 ||
-                !references.contains(i.args[0]) || references.at(i.args[0]) != Access::Shared ||
-                i.projection)
+            auto access = i.kind == Inst::BorrowShared ? Access::Shared : Access::Unique;
+            if (i.args.size() != 1 || !references.contains(i.args[0]) ||
+                references.at(i.args[0]) != access || i.projection)
               bad();
             expect(arg(0), i.type);
           }
           if (i.offset >= p.semantics.symbols.size())
+            bad();
+          const auto &alias = p.semantics.symbols.at(i.offset);
+          const auto reference = p.semantics.symbolReference(i.offset);
+          if (!alias.reference || !reference ||
+              reference->capability !=
+                  (i.kind == Inst::BorrowShared ? Access::Shared : Access::Unique) ||
+              reference->region != i.region)
             bad();
           expect(p.semantics.symbols.at(i.offset).type, i.type);
           if (i.placeProjection != Inst::PlaceProjection::None || !i.args.empty()) {
@@ -470,11 +520,19 @@ void checkTypes(const Program &p) {
               for (size_t n = 0; n < variant.payload.size(); ++n)
                 if (p.semantics.payloadOffset(slot(), variant.id, n) == i.projection &&
                     (variant.payload[n] == i.type ||
-                     (i.kind == Inst::BorrowShared && p.semantics.reference(variant.payload[n]) &&
+                     (p.semantics.reference(variant.payload[n]) &&
+                      p.semantics.types[variant.payload[n]].referenceAccess ==
+                          (i.kind == Inst::BorrowShared ? Access::Shared : Access::Unique) &&
                       p.semantics.types[variant.payload[n]].element == i.type)))
                   found = true;
             if (!found || p.semantics.types[i.type].protocol != None ||
-                (i.kind == Inst::BorrowUnique && !p.semantics.heap(i.type)))
+                (i.kind == Inst::BorrowUnique && !p.semantics.heap(i.type) &&
+                 !std::any_of(t.variants.begin(), t.variants.end(), [&](const auto &variant) {
+                   return std::any_of(variant.payload.begin(), variant.payload.end(), [&](auto pt) {
+                     return p.semantics.reference(pt) && p.semantics.types[pt].element == i.type &&
+                            p.semantics.types[pt].referenceAccess == Access::Unique;
+                   });
+                 })))
               bad();
           }
           break;
@@ -518,10 +576,16 @@ void checkTypes(const Program &p) {
           expect(arg(0), i.type);
           break;
         case Inst::ArrayRepeat:
-          if (p.semantics.types[i.type].kind != hir::Type::Array || i.args.size() != 1 ||
-              !scalar(p.semantics.types[i.type].element))
+          if (p.semantics.types[i.type].kind != hir::Type::Array || i.args.size() != 1)
             bad();
-          expect(arg(0), p.semantics.types[i.type].element);
+          {
+            auto element = p.semantics.types[i.type].element;
+            while (i.text == "zero" && p.semantics.types[element].kind == hir::Type::Array)
+              element = p.semantics.types[element].element;
+            if (!scalar(element))
+              bad();
+            expect(arg(0), element);
+          }
           break;
         case Inst::Array:
           if (p.semantics.types[i.type].kind != hir::Type::Array ||
@@ -601,6 +665,20 @@ void checkTypes(const Program &p) {
             expect(arg(n), v.payload[n]);
           break;
         }
+        case Inst::StructInit: {
+          const auto &type = p.semantics.types[i.type];
+          if (type.kind != hir::Type::Structure || p.semantics.heap(i.type) ||
+              i.args.size() != type.fields.size() || i.fieldPath.size() != type.fields.size())
+            bad();
+          std::set<uint32_t> fields;
+          for (size_t n = 0; n < i.args.size(); ++n) {
+            auto field = i.fieldPath[n];
+            if (field >= type.fields.size() || !fields.insert(field).second)
+              bad();
+            expect(arg(n), type.fields[field].type);
+          }
+          break;
+        }
         case Inst::Create:
           if (p.semantics.types[i.type].kind != hir::Type::Structure ||
               p.semantics.dynamicContainer(i.type))
@@ -651,9 +729,9 @@ void checkTypes(const Program &p) {
           expect(arg(0), Bool);
           break;
         case Inst::Return:
-          if (signature.returnsReference()) {
+          if (auto result = p.semantics.functionReferenceResult(f.id)) {
             if (i.args.size() != 1 || !references.contains(i.args[0]) ||
-                references.at(i.args[0]) != Access::Shared)
+                references.at(i.args[0]) != result->capability)
               bad();
           } else if (!i.args.empty() && references.contains(i.args[0]))
             bad();
@@ -680,8 +758,8 @@ void checkTypes(const Program &p) {
           if ((i.kind == Inst::ForeignCall) != (target.foreignC && target.external) ||
               ((target.unsafeFunction || (target.foreignC && target.external)) && !unsafeDepth))
             bad();
-          if (target.returnsReference())
-            references[i.result] = Access::Shared;
+          if (auto result = p.semantics.functionReferenceResult(i.function))
+            references[i.result] = result->capability;
           if (i.intrinsicId != target.intrinsicId)
             bad();
           size_t skip = i.slot == None ? 0 : 1;

@@ -1,0 +1,31 @@
+@import "std.vec"
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(1);
+  let s = values.as_mut_slice();
+  match s.first_mut() {
+    Some(value) => {
+      value = 10;
+    },
+    None => {}
+  }
+  match s.last_mut() {
+    Some(value) => {
+      value = 20;
+    },
+    None => {}
+  }
+  let missing = s.get_mut(1);
+  print(missing.is_none());
+  missing.drop();
+  match s.first() {
+    Some(value) => print(value),
+    None => {}
+  }
+  match s.last() {
+    Some(value) => print(value),
+    None => {}
+  }
+  values.push(30);
+  print(values.len());
+}

@@ -1,0 +1,24 @@
+fn at(values: &mut i32[], index: usize) -> Option<&mut i32> {
+  return values.get_mut(index);
+}
+fn forward(values: &mut i32[], index: usize) -> Option<&mut i32> {
+  let result = at(values, index);
+  return result.move();
+}
+fn main() {
+  let data = [10, 20];
+  let edit: &mut i32[] = &mut data;
+  let result = forward(edit, 1);
+  print(result.is_some());
+  print(result.is_none());
+  let moved = result.move();
+  match moved {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+  edit[0] = 11;
+  print(data[0]);
+  print(data[1]);
+}

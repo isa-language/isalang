@@ -1,0 +1,6 @@
+@import "std.vec" fn main() {
+  let text = String::from("a");
+  let v = Vec<String> {
+    text
+  };
+}

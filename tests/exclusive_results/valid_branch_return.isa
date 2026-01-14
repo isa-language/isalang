@@ -1,0 +1,25 @@
+fn select(values: &mut i32[], front: bool) -> Option<&mut i32> {
+  if front {
+    return values.first_mut();
+  }
+  let last = values.last_mut();
+  return last.move();
+}
+fn main() {
+  let data = [10, 20];
+  let edit: &mut i32[] = &mut data;
+  match select(edit, true) {
+    Some(value) => {
+      value = 11;
+    },
+    None => {}
+  }
+  match select(edit, false) {
+    Some(value) => {
+      value = 22;
+    },
+    None => {}
+  }
+  print(data[0]);
+  print(data[1]);
+}

@@ -1,0 +1,44 @@
+fn first(values: &i32[]) -> Option<&i32> {
+  return values.first();
+}
+fn last(values: &i32[]) -> Option<&i32> {
+  return values.last();
+}
+fn get(values: &i32[], index: usize) -> Option<&i32> {
+  return values.get(index);
+}
+fn edit(values: &mut i32[]) {
+  let item = values.get_mut(0);
+  print(item.is_some());
+  print(item.is_none());
+  let moved = item.move();
+  match moved {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+  values[1] = 20;
+  match values.last_mut() {
+    Some(value) => {
+      value = 30;
+    },
+    None => {}
+  }
+}
+fn main() {
+  let a: i32[3] = [1, 2, 3];
+  edit(&mut a);
+  match first(&a) {
+    Some(value) => print(value),
+    None => {}
+  }
+  match last(&a) {
+    Some(value) => print(value),
+    None => {}
+  }
+  match get(&a, 1) {
+    Some(value) => print(value),
+    None => {}
+  }
+}

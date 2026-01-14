@@ -1,0 +1,24 @@
+@import "std.buffer"
+struct Inner {
+  data: Buffer,
+}
+struct Outer {
+  inner: Inner,
+}
+fn main() {
+  let b = Buffer::new(2);
+  b.release();
+  let outer = Outer {
+    inner: Inner {
+      data: b.move()
+    }
+  };
+  let moved = outer.move();
+  let active = Inner {
+    data: Buffer::new(1)
+  };
+  active.data.write(0, 42);
+  print(active.data.read(0));
+  let taken = active.data.move();
+  taken.release();
+}

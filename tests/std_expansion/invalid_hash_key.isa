@@ -1,0 +1,8 @@
+@import "std.collections"
+struct NoHash {
+  id: i32,
+}
+fn main() {
+  let map = HashMap<NoHash, i32>::create();
+  map.insert(NoHash::new(), 1);
+}

@@ -1,0 +1,20 @@
+fn main() {
+  let data = [1, 2];
+  let a = data.get(0);
+  let b = data.get(1);
+  print(a.is_some());
+  print(b.is_some());
+  match a {
+    Some(value) => print(value),
+    None => {}
+  }
+  match b {
+    Some(value) => print(value),
+    None => {}
+  }
+  let c = data.get_mut(9);
+  print(c.is_none());
+  c.drop();
+  data[0] = 42;
+  print(data[0]);
+}

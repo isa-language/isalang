@@ -1,0 +1,13 @@
+@import "std.vec" fn edit(v: &mut Vec<i32>) {
+  let last = v.last_mut();
+  return;
+}
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(4);
+  edit(&mut v);
+  let r = v.first_mut();
+  r.drop();
+  v.push(5);
+  print(v.len());
+}

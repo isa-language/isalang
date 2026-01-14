@@ -1,0 +1,20 @@
+@import "std.vec"
+fn main() {
+  let values = Vec<i32>::new();
+  let view = values.as_slice();
+  print(view.get(0).is_none());
+  print(view.first().is_none());
+  print(view.last().is_none());
+  let edit = values.as_mut_slice();
+  let a = edit.get_mut(0);
+  print(a.is_none());
+  a.drop();
+  let b = edit.first_mut();
+  print(b.is_none());
+  b.drop();
+  let c = edit.last_mut();
+  print(c.is_none());
+  c.drop();
+  values.push(42);
+  print(values.at_copy(0));
+}

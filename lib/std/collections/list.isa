@@ -1,0 +1,32 @@
+@import "std.vec"
+
+@initializer("create", "push")
+@iteration("len", "get")
+pub struct List<T> {
+  values: Vec<T>,
+}
+impl<T> List<T> {
+  pub fn create() -> List<T> {
+    let list = List<T>::new();
+    list.values = Vec<T>::new();
+    return list.move();
+  }
+  pub fn len(shared self) -> usize {
+    return self.values.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.values.is_empty();
+  }
+  pub fn push(unique self, value: T) {
+    self.values.push(value.move());
+  }
+  pub fn pop(unique self) -> Option<T> {
+    return self.values.pop();
+  }
+  pub fn get(shared self, index: usize) -> Option<&T> {
+    return self.values.get(index);
+  }
+  pub fn clear(unique self) {
+    self.values.clear();
+  }
+}

@@ -1,0 +1,84 @@
+@import("std.string", "std.fmt", "std.option")
+
+pub struct Path {
+  text: String,
+}
+impl Path {
+  pub fn from(text: str) -> Path {
+    let path = Path::new();
+    path.text = String::from(text);
+    return path.move();
+  }
+  pub fn to_string(shared self) -> String {
+    return String::from(self.text.as_str());
+  }
+  pub fn is_absolute(shared self) -> bool {
+    match self.text.char_at(0) {
+      Some(ch) => {
+        return ch == '/';
+      },
+      None => {
+        return false;
+      }
+    }
+  }
+  pub fn is_relative(shared self) -> bool {
+    return !self.is_absolute();
+  }
+  pub fn join(shared self, other: str) -> Path {
+    let right = String::from(other);
+    match right.char_at(0) {
+      Some(ch) => {
+        if ch == '/' {
+          return Path::from(other);
+        }
+      },
+      None => {}
+    }
+    let output = self.to_string();
+    if !output.is_empty() {
+      let last = output.len() - 1;
+      let slash = false;
+      match output.char_at(last) {
+        Some(ch) => {
+          slash = ch == '/';
+        },
+        None => {}
+      }
+      if !slash {
+        output.push_str("/");
+      }
+    }
+    output.push_str(other);
+    return Path::from(output.as_str());
+  }
+  pub fn file_name(shared self) -> Option<String> {
+    if self.text.is_empty() {
+      return Option::None;
+    }
+    let start = 0usize;
+    for i in 0usize..self.text.len() {
+      match self.text.char_at(i) {
+        Some(ch) => {
+          if ch == '/' {
+            start = i + 1;
+          }
+        },
+        None => {}
+      }
+    }
+    if start == self.text.len() {
+      return Option::None;
+    }
+    let output = String::new();
+    for i in start..self.text.len() {
+      match self.text.char_at(i) {
+        Some(ch) => {
+          output.fmt_char(ch);
+        },
+        None => {}
+      }
+    }
+    return Option::Some(output.move());
+  }
+}

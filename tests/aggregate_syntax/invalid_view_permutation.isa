@@ -1,0 +1,13 @@
+fn main() {
+  let a: i32[2][2] = {
+    {
+      1,
+      2
+    },
+    {
+      3,
+      4
+    }
+  };
+  for v in a.view_mut().permute_axes(0, 0).elements_mut() {}
+}

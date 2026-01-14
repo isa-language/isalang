@@ -1,0 +1,39 @@
+@import "std.vec"
+@macro make_vec {
+  ($($value: expr), *) => {
+    Vec<i32> {
+      $($value),
+      *
+    }
+  }
+}
+fn sum(values: &i32[]) -> i32 {
+  let total = 0;
+  for value in values {
+    total = total + value;
+  }
+  return total;
+}
+struct Data {
+  cells: i32[3],
+}
+fn main() {
+  let v = @make_vec(1, 2, 3);
+  for value in v.as_slice() {
+    print(value);
+  }
+  let data = Data {
+    cells: {
+      4,
+      5,
+      6
+    }
+  };
+  print(sum(&data.cells));
+  for value in &mut data.cells {
+    value = value + 1;
+  }
+  for value in &data.cells {
+    print(value);
+  }
+}

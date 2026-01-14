@@ -1,0 +1,29 @@
+@import("std.vec", "std.box")
+
+fn main() -> i32 {
+  let values = Vec<i32>::new();
+  values.push(10);
+  values.push(20);
+
+  match values.get_mut(0) {
+    Some(value) => {
+      value = 42;
+    },
+    None => {},
+  }
+
+  let view = values.as_slice();
+  @println("first = {}, length = {}", view[0], view.len());
+
+  let edit = values.as_mut_slice();
+  edit[1] = 99;
+  @println("second = {}", edit[1]);
+  values.push(30);
+
+  let boxed = Box<String>::new(String::from("Isalang"));
+  let text = boxed.get_mut();
+  text.push_str("!");
+  @println("{}", text);
+
+  return 0;
+}

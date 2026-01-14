@@ -1,0 +1,13 @@
+fn choose(a: &i32[], b: &i32[], left: bool) -> Option<&i32> {
+  if left {
+    return a.first();
+  }
+  return b.last();
+}
+fn main() {
+  let a = [10, 20];
+  let b = [30, 40];
+  let item = choose(&a, &b, true);
+  b[0] = 42;
+  print(item.is_some());
+}

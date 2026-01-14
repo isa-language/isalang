@@ -1,0 +1,44 @@
+@import "std.collections"
+struct Pair {
+  first: i32,
+  second: i32,
+}
+fn next(counter: &mut i32) -> i32 {
+  counter = counter + 1;
+  print(counter);
+  return counter;
+}
+fn index(value: usize) -> usize {
+  print(value);
+  return value;
+}
+fn main() {
+  let counter = 0;
+  let p = Pair {
+    second: next(&mut counter),
+    first: next(&mut counter)
+  };
+  print(p.first);
+  print(p.second);
+  let v = Vec<i32> {
+    next(&mut counter),
+    next(&mut counter)
+  };
+  print(v.len());
+  let m = HashMap<i32, i32> {
+    next(&mut counter) => next(&mut counter)
+  };
+  print(m.len());
+  let array: i32[2][2] = {
+    {
+      1,
+      2
+    },
+    {
+      3,
+      4
+    }
+  };
+  array[index(1)][index(0)] = array[1][0] + 1;
+  print(array[1][0]);
+}

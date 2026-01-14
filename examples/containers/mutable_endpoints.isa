@@ -1,0 +1,44 @@
+@import "std.vec"
+
+fn decorate(values: &mut Vec<String>) {
+  let first = values.first_mut();
+  @println("has first = {}", first.is_some());
+  match first {
+    Some(text) => {
+      text.push_str("!");
+    },
+    None => {},
+  }
+
+  let last = values.last_mut();
+  @println("has last = {}", !last.is_none());
+  match last {
+    Some(text) => {
+      text.push_str("?");
+    },
+    None => {},
+  }
+
+  values.push(String::from("next"));
+}
+
+fn main() -> i32 {
+  let values = Vec<String>::new();
+  values.push(String::from("Olá"));
+  values.push(String::from("Isalang"));
+  decorate(&mut values);
+  match values.get(0) {
+    Some(text) => {
+      @println("{}", text);
+    },
+    None => {},
+  }
+  match values.get(1) {
+    Some(text) => {
+      @println("{}", text);
+    },
+    None => {},
+  }
+  @println("elements = {}", values.len());
+  return 0;
+}

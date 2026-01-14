@@ -1,0 +1,137 @@
+@import "std.vec"
+
+@initializer("create", "push_back")
+pub struct VecDeque<T> {
+  values: Vec<T>,
+  slots: Vec<usize>,
+  positions: Vec<usize>,
+  head: usize,
+}
+impl<T> VecDeque<T> {
+  pub fn create() -> VecDeque<T> {
+    let deque = VecDeque<T>::new();
+    deque.values = Vec<T>::new();
+    deque.slots = Vec<usize>::new();
+    deque.positions = Vec<usize>::new();
+    deque.head = 0;
+    return deque.move();
+  }
+  pub fn len(shared self) -> usize {
+    return self.values.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.values.is_empty();
+  }
+  pub fn capacity(shared self) -> usize {
+    return self.slots.len();
+  }
+  fn position(shared self, index: usize) -> usize {
+    let capacity = self.slots.len();
+    if self.head >= capacity || index >= capacity {
+      panic("invalid deque position");
+    }
+    let tail = capacity - self.head;
+    if index >= tail {
+      return index - tail;
+    }
+    return self.head + index;
+  }
+  fn grow(unique self) {
+    let old_capacity = self.slots.len();
+    let count = self.values.len();
+    if count < old_capacity {
+      return;
+    }
+    if old_capacity >(0usize - 1) / 2 {
+      panic("deque capacity overflow");
+    }
+    let capacity = old_capacity * 2;
+    if capacity == 0 {
+      capacity = 8;
+    }
+    let slots = Vec<usize>::with_capacity(capacity);
+    for i in 0usize..capacity {
+      slots.push(0);
+    }
+    for i in 0usize..count {
+      let dense = self.slots.at_copy(self.position(i));
+      slots.replace(i, dense);
+      self.positions.replace(dense, i);
+    }
+    self.slots = slots.move();
+    self.head = 0;
+  }
+  pub fn push_back(unique self, value: T) {
+    self.grow();
+    let dense = self.values.len();
+    let position = self.position(dense);
+    self.values.push(value.move());
+    self.positions.push(position);
+    self.slots.replace(position, dense);
+  }
+  pub fn push_front(unique self, value: T) {
+    self.grow();
+    let head = self.head;
+    if head == 0 {
+      head = self.slots.len();
+    }
+    head = head - 1;
+    let dense = self.values.len();
+    self.values.push(value.move());
+    self.positions.push(head);
+    self.slots.replace(head, dense);
+    self.head = head;
+  }
+  fn remove_slot(unique self, position: usize) -> Option<T> {
+    let dense = self.slots.at_copy(position);
+    let last = self.values.len() - 1;
+    self.values.swap(dense, last);
+    if dense != last {
+      let moved_position = self.positions.at_copy(last);
+      self.positions.replace(dense, moved_position);
+      self.slots.replace(moved_position, dense);
+    }
+    self.positions.pop();
+    return self.values.pop();
+  }
+  pub fn pop_front(unique self) -> Option<T> {
+    if self.values.is_empty() {
+      return Option::None;
+    }
+    let position = self.head;
+    let result = self.remove_slot(position);
+    self.head = position + 1;
+    if self.head == self.slots.len() {
+      self.head = 0;
+    }
+    return result.move();
+  }
+  pub fn pop_back(unique self) -> Option<T> {
+    if self.values.is_empty() {
+      return Option::None;
+    }
+    let position = self.position(self.values.len() - 1);
+    return self.remove_slot(position);
+  }
+  pub fn get(shared self, index: usize) -> Option<&T> {
+    if index >= self.values.len() {
+      return Option::None;
+    }
+    let dense = self.slots.at_copy(self.position(index));
+    return self.values.get(dense);
+  }
+  pub fn front(shared self) -> Option<&T> {
+    return self.get(0);
+  }
+  pub fn back(shared self) -> Option<&T> {
+    if self.values.is_empty() {
+      return Option::None;
+    }
+    return self.get(self.values.len() - 1);
+  }
+  pub fn clear(unique self) {
+    self.values.clear();
+    self.positions.clear();
+    self.head = 0;
+  }
+}

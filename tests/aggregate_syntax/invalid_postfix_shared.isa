@@ -1,0 +1,6 @@
+fn main() {
+  let i = 1;
+  let r = &i;
+  r++;
+  @println("{}", r);
+}

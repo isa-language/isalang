@@ -23,6 +23,8 @@ impl<T> Box<T> {
   pub fn new(value: T) -> Box<T>;
   @intrinsic "box.generic.get"
   pub fn get(shared self) -> &T;
+  @intrinsic "box.generic.get_mut"
+  pub fn get_mut(unique self) -> &mut T;
   @intrinsic "box.generic.into_inner"
   pub fn into_inner(self) -> T;
 }

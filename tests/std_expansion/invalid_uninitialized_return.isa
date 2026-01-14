@@ -1,0 +1,11 @@
+@import "std.vec"
+struct Owner<T> {
+  values: Vec<T>,
+}
+fn bad() -> Owner<i32> {
+  let x = Owner<i32>::new();
+  return x.move();
+}
+fn main() {
+  let x = bad();
+}

@@ -1,0 +1,8 @@
+@import("std.vec", "std.box")
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let a = v.get_mut(0);
+  v.drop();
+  a.drop();
+}

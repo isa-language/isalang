@@ -1,0 +1,11 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<i32>::new();
+  let s = v.as_slice();
+  print(s.len());
+  print(s.is_empty());
+  let m = v.as_mut_slice();
+  print(m.len());
+  v.push(1);
+  print(v.len());
+}

@@ -126,7 +126,8 @@ void compileNative(const std::string &ir, const std::string &output, NativeOptio
   if (!options.target.triple.empty())
     arguments.push_back("--target=" + options.target.triple);
   if (options.sanitize || options.counters)
-    arguments.insert(arguments.end(), {"-x", "c", ISAC_RUNTIME_SOURCE, "-I", ISAC_RUNTIME_INCLUDE});
+    arguments.insert(arguments.end(), {"-x", "c", ISAC_RUNTIME_SOURCE, ISAC_ALLOCATOR_SOURCE, "-I",
+                                       ISAC_RUNTIME_INCLUDE});
   else
     arguments.insert(arguments.end(), {"-x", "none", ISAC_RUNTIME_LIBRARY});
   if (!options.linkInputs.empty()) {

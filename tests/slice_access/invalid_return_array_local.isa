@@ -1,0 +1,9 @@
+fn bad(input: &i32[]) -> Option<&i32> {
+  let a = [1, 2];
+  return a.first();
+}
+fn main() {
+  let input = [3, 4];
+  let a = bad(&input);
+  print(a.is_some());
+}

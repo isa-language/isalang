@@ -1,7 +1,9 @@
 #include "isac/hir.hpp"
 #include "isac/ffi.hpp"
 #include "isac/macros.hpp"
+#include "isac/iteration.hpp"
 #include <algorithm>
+#include <deque>
 #include <functional>
 #include <map>
 #include <optional>
@@ -15,6 +17,7 @@ class Resolver {
   std::unordered_map<std::string, TypeId> types;
   std::unordered_map<std::string, GenericDeclId> genericNames;
   std::map<std::pair<GenericDeclId, std::vector<TypeId>>, TypeId> instanceCache;
+  std::set<std::pair<GenericDeclId, std::vector<TypeId>>> resolvingInstances;
   TypeParamId nextTypeParam = 0;
   std::map<TypeId, const ast::Struct *> structSources;
   std::map<TypeId, unsigned> structLayoutState;
@@ -133,6 +136,7 @@ class Resolver {
     TypeId owner;
   };
   std::vector<FunctionSource> functionSources;
+  std::deque<ast::Function> synthesizedMethods;
   std::map<std::pair<FunctionId, std::vector<TypeId>>, FunctionId> variadicInstances;
   FunctionId instantiateVariadic(FunctionId declaration, hir::Expr &expression) {
     const auto original = p.functions.at(declaration);
@@ -187,6 +191,13 @@ class Resolver {
   }
   std::set<std::pair<TypeId, std::string>> methodsDeclared;
   TypeId substitute(hir::GenericPayload payload, const hir::Substitution &sub) {
+    if (!payload.arguments.empty()) {
+      std::vector<TypeId> arguments;
+      for (const auto &argument : payload.arguments)
+        arguments.push_back(substitute(argument, sub));
+      return payload.id < p.genericEnums.size() ? instantiate(payload.id, arguments, {})
+                                                : instantiateStruct(payload.id, arguments, {});
+    }
     if (!payload.parameter)
       return payload.id;
     for (auto [parameter, type] : sub.types)
@@ -202,11 +213,14 @@ class Resolver {
     for (auto type : arguments)
       ensureStructLayout(type, loc);
     for (const auto &field : decl.fields)
-      if (!field.type.parameter)
+      if (!field.type.parameter && field.type.arguments.empty())
         ensureStructLayout(field.type.id, loc);
     auto key = std::make_pair(id, arguments);
     if (instanceCache.contains(key))
       return instanceCache.at(key);
+    if (!resolvingInstances.insert(key).second)
+      fail(loc, DiagnosticCode::InvalidPlace,
+           "recursive generic field layout involving `" + decl.name + "`");
     if (p.instances.size() >= 1024)
       fail(loc, DiagnosticCode::TypeMismatch, "generic instantiation limit reached (1024)");
     hir::GenericInstance instance{
@@ -227,16 +241,21 @@ class Resolver {
       type.representation = decl.representation;
       type.dropGlue = hir::DropGlue::ContainerElements;
       type.element = arguments[0];
-      auto tid = instance.type;
+      instance.id = static_cast<InstanceId>(p.instances.size());
+      auto tid = instance.type = static_cast<TypeId>(p.types.size());
       types[type.name] = tid;
       p.types.push_back(std::move(type));
       p.instances.push_back(std::move(instance));
       instanceCache.emplace(std::move(key), tid);
+      resolvingInstances.erase({id, arguments});
       return tid;
     }
     uint32_t offset = 0;
     for (const auto &field : decl.fields) {
       auto tid = substitute(field.type, instance.substitution);
+      if (p.containsReferences(tid))
+        fail(loc, DiagnosticCode::EscapingView,
+             "struct field `" + field.name + "` requires a recursive stored-region contract");
       if (!scalar(tid) && p.types[tid].kind != hir::Type::Array && !p.ownedFieldType(tid) &&
           !p.supportsStoredSharedReference(tid))
         fail(loc, DiagnosticCode::InvalidPlace,
@@ -248,16 +267,322 @@ class Resolver {
       offset += p.storageWidth(tid);
     }
     type.width = std::max(1u, offset);
-    auto tid = instance.type;
+    instance.id = static_cast<InstanceId>(p.instances.size());
+    auto tid = instance.type = static_cast<TypeId>(p.types.size());
     types[type.name] = tid;
     p.types.push_back(std::move(type));
     p.instances.push_back(std::move(instance));
     instanceCache.emplace(std::move(key), tid);
+    resolvingInstances.erase({id, arguments});
     return tid;
+  }
+  TypeId fixedArray(TypeId element, uint32_t count, Loc loc) {
+    if ((!scalar(element) && p.types[element].kind != hir::Type::Array) || !count ||
+        count > 65536 || p.storageWidth(element) > 65536 / count)
+      fail(loc, DiagnosticCode::InvalidIndex,
+           "fixed arrays require scalar leaves and at most 65536 storage cells");
+    auto name = p.types[element].name;
+    auto bracket = name.find('[');
+    name.insert(bracket == std::string::npos ? name.size() : bracket,
+                "[" + std::to_string(count) + "]");
+    if (types.contains(name))
+      return types.at(name);
+    auto id = static_cast<TypeId>(p.types.size());
+    auto width = count * p.storageWidth(element);
+    types[name] = id;
+    p.types.push_back({hir::Type::Array, name, None, element, count, width, {}});
+    return id;
+  }
+  const ast::Struct *structDeclaration(TypeId type) const {
+    if (structSources.contains(type))
+      return structSources.at(type);
+    for (const auto &instance : p.instances) {
+      if (instance.type != type || instance.declaration < p.genericEnums.size())
+        continue;
+      const auto &decl = p.genericStructs.at(instance.declaration - p.genericEnums.size());
+      for (const auto &source : ast.structs)
+        if (source.name == decl.name)
+          return &source;
+    }
+    return nullptr;
+  }
+  const std::vector<std::string> *initializerMethods(TypeId type) const {
+    auto source = structDeclaration(type);
+    return source && !source->initializerMethods.empty() ? &source->initializerMethods : nullptr;
+  }
+  struct IterationProtocol {
+    TypeId element;
+    std::string length, get;
+  };
+  struct ViewIteration {
+    struct Transformation {
+      ViewOperation kind;
+      Loc loc;
+      std::vector<ast::Expr> args;
+    };
+    ast::Expr source;
+    std::vector<Transformation> operations;
+    bool sourceUnique = false, unique = false, elements = false, reverse = false;
+  };
+  std::optional<ViewIteration> viewIteration(const ast::Expr &expression) {
+    const ast::Expr *base = &expression;
+    std::vector<const ast::Expr *> chain;
+    while (base->kind == ast::Expr::Method && !base->args.empty()) {
+      chain.push_back(base);
+      base = &base->args.front();
+    }
+    std::reverse(chain.begin(), chain.end());
+    if (chain.empty())
+      return std::nullopt;
+
+    bool elements = false;
+    size_t start = chain.size();
+    for (size_t n = 0; n < chain.size(); ++n) {
+      auto operation = findViewOperation(chain[n]->text);
+      if (!operation)
+        continue;
+      if (*operation == ViewOperation::View || *operation == ViewOperation::ViewMut)
+        start = n;
+      if (*operation == ViewOperation::Elements || *operation == ViewOperation::ElementsMut)
+        elements = true;
+    }
+    if (!elements || start == chain.size())
+      return std::nullopt;
+    auto root = *findViewOperation(chain[start]->text);
+    if (chain[start]->args.size() != 1)
+      fail(chain[start]->loc, DiagnosticCode::InvalidRange, "view()/view_mut() take no arguments");
+    ViewIteration plan;
+    plan.source = chain[start]->args.front();
+    plan.unique = root == ViewOperation::ViewMut;
+    plan.sourceUnique = plan.unique;
+    for (size_t n = start + 1; n < chain.size(); ++n) {
+      const auto &call = *chain[n];
+      auto operation = findViewOperation(call.text);
+      if (!operation)
+        fail(call.loc, DiagnosticCode::InvalidRange,
+             "unknown view/iterator operation `" + call.text + "`");
+      if (*operation == ViewOperation::Elements || *operation == ViewOperation::ElementsMut) {
+        if (plan.elements || call.args.size() != 1)
+          fail(call.loc, DiagnosticCode::InvalidRange,
+               "elements()/elements_mut() take no arguments and end the view chain");
+        if (*operation == ViewOperation::ElementsMut && !plan.unique)
+          fail(call.loc, DiagnosticCode::InvalidRange, "elements_mut() requires view_mut()");
+        plan.unique = *operation == ViewOperation::ElementsMut;
+        plan.elements = true;
+      } else if (*operation == ViewOperation::Reverse) {
+        if (!plan.elements || call.args.size() != 1)
+          fail(call.loc, DiagnosticCode::InvalidRange,
+               "rev() requires an elements iterator and takes no arguments");
+        plan.reverse = !plan.reverse;
+      } else {
+        if (plan.elements || *operation == ViewOperation::View ||
+            *operation == ViewOperation::ViewMut)
+          fail(call.loc, DiagnosticCode::InvalidRange,
+               "view transformations must precede elements()/elements_mut()");
+        plan.operations.push_back({*operation, call.loc, {call.args.begin() + 1, call.args.end()}});
+      }
+    }
+    if (!plan.elements)
+      fail(expression.loc, DiagnosticCode::InvalidRange,
+           "a for view requires elements()/elements_mut()");
+    return plan;
+  }
+
+  std::pair<ast::Expr, std::vector<ast::Expr>>
+  viewIndices(const ViewIteration &plan, TypeId owner, const ast::Expr &source,
+              const ast::Expr &index, const std::string &lengthMethod,
+              std::vector<ast::Stmt> &bindings, Loc loc, const std::string &prefix) {
+    using A = ast::Expr;
+    auto name = [&](const std::string &text) { return A{A::Name, loc, text, {}}; };
+    auto number = [&](uint64_t value) {
+      return A{A::Int, loc, std::to_string(value) + "usize", {}};
+    };
+    auto binary = [&](std::string op, A left, A right) {
+      return A{A::Binary, loc, std::move(op), {std::move(left), std::move(right)}};
+    };
+    size_t serial = 0;
+    auto bind = [&](A expression) {
+      auto text = prefix + std::to_string(serial++);
+      ast::Stmt statement{};
+      statement.kind = ast::Stmt::Let;
+      statement.loc = expression.loc;
+      statement.name = text;
+      statement.annotated = true;
+      statement.annotation = {"usize", 0, expression.loc};
+      statement.expr = std::move(expression);
+      bindings.push_back(std::move(statement));
+      return name(text);
+    };
+    struct Axis {
+      size_t original;
+      A start, length;
+      bool reverse = false;
+    };
+    std::vector<Axis> axes;
+    auto type = owner;
+    while (p.types.at(type).kind == hir::Type::Array) {
+      axes.push_back({axes.size(), number(0), number(p.types.at(type).count)});
+      type = p.types.at(type).element;
+    }
+    if (axes.empty())
+      axes.push_back({0, number(0), bind(A{A::Method, loc, lengthMethod, {source}})});
+    auto rank = axes.size();
+    auto axisNumber = [&](const A &argument) -> size_t {
+      auto value = expr(argument);
+      if (value.kind != hir::Expr::Constant || !integer(value.type) || value.text.starts_with('-'))
+        fail(argument.loc, DiagnosticCode::InvalidRange,
+             "view axes must be nonnegative compile-time integer constants");
+      auto axis = std::stoull(value.text);
+      if (axis >= rank)
+        fail(argument.loc, DiagnosticCode::InvalidRange, "view axis is outside the source rank");
+      return static_cast<size_t>(axis);
+    };
+    for (const auto &call : plan.operations) {
+      auto operation = call.kind;
+      auto arity = call.args.size();
+      if (operation == ViewOperation::Transpose) {
+        if (arity)
+          fail(call.loc, DiagnosticCode::InvalidRange, "transpose() takes no arguments");
+        std::reverse(axes.begin(), axes.end());
+      } else if (operation == ViewOperation::ReverseAxis) {
+        if (arity != 1)
+          fail(call.loc, DiagnosticCode::InvalidRange, "reverse_axis() requires one axis");
+        auto &axis = axes.at(axisNumber(call.args.at(0)));
+        axis.reverse = !axis.reverse;
+      } else if (operation == ViewOperation::PermuteAxes) {
+        if (arity != rank)
+          fail(call.loc, DiagnosticCode::InvalidRange,
+               "permute_axes() requires one distinct axis per dimension");
+        std::vector<Axis> reordered;
+        std::set<size_t> seen;
+        for (size_t n = 0; n < call.args.size(); ++n) {
+          auto axis = axisNumber(call.args[n]);
+          if (!seen.insert(axis).second)
+            fail(call.args[n].loc, DiagnosticCode::InvalidRange,
+                 "permute_axes() cannot duplicate an axis");
+          reordered.push_back(axes.at(axis));
+        }
+        axes = std::move(reordered);
+      } else if (operation == ViewOperation::Slice) {
+        if (arity != 3)
+          fail(call.loc, DiagnosticCode::InvalidRange, "slice() requires axis, start and end");
+        auto &axis = axes.at(axisNumber(call.args.at(0)));
+        auto start = bind(call.args.at(1)), end = bind(call.args.at(2));
+        ast::Stmt check{};
+        check.kind = ast::Stmt::If;
+        check.loc = call.loc;
+        check.expr = binary("||", binary(">", start, end), binary(">", end, axis.length));
+        ast::Stmt panic{};
+        panic.kind = ast::Stmt::Expression;
+        panic.loc = call.loc;
+        panic.expr = {A::Call,
+                      call.loc,
+                      "panic",
+                      {{A::String, call.loc, "view slice bounds out of range", {}}}};
+        check.body.push_back(std::move(panic));
+        bindings.push_back(std::move(check));
+        axis.start =
+            bind(binary("+", axis.start, axis.reverse ? binary("-", axis.length, end) : start));
+        axis.length = bind(binary("-", end, start));
+      }
+    }
+    A total = number(1);
+    for (const auto &axis : axes)
+      total = binary("*", total, axis.length);
+    total = bind(std::move(total));
+    A flat = plan.reverse ? binary("-", binary("-", total, number(1)), index) : index;
+    std::vector<A> coordinates(rank);
+    for (size_t axis = 0; axis < rank; ++axis) {
+      A stride = number(1);
+      for (size_t next = axis + 1; next < rank; ++next)
+        stride = binary("*", stride, axes[next].length);
+      auto coordinate = binary("%", binary("/", flat, stride), axes[axis].length);
+      if (axes[axis].reverse)
+        coordinate = binary("-", binary("-", axes[axis].length, number(1)), coordinate);
+      coordinates[axes[axis].original] = binary("+", axes[axis].start, coordinate);
+    }
+    return {std::move(total), std::move(coordinates)};
+  }
+  IterationProtocol iterationProtocol(TypeId owner, bool unique, Loc loc) {
+    auto shape = p.types.at(owner);
+    if (shape.kind == hir::Type::Array || shape.kind == hir::Type::Slice)
+      return {shape.element, "len", unique ? "get_mut" : "get"};
+    auto declaration = structDeclaration(owner);
+    if (!declaration || declaration->iterationMethods.empty())
+      fail(loc, DiagnosticCode::InvalidRange,
+           "collection for requires an array, slice or a type declaring @iteration");
+    const auto recipe = declaration->iterationMethods;
+    if (unique && recipe.size() != 3)
+      fail(loc, DiagnosticCode::InvalidRange, "@iteration does not declare mutable element access");
+    auto lengthName = recipe.at(0), getName = recipe.at(unique ? 2 : 1);
+    ensureMethods(owner, lengthName);
+    ensureMethods(owner, getName);
+    auto key = p.types.at(owner).name + "::";
+    if (!functions.contains(key + lengthName) || !functions.contains(key + getName))
+      fail(loc, DiagnosticCode::InvalidRange, "@iteration names an unknown method");
+    auto length = p.functions.at(functions.at(key + lengthName));
+    auto get = p.functions.at(functions.at(key + getName));
+    auto access = unique ? Access::Unique : Access::Shared;
+    const auto result = p.types.at(get.result);
+    bool valid = length.pub && get.pub && length.params.size() == 1 && length.owner == owner &&
+                 length.access == Access::Shared && length.result == USize &&
+                 length.resultOrigin == None && get.params.size() == 2 && get.owner == owner &&
+                 get.access == access && p.symbols.at(get.params.at(1)).type == USize &&
+                 !p.symbols.at(get.params.at(1)).reference && get.resultBorrowedContainer &&
+                 get.resultAccess == access && get.resultOrigin == get.params.front() &&
+                 get.additionalResultOrigins.empty() && result.kind == hir::Type::Enum &&
+                 result.variants.size() == 2;
+    TypeId element = None;
+    bool some = false, none = false;
+    for (const auto &variant : result.variants) {
+      if (variant.name == "None" && variant.payload.empty())
+        none = true;
+      if (variant.name == "Some" && variant.payload.size() == 1) {
+        const auto &payload = p.types.at(variant.payload.front());
+        some = payload.kind == hir::Type::Reference && payload.referenceAccess == access;
+        if (some)
+          element = payload.element;
+      }
+    }
+    if (!valid || !some || !none)
+      fail(loc, DiagnosticCode::InvalidRange,
+           "@iteration requires len(shared self) -> usize and get(shared/unique self, usize) "
+           "-> Option<&T>/Option<&mut T> bounded by self");
+    return {element, std::move(lengthName), std::move(getName)};
   }
   void ensureMethods(TypeId owner, const std::string &name) {
     if (!methodsDeclared.insert({owner, name}).second)
       return;
+    if (p.types[owner].kind == hir::Type::Array || p.types[owner].kind == hir::Type::Slice) {
+      if (!scalar(p.types[owner].element))
+        return;
+      auto intrinsic = findIntrinsic("slice." + name);
+      if (!elementSliceIntrinsic(intrinsic))
+        return;
+
+      ast::Function method{};
+      method.name = name;
+      method.trusted = method.pub = true;
+      method.intrinsic = std::string(intrinsicInfo(intrinsic).name);
+      auto capability =
+          containerMutableBorrowIntrinsic(intrinsic) ? Access::Unique : Access::Shared;
+      TypeSyntax receiverType{};
+      receiverType.name = p.types[owner].name;
+      method.params.push_back({"self", receiverType, capability, {}});
+      if (intrinsic == IntrinsicId::Slice_get || intrinsic == IntrinsicId::Slice_get_mut)
+        method.params.push_back({"index", TypeSyntax{"usize", 0, {}}, Access::Own, {}});
+      TypeSyntax payload{};
+      payload.name = p.types[p.types[owner].element].name;
+      payload.reference = true;
+      payload.mutableReference = capability == Access::Unique;
+      method.result.name = "Option";
+      method.result.arguments = {payload};
+      synthesizedMethods.push_back(std::move(method));
+      auto savedPrivilege = privileged;
+      declareFunction(synthesizedMethods.back(), owner);
+      privileged = savedPrivilege;
+      return;
+    }
     std::optional<hir::GenericInstance> instance;
     for (const auto &candidate : p.instances)
       if (candidate.type == owner)
@@ -292,19 +617,22 @@ class Resolver {
     activeOwner = std::move(savedOwner);
     privileged = savedPrivilege;
   }
-  std::map<TypeId, TypeId> sharedReferenceTypes;
-  TypeId storedReferenceType(TypeId element, Loc loc) {
+  std::map<std::pair<TypeId, Access>, TypeId> sharedReferenceTypes;
+  TypeId storedReferenceType(TypeId element, Loc loc, Access access = Access::Shared) {
     if (!p.supportsStoredSharedReference(element))
       fail(loc, DiagnosticCode::EscapingView,
            "stored references require a scalar, plain fixed stack aggregate or non-protocol heap "
            "wrapper");
-    if (sharedReferenceTypes.contains(element))
-      return sharedReferenceTypes.at(element);
+    auto key = std::make_pair(element, access);
+    if (sharedReferenceTypes.contains(key))
+      return sharedReferenceTypes.at(key);
     auto id = static_cast<TypeId>(p.types.size());
-    hir::Type type{hir::Type::Reference, "&" + p.types[element].name};
+    hir::Type type{hir::Type::Reference,
+                   (access == Access::Unique ? "&mut " : "&") + p.types[element].name};
     type.element = element;
+    type.referenceAccess = access;
     p.types.push_back(std::move(type));
-    sharedReferenceTypes[element] = id;
+    sharedReferenceTypes[key] = id;
     return id;
   }
   void storeReference(hir::Expr &expression) {
@@ -437,6 +765,35 @@ class Resolver {
     fail(l, DiagnosticCode::DuplicateDeclaration, "duplicate declaration `" + n + "`");
   }
   TypeId getType(const TypeSyntax &s, bool allowReference = false) {
+    if (!s.dimensions.empty()) {
+      auto base = s;
+      base.count = 0;
+      base.countName.clear();
+      base.dimensions.clear();
+      base.reference = false;
+      base.mutableReference = false;
+      auto element = getType(base);
+      std::vector<std::pair<int, std::string>> extents{{s.count, s.countName}};
+      extents.insert(extents.end(), s.dimensions.begin(), s.dimensions.end());
+      for (auto it = extents.rbegin(); it != extents.rend(); ++it) {
+        auto count = it->first;
+        if (!it->second.empty()) {
+          auto entry = binding(it->second, s.loc);
+          if (!entry || !entry->constant)
+            fail(s.loc, DiagnosticCode::InvalidConstant,
+                 "array size requires a previously declared constant");
+          const auto &value = p.constants[entry->id].value;
+          if (!integer(value.type) || value.text.starts_with('-') ||
+              std::stoull(value.text) > 65536)
+            fail(s.loc, DiagnosticCode::InvalidConstant, "array size must be in 1..65536");
+          count = static_cast<int>(std::stoull(value.text));
+        }
+        element = fixedArray(element, count, s.loc);
+      }
+      if (s.reference && !allowReference)
+        fail(s.loc, DiagnosticCode::EscapingView, "array references require a borrow contract");
+      return element;
+    }
     if (s.functionPointer) {
       std::vector<TypeId> parameters;
       for (size_t n = 0; n < s.arguments.size(); ++n) {
@@ -521,6 +878,12 @@ class Resolver {
            "region contracts are not implemented");
     if (!s.count && s.arguments.empty() && activeTypeParameters.contains(s.name))
       return substitute({true, activeTypeParameters.at(s.name)}, activeSubstitution);
+    if (s.count && s.arguments.empty() && activeTypeParameters.contains(s.name)) {
+      auto resolved = s;
+      resolved.name =
+          p.types[substitute({true, activeTypeParameters.at(s.name)}, activeSubstitution)].name;
+      return getType(resolved, allowReference);
+    }
     if (activeSelf != None && !s.count && s.arguments.empty() &&
         (s.name == "self" || s.name == activeOwner))
       return activeSelf;
@@ -528,10 +891,9 @@ class Resolver {
       std::vector<TypeId> arguments;
       for (const auto &argument : s.arguments) {
         if (argument.reference) {
-          if (argument.mutableReference)
-            fail(argument.loc, DiagnosticCode::EscapingView,
-                 "stored unique references are not supported yet");
-          arguments.push_back(storedReferenceType(getType(argument, true), argument.loc));
+          arguments.push_back(
+              storedReferenceType(getType(argument, true), argument.loc,
+                                  argument.mutableReference ? Access::Unique : Access::Shared));
         } else
           arguments.push_back(getType(argument));
       }
@@ -555,7 +917,7 @@ class Resolver {
            "RawPtr is restricted to bundled runtime bindings");
     if (!s.count)
       return t;
-    if (!scalar(t))
+    if (!scalar(t) && !(s.count > 0 && p.types[t].kind == hir::Type::Array))
       fail(s.loc, DiagnosticCode::InvalidReceiver,
            "arrays and slices require scalar elements in this increment");
     if (s.count == -1) {
@@ -569,13 +931,7 @@ class Resolver {
       p.types.push_back({hir::Type::Slice, key, None, t, 0, 0, {}});
       return id;
     }
-    std::string key = s.name + "[" + std::to_string(s.count) + "]";
-    if (types.contains(key))
-      return types[key];
-    TypeId id = p.types.size();
-    types[key] = id;
-    p.types.push_back({hir::Type::Array, key, None, t, (uint32_t)s.count, (uint32_t)s.count, {}});
-    return id;
+    return fixedArray(t, static_cast<uint32_t>(s.count), s.loc);
   }
   void declareFunction(const ast::Function &a, TypeId ownerOverride = None) {
     if (ownerOverride != None &&
@@ -631,10 +987,21 @@ class Resolver {
     if (a.foreignC && a.result.reference)
       fail(a.loc, DiagnosticCode::InvalidCAbi,
            "C borrowed returns require an explicit origin contract");
-    if (a.result.mutableReference)
+    f.resultAccess =
+        containerMutableBorrowIntrinsic(f.intrinsicId) ? Access::Unique : Access::Shared;
+    if (a.result.mutableReference && !containerMutableBorrowIntrinsic(f.intrinsicId))
       fail(a.result.loc, DiagnosticCode::EscapingView,
            "unique reference returns require exclusive result-region contracts");
     f.result = getType(a.result, a.result.reference);
+
+    if (!a.result.reference && f.intrinsic.empty() && !f.external &&
+        p.types[f.result].kind == hir::Type::Enum && p.containsReferences(f.result) &&
+        p.referenceCapability(f.result, Access::Unique) &&
+        std::any_of(a.params.begin(), a.params.end(), [&](const auto &parameter) {
+          return parameter.type.mutableReference ||
+                 (parameter.name == "self" && parameter.access == Access::Unique);
+        }))
+      f.resultAccess = Access::Unique;
     if (p.types[f.result].kind == hir::Type::ForeignRecord ||
         p.types[f.result].kind == hir::Type::ForeignOpaque)
       fail(a.loc, DiagnosticCode::InvalidCAbi,
@@ -643,8 +1010,14 @@ class Resolver {
       fail(f.loc, DiagnosticCode::EscapingView,
            "returning str views requires lifetime contracts, outside this PoC");
     f.resultBorrowedContainer = !a.result.reference && p.containsReferences(f.result);
+    if (f.resultBorrowedContainer && !p.referenceCapability(f.result, f.resultAccess))
+      fail(a.result.loc, DiagnosticCode::EscapingView,
+           "unique payload returns require an exclusive storage result contract");
     if (!a.result.reference && p.linear(f.result) && f.intrinsic.empty() &&
-        ((!p.heap(f.result) && p.needsDrop(f.result)) || p.types[f.result].protocol != None))
+        ((!p.heap(f.result) && p.needsDrop(f.result) &&
+          p.types[f.result].kind != hir::Type::Structure &&
+          p.types[f.result].kind != hir::Type::Enum) ||
+         p.types[f.result].protocol != None))
       fail(a.loc, DiagnosticCode::InvalidPlace,
            "this resource return requires an allocation or region transfer contract");
     scopes.emplace_back();
@@ -665,9 +1038,14 @@ class Resolver {
                                 p.types[t].protocol != None || t == Str || t == RawPtr))
         fail(ap.loc, DiagnosticCode::EscapingView,
              "this reference parameter requires an unsupported ABI or protocol contract");
-      if (p.containsReferences(t) &&
-          (ap.type.reference || self || f.external || !f.intrinsic.empty() ||
-           p.borrowedPayloadInputType(t) == None))
+      bool inspectPayload = self && ap.access == Access::Shared && !ap.type.reference &&
+                            !f.external && f.intrinsic.empty() && p.opaqueBorrowedPayload(t);
+      if (inspectPayload && (a.result.reference || f.resultBorrowedContainer))
+        fail(a.result.loc, DiagnosticCode::EscapingView,
+             "a tag-only payload inspection cannot return borrowed values");
+      if (p.containsReferences(t) && !inspectPayload &&
+          (ap.type.reference || (self && ap.access != Access::Shared) || f.external ||
+           !f.intrinsic.empty() || p.borrowedPayloadInputType(t) == None))
         fail(ap.loc, DiagnosticCode::EscapingView,
              "borrowed container parameters require payload origin contracts");
       if (t == Unit)
@@ -676,7 +1054,9 @@ class Resolver {
                                       : ap.access;
       auto id = add(ap.name, t, ap.loc, access, true, self);
       f.params.push_back(id);
-      if (p.containsReferences(t)) {
+      if (inspectPayload)
+        f.payloadInspectionParameters.push_back(id);
+      else if (p.containsReferences(t)) {
         auto origin = static_cast<SymbolId>(p.symbols.size());
         auto region = nextRegion++;
         hir::Symbol symbol{origin, ap.name, p.borrowedPayloadInputType(t), Access::Shared, true,
@@ -686,10 +1066,12 @@ class Resolver {
         p.symbols.push_back(std::move(symbol));
         f.payloadParameterRegions.push_back({id, origin, region});
       }
-      if (ap.type.reference || (self &&
-                                (a.result.reference || (f.resultBorrowedContainer &&
-                                                        containerBorrowIntrinsic(f.intrinsicId))) &&
-                                access == Access::Shared && p.types[t].protocol == None)) {
+      if (ap.type.reference || (self && (a.result.reference || f.resultBorrowedContainer) &&
+                                (access == Access::Shared ||
+                                 (f.resultBorrowedContainer && f.resultAccess == Access::Unique &&
+                                  access == Access::Unique) ||
+                                 containerMutableBorrowIntrinsic(f.intrinsicId)) &&
+                                p.types[t].protocol == None)) {
         auto &symbol = p.symbols[id];
         symbol.reference = true;
         symbol.region = nextRegion++;
@@ -707,10 +1089,13 @@ class Resolver {
     if (a.result.reference || f.resultBorrowedContainer) {
       for (const auto &region : f.parameterRegions) {
         const auto &parameter = p.symbols[region.parameter];
-        if (parameter.access == Access::Shared &&
+        if (parameter.access == f.resultAccess &&
             (f.resultBorrowedContainer ? p.borrowedPayloadResultCompatible(parameter.type, f.result)
                                        : p.borrowResultCompatible(parameter.type, f.result))) {
           if (f.resultOrigin != None) {
+            if (f.resultAccess == Access::Unique)
+              fail(a.result.loc, DiagnosticCode::EscapingView,
+                   "exclusive payload returns require exactly one compatible unique input origin");
             if (!f.resultBorrowedContainer)
               fail(a.result.loc, DiagnosticCode::EscapingView,
                    "direct reference return requires one input origin in this subset");
@@ -744,13 +1129,14 @@ class Resolver {
         }
       if (f.resultOrigin == None || f.external ||
           (!f.intrinsic.empty() && !containerBorrowIntrinsic(f.intrinsicId)) ||
-          (f.owner != None &&
-           ((f.resultBorrowedContainer && !containerBorrowIntrinsic(f.intrinsicId)) ||
-            p.types[f.owner].protocol != None)))
+          (f.owner != None && p.types[f.owner].protocol != None))
         fail(a.result.loc, DiagnosticCode::EscapingView,
              "reference return requires a compatible shared input-region contract; local owners "
              "cannot escape");
       f.resultRegion = nextRegion++;
+      if (f.resultAccess == Access::Unique && f.intrinsic.empty() && !p.exclusivePayloadResult(f))
+        fail(a.result.loc, DiagnosticCode::EscapingView,
+             "exclusive payload returns require a direct unique input and one payload capability");
     }
     scopes.pop_back();
     f.consumesSelf = f.owner != None &&
@@ -840,6 +1226,60 @@ class Resolver {
       return true;
     return e.kind == hir::Expr::Field && !p.heap(e.args[0].type) && fieldPlace(e.args[0]);
   }
+  hir::Expr initializerExpr(const ast::Expr &value, TypeId target) {
+    auto argument = expr(value, target);
+    if (argument.type == Str &&
+        p.types[target].representation == hir::Representation::StringRecord) {
+
+      ensureMethods(target, "from");
+      auto name = p.types[target].name + "::from";
+      if (!functions.contains(name))
+        fail(value.loc, DiagnosticCode::UnknownName, "String initializer requires String::from");
+      auto factory = p.functions.at(functions.at(name));
+      if (factory.params.size() != 1 || factory.result != target ||
+          p.symbols[factory.params[0]].type != Str || p.symbols[factory.params[0]].reference ||
+          p.symbols[factory.params[0]].receiver || factory.resultOrigin != None ||
+          factory.unsafeFunction || (factory.trusted && !factory.pub))
+        fail(value.loc, DiagnosticCode::ArgumentMismatch,
+             "String initializer requires a safe public str -> String constructor");
+      hir::Expr call{};
+      call.kind = hir::Expr::Call;
+      call.ref = factory.id;
+      call.loc = value.loc;
+      call.type = target;
+      call.args.push_back(std::move(argument));
+      args(call, factory, 0);
+      return call;
+    }
+    const auto from = argument.type;
+    bool lossless = false;
+    const auto bits = p.target.pointerWidth;
+    if (integer(from) && integer(target)) {
+      auto sourceBits = bitWidth(from, bits), targetBits = bitWidth(target, bits);
+      lossless = signedType(from) == signedType(target)
+                     ? targetBits >= sourceBits
+                     : !signedType(from) && signedType(target) && targetBits > sourceBits;
+    } else if (from == F32 && target == F64)
+      lossless = true;
+    else if (integer(from) && floating(target)) {
+      auto precision = target == F32 ? 24u : 53u;
+      lossless = bitWidth(from, bits) - unsigned(signedType(from)) <= precision;
+    }
+    const bool reference =
+        argument.kind == hir::Expr::Borrow ||
+        (argument.kind == hir::Expr::Variable && p.symbols[argument.ref].reference);
+    if (from != target && lossless && !reference && !argument.inferredLiteral) {
+      hir::Expr cast{};
+      cast.kind = hir::Expr::Cast;
+      cast.type = target;
+      cast.loc = value.loc;
+      cast.text = "initializer.lossless";
+      cast.args.push_back(std::move(argument));
+      return cast;
+    }
+    coerce(target, argument);
+    return argument;
+  }
   hir::Expr expr(const ast::Expr &a, TypeId expected = None) {
     hir::Expr e{};
     e.loc = a.loc;
@@ -855,8 +1295,13 @@ class Resolver {
       return e;
     }
     if (a.kind == A::Dereference) {
-      requireUnsafe(a.loc, "raw pointer dereference");
       auto pointer = expr(a.args.at(0));
+
+      if (pointer.kind == H::Variable && p.symbols[pointer.ref].reference) {
+        pointer.loc = a.loc;
+        return pointer;
+      }
+      requireUnsafe(a.loc, "raw pointer dereference");
       if (!p.rawPointer(pointer.type) || p.types[pointer.type].element == Unit ||
           p.types[p.types[pointer.type].element].kind == hir::Type::ForeignOpaque)
         fail(a.loc, DiagnosticCode::InvalidRawPointer,
@@ -881,7 +1326,7 @@ class Resolver {
         syntax.count = std::stoi(syntax.name.substr(bracket + 1));
         syntax.name.resize(bracket);
       }
-      auto id = getType(syntax);
+      auto id = getType(a.typeArguments.empty() ? syntax : a.typeArguments.at(0));
       auto &t = p.types[id];
       unsigned word = p.target.pointerWidth / 8;
       uint64_t size = 0;
@@ -954,21 +1399,169 @@ class Resolver {
       e.kind = H::Borrow;
       e.args.push_back(expr(a.args.at(0)));
       const auto &source = e.args[0];
-      bool projection =
-          (source.kind == H::Field && fieldPlace(source) &&
-           (scalar(source.type) || p.ownedFieldType(source.type) ||
-            p.types[source.type].kind == hir::Type::Array)) ||
-          (source.kind == H::Index && source.args[0].kind == H::Variable && scalar(source.type));
+      bool projection = (source.kind == H::Field && fieldPlace(source) &&
+                         (scalar(source.type) || p.ownedFieldType(source.type) ||
+                          p.types[source.type].kind == hir::Type::Array)) ||
+                        (source.kind == H::Index &&
+                         (scalar(source.type) || p.types[source.type].kind == hir::Type::Array));
       if (source.kind != H::Variable && !projection)
         fail(a.loc, DiagnosticCode::InvalidPlace,
              "borrow requires a named owner or a supported direct field/element projection");
       if (projection && a.text == "unique" && !p.ownedFieldType(source.type) &&
-          p.types[source.type].kind != hir::Type::Array)
+          p.types[source.type].kind != hir::Type::Array && source.kind != H::Index)
         fail(a.loc, DiagnosticCode::InvalidPlace,
              "unique projection borrows require exclusive place contracts");
       e.type = e.args[0].type;
       e.borrowKind = a.text == "unique" ? BorrowKind::Unique : BorrowKind::Shared;
       e.region = nextRegion++;
+      return e;
+    }
+    if (a.kind == A::BraceInit ||
+        (a.kind == A::Block && a.body.empty() && expected != None &&
+         (p.types[expected].kind == hir::Type::Array || initializerMethods(expected)))) {
+      TypeId target = expected;
+      if (!a.text.empty()) {
+        TypeSyntax syntax{a.text, 0, a.loc};
+        syntax.arguments = a.typeArguments;
+        target = getType(syntax);
+        if (expected != None)
+          same(expected, target, a.loc);
+      }
+      if (target == None)
+        fail(a.loc, DiagnosticCode::TypeMismatch,
+             "brace initialization requires a type name or an expected array/collection type");
+      auto values = a.args;
+      auto names = a.initializerNames;
+      if (a.kind == A::Block && values.size() == 1 && values[0].kind == A::Name &&
+          values[0].text == "unit")
+        values.clear();
+      if (p.types[target].kind == hir::Type::Array) {
+        if (std::any_of(names.begin(), names.end(), [](const auto &name) { return !name.empty(); }))
+          fail(a.loc, DiagnosticCode::TypeMismatch,
+               "array initialization requires positional elements");
+        if (values.size() != p.types[target].count)
+          fail(a.loc, DiagnosticCode::TypeMismatch,
+               "array initializer length does not match its type");
+        e.kind = H::Array;
+        e.type = target;
+        auto element = p.types[target].element;
+        for (const auto &value : values) {
+          auto argument = initializerExpr(value, element);
+          e.args.push_back(std::move(argument));
+        }
+        return e;
+      }
+      if (auto recipe = initializerMethods(target)) {
+        auto factoryName = recipe->at(0), insertionName = recipe->at(1);
+        ensureMethods(target, factoryName);
+        ensureMethods(target, insertionName);
+        auto key = p.types[target].name + "::";
+        if (!functions.contains(key + factoryName) || !functions.contains(key + insertionName))
+          fail(a.loc, DiagnosticCode::UnknownName,
+               "@initializer names an unknown factory or insertion method");
+        auto factory = p.functions.at(functions.at(key + factoryName));
+        auto insertion = p.functions.at(functions.at(key + insertionName));
+        if (!factory.params.empty() || factory.result != target || factory.resultOrigin != None ||
+            insertion.params.empty() || !p.symbols[insertion.params[0]].receiver ||
+            insertion.access != Access::Unique ||
+            (insertion.params.size() != 2 && insertion.params.size() != 3))
+          fail(
+              a.loc, DiagnosticCode::ArgumentMismatch,
+              "@initializer requires a zero-argument owned factory and a unique insertion with one or two owned arguments");
+        for (size_t n = 1; n < insertion.params.size(); ++n)
+          if (p.symbols[insertion.params[n]].reference)
+            fail(a.loc, DiagnosticCode::ArgumentMismatch,
+                 "@initializer insertion arguments must be owned");
+
+        e.kind = H::Block;
+        e.type = target;
+        scopes.emplace_back();
+        auto id = add("$initializer" + std::to_string(p.symbols.size()), target, a.loc, Access::Own,
+                      false, false, true);
+        hir::Stmt binding{};
+        binding.kind = hir::Stmt::Let;
+        binding.symbol = id;
+        binding.loc = a.loc;
+        binding.expr = expr(ast::Expr{A::Call, a.loc, key + factoryName, {}});
+        e.body.push_back(std::move(binding));
+        H receiver{};
+        receiver.kind = H::Variable;
+        receiver.ref = id;
+        receiver.type = target;
+        receiver.loc = a.loc;
+        size_t at = 0;
+        for (size_t n = 0; n < values.size(); ++n) {
+          const auto &name = names.empty() ? std::string{} : names.at(at++);
+          std::vector<ast::Expr> entry;
+          if (insertion.params.size() == 2) {
+            if (!name.empty())
+              fail(values[n].loc, DiagnosticCode::TypeMismatch,
+                   "sequence initializer requires positional elements");
+            entry.push_back(values[n]);
+          } else {
+            if (name != ":")
+              fail(values[n].loc, DiagnosticCode::TypeMismatch,
+                   "map initializer requires key => value entries");
+            if (name == ":") {
+              entry.push_back(values[n++]);
+              entry.push_back(values.at(n));
+            }
+          }
+          H call{};
+          call.kind = H::Method;
+          call.ref = insertion.id;
+          call.type = insertion.result;
+          call.loc = entry[0].loc;
+          call.args.push_back(receiver);
+          for (size_t arg = 0; arg < entry.size(); ++arg)
+            call.args.push_back(
+                initializerExpr(entry[arg], p.symbols[insertion.params[arg + 1]].type));
+          args(call, insertion, 0);
+          if (insertion.unsafeFunction || (factory.foreignC && factory.external))
+            requireUnsafe(a.loc, "unsafe initializer call");
+          if (!privileged && insertion.trusted && !insertion.pub)
+            fail(a.loc, DiagnosticCode::RestrictedOperation, "initializer insertion is not public");
+          hir::Stmt statement{};
+          statement.kind = hir::Stmt::Expression;
+          statement.loc = call.loc;
+          statement.expr = std::move(call);
+          e.body.push_back(std::move(statement));
+        }
+        H moved{};
+        moved.kind = H::Move;
+        moved.type = target;
+        moved.loc = a.loc;
+        moved.args.push_back(receiver);
+        e.args.push_back(std::move(moved));
+        scopes.pop_back();
+        return e;
+      }
+      if (p.types[target].kind != hir::Type::Structure || p.heap(target))
+        fail(a.loc, DiagnosticCode::TypeMismatch, "type does not support brace initialization");
+      const auto fields = p.types[target].fields;
+      if (values.size() != fields.size() || names.size() != fields.size())
+        fail(a.loc, DiagnosticCode::TypeMismatch,
+             "struct initializer must specify every field exactly once");
+      std::set<uint32_t> initialized;
+      e.kind = H::StructInit;
+      e.type = target;
+      for (size_t n = 0; n < values.size(); ++n) {
+        auto field = std::find_if(fields.begin(), fields.end(),
+                                  [&](const auto &field) { return field.name == names[n]; });
+        if (field == fields.end())
+          fail(values[n].loc, DiagnosticCode::UnknownName,
+               "unknown initializer field `" + names[n] + "`");
+        auto index = static_cast<uint32_t>(field - fields.begin());
+        if (!initialized.insert(index).second)
+          fail(values[n].loc, DiagnosticCode::DuplicateDeclaration,
+               "duplicate initializer field `" + names[n] + "`");
+        auto value = initializerExpr(values[n], field->type);
+        if (value.kind == H::Borrow)
+          fail(value.loc, DiagnosticCode::EscapingView,
+               "struct initializer requires owned field values");
+        e.fieldPath.push_back(index);
+        e.args.push_back(std::move(value));
+      }
       return e;
     }
     if (a.kind == A::ArrayRepeat) {
@@ -978,6 +1571,8 @@ class Resolver {
                            : None;
       uint32_t count = 0;
       if (a.text == "zero") {
+        while (element != None && p.types[element].kind == hir::Type::Array)
+          element = p.types[element].element;
         if (element == None || !scalar(element))
           fail(a.loc, DiagnosticCode::TypeMismatch,
                "default array initialization requires scalar elements");
@@ -987,7 +1582,7 @@ class Resolver {
         zero.type = element;
         zero.text = "0";
         e.args = {zero};
-        count = p.types[expected].count;
+        count = p.types[expected].width;
       } else {
         auto value = expr(a.args.at(0), element);
         if (element != None)
@@ -1005,7 +1600,8 @@ class Resolver {
         count = size;
         e.args = {std::move(value)};
       }
-      e.type = getType({p.types[element].name, static_cast<int>(count), a.loc});
+      e.type = a.text == "zero" ? expected
+                                : getType({p.types[element].name, static_cast<int>(count), a.loc});
       return e;
     }
     if (a.kind == A::Match) {
@@ -1167,6 +1763,55 @@ class Resolver {
       n.text = "-" + n.text;
       return expr(n, expected);
     }
+    if (a.kind == A::Unary && (a.text == "post++" || a.text == "post--")) {
+      const auto &operand = a.args.at(0);
+      if (operand.kind != A::Name)
+        fail(a.loc, DiagnosticCode::InvalidPlace,
+             "postfix increment/decrement requires a named integer place");
+      auto found = binding(operand.text, operand.loc);
+      if (found && found->constant)
+        fail(a.loc, DiagnosticCode::ConstantAssignment,
+             "cannot assign to constant `" + operand.text + "`");
+      auto place = expr(operand);
+      if (!integer(place.type))
+        fail(a.loc, DiagnosticCode::TypeMismatch,
+             "postfix increment/decrement requires an integer");
+
+      e.kind = H::Block;
+      e.type = place.type;
+      scopes.emplace_back();
+      auto old = add("$postfix" + std::to_string(p.symbols.size()), place.type, a.loc);
+      hir::Stmt snapshot{};
+      snapshot.kind = hir::Stmt::Let;
+      snapshot.loc = a.loc;
+      snapshot.symbol = old;
+      snapshot.expr = place;
+      e.body.push_back(std::move(snapshot));
+      H value = place;
+      value.ref = old;
+      H one{};
+      one.kind = H::Constant;
+      one.type = place.type;
+      one.loc = a.loc;
+      one.text = "1";
+      H sum{};
+      sum.kind = H::Binary;
+      sum.type = place.type;
+      sum.loc = a.loc;
+      sum.text = a.text == "post++" ? "+" : "-";
+      sum.args = {value, one};
+      hir::Stmt update{};
+      update.kind = hir::Stmt::Expression;
+      update.loc = a.loc;
+      update.expr.kind = H::Assign;
+      update.expr.type = Unit;
+      update.expr.loc = a.loc;
+      update.expr.args = {place, std::move(sum)};
+      e.body.push_back(std::move(update));
+      e.args.push_back(value);
+      scopes.pop_back();
+      return e;
+    }
     if (a.kind == A::Assign && a.args[0].kind == A::Name) {
       auto found = binding(a.args[0].text, a.args[0].loc);
       if (found && found->constant)
@@ -1300,9 +1945,8 @@ class Resolver {
       TypeId t = e.args[0].type;
       for (auto &x : e.args)
         same(t, x.type, x.loc);
-      TypeSyntax s{p.types[t].name, (int)e.args.size(), a.loc};
       e.kind = H::Array;
-      e.type = getType(s);
+      e.type = fixedArray(t, static_cast<uint32_t>(e.args.size()), a.loc);
       break;
     }
     case A::Member: {
@@ -1577,7 +2221,8 @@ class Resolver {
       borrowed.kind = H::Borrow;
       borrowed.loc = e.loc;
       borrowed.type = e.type;
-      borrowed.borrowKind = BorrowKind::Shared;
+      borrowed.borrowKind = p.functions[e.ref].resultAccess == Access::Unique ? BorrowKind::Unique
+                                                                              : BorrowKind::Shared;
       borrowed.region = nextRegion++;
       borrowed.args.push_back(std::move(e));
       return borrowed;
@@ -1786,11 +2431,15 @@ class Resolver {
               for (size_t j = 0; j < pat.bindings.size(); ++j)
                 if (pat.bindings[j] != "_") {
                   if (p.reference(found->payload[j])) {
+                    auto capability = p.types[found->payload[j]].referenceAccess;
+                    if (capability == Access::Unique && matchAccess != Access::Own)
+                      fail(pat.loc, DiagnosticCode::InvalidReborrow,
+                           "match a unique reference result by value to transfer exclusive access");
                     if (matchAccess == Access::Unique)
                       fail(pat.loc, DiagnosticCode::SharedMutation,
                            "a stored shared reference cannot become unique through match");
                     auto pt = p.types[found->payload[j]].element;
-                    auto id = add(pat.bindings[j], pt, pat.loc, Access::Shared);
+                    auto id = add(pat.bindings[j], pt, pat.loc, capability);
                     p.symbols[id].reference = true;
                     p.symbols[id].region = nextRegion++;
                     payloadBorrows.push_back({id, p.payloadOffset(tid, found->id, j)});
@@ -1976,6 +2625,146 @@ class Resolver {
         out.push_back(s);
         continue;
       }
+      if (a.kind == A::For && a.classicFor) {
+        ast::Expr expansion{
+            ast::Expr::Block, a.loc, "classic-for", {{ast::Expr::Name, a.loc, "unit", {}}}};
+        expansion.body = a.headerInit;
+        auto loop = a;
+        loop.kind = A::While;
+        loop.headerInit.clear();
+        expansion.body.push_back(std::move(loop));
+        s.kind = H::Expression;
+        s.expr = expr(expansion);
+        out.push_back(std::move(s));
+        continue;
+      }
+      if (a.kind == A::For && a.collectionIteration) {
+        auto viewPlan = viewIteration(a.expr);
+        const auto &sourceExpression = viewPlan ? viewPlan->source : a.expr;
+        auto source = expr(sourceExpression);
+        const auto shape = p.types[source.type];
+        bool unique = viewPlan ? viewPlan->unique
+                      : source.kind == hir::Expr::Borrow
+                          ? source.borrowKind == BorrowKind::Unique
+                          : source.kind == hir::Expr::Variable && p.symbols[source.ref].reference &&
+                                p.symbols[source.ref].access == Access::Unique;
+        bool sourceUnique = viewPlan ? viewPlan->sourceUnique : unique;
+        if (sourceUnique &&
+            ((source.kind == hir::Expr::Borrow && source.borrowKind != BorrowKind::Unique) ||
+             (source.kind == hir::Expr::Variable && p.symbols[source.ref].reference &&
+              p.symbols[source.ref].access != Access::Unique)))
+          fail(a.loc, DiagnosticCode::InvalidRange,
+               "mutable iteration requires unique access to the source");
+        const auto protocol = iterationProtocol(source.type, unique, a.loc);
+        auto suffix = std::to_string(p.symbols.size());
+        auto owner = "$for_owner" + suffix, view = "$for_view" + suffix,
+             index = "$for_index" + suffix;
+        auto name = [&](const std::string &text) {
+          return ast::Expr{ast::Expr::Name, a.loc, text, {}};
+        };
+        auto viewExpression = name(view);
+        ast::Expr expansion{ast::Expr::Block, a.loc, "collection-for", {name("unit")}};
+        ast::Stmt input{};
+        input.kind = ast::Stmt::Let;
+        input.loc = a.loc;
+        input.name = view;
+        if (sourceExpression.kind == ast::Expr::Borrow)
+          input.expr = sourceExpression;
+        else if (source.kind == hir::Expr::Borrow) {
+
+          ast::Stmt storage{};
+          storage.kind = ast::Stmt::Let;
+          storage.name = owner;
+          storage.loc = a.loc;
+          storage.expr = sourceExpression;
+          expansion.body.push_back(std::move(storage));
+          viewExpression = name(owner);
+        } else {
+          auto borrowed = sourceExpression;
+          if (source.kind != hir::Expr::Variable && source.kind != hir::Expr::Field) {
+            ast::Stmt storage{};
+            storage.kind = ast::Stmt::Let;
+            storage.name = owner;
+            storage.loc = a.loc;
+            storage.expr = sourceExpression;
+            expansion.body.push_back(std::move(storage));
+            borrowed = name(owner);
+          }
+          input.expr = {ast::Expr::Borrow, a.loc, sourceUnique ? "unique" : "shared", {borrowed}};
+        }
+        if (source.kind == hir::Expr::Variable && p.symbols[source.ref].reference)
+          viewExpression = sourceExpression;
+        else if (viewExpression.text == view)
+          expansion.body.push_back(std::move(input));
+        ast::Stmt loop = a;
+        loop.collectionIteration = false;
+        loop.name = index;
+        loop.expr = {ast::Expr::Int, a.loc, "0usize", {}};
+        loop.limit = {ast::Expr::Method, a.loc, protocol.length, {viewExpression}};
+        ast::Expr selectionIndex = name(index);
+        if (viewPlan) {
+          auto [length, coordinates] =
+              viewIndices(*viewPlan, source.type, viewExpression, name(index), protocol.length,
+                          expansion.body, a.loc, "$view_axis" + suffix + "_");
+          expansion.text = "view-for rank=" + std::to_string(coordinates.size());
+          loop.limit = std::move(length);
+          if (shape.kind == hir::Type::Array) {
+            auto projection = viewExpression;
+            for (auto &coordinate : coordinates)
+              projection = {
+                  ast::Expr::Index, a.loc, "", {std::move(projection), std::move(coordinate)}};
+            ast::Stmt element{};
+            element.kind = ast::Stmt::Let;
+            element.loc = a.loc;
+            element.name = a.name;
+            element.expr = {
+                ast::Expr::Borrow, a.loc, unique ? "unique" : "shared", {std::move(projection)}};
+            loop.body.insert(loop.body.begin(), std::move(element));
+            expansion.body.push_back(std::move(loop));
+            s.kind = H::Expression;
+            s.expr = expr(expansion);
+            s.expr.text = expansion.text;
+            out.push_back(std::move(s));
+            continue;
+          }
+          selectionIndex = std::move(coordinates.front());
+        }
+        if (!viewPlan && shape.kind == hir::Type::Array &&
+            p.types[shape.element].kind == hir::Type::Array) {
+          ast::Stmt row{};
+          row.kind = ast::Stmt::Let;
+          row.loc = a.loc;
+          row.name = a.name;
+          ast::Expr projection{ast::Expr::Index, a.loc, "", {viewExpression, name(index)}};
+          row.expr = {
+              ast::Expr::Borrow, a.loc, unique ? "unique" : "shared", {std::move(projection)}};
+          loop.body.insert(loop.body.begin(), std::move(row));
+          expansion.body.push_back(std::move(loop));
+          s.kind = H::Expression;
+          s.expr = expr(expansion);
+          out.push_back(std::move(s));
+          continue;
+        }
+        ast::Stmt selection{};
+        selection.kind = ast::Stmt::Match;
+        selection.loc = a.loc;
+        selection.expr = {ast::Expr::Method, a.loc, protocol.get, {viewExpression, selectionIndex}};
+        ast::Stmt present{}, absent{};
+        present.kind = absent.kind = ast::Stmt::Expression;
+        present.loc = absent.loc = a.loc;
+        present.pattern = {ast::Pattern::Variant, a.loc, "Some", {a.name}};
+        present.body = a.body;
+        absent.pattern = {ast::Pattern::Variant, a.loc, "None", {}};
+        selection.body = {std::move(present), std::move(absent)};
+        loop.body = {std::move(selection)};
+        expansion.body.push_back(std::move(loop));
+        s.kind = H::Expression;
+        s.expr = expr(expansion);
+        if (viewPlan)
+          s.expr.text = expansion.text;
+        out.push_back(std::move(s));
+        continue;
+      }
       if (a.kind == A::While || a.kind == A::Loop || a.kind == A::For) {
         s.kind = H::Loop;
         s.loop = nextLoop++;
@@ -2035,6 +2824,13 @@ class Resolver {
         }
         loops.push_back(s.loop);
         s.body = block(a.body);
+        if (a.classicFor) {
+          H step{};
+          step.kind = H::Expression;
+          step.loc = a.limit.loc;
+          step.expr = expr(a.limit);
+          s.latch.push_back(std::move(step));
+        }
         loops.pop_back();
         scopes.pop_back();
         if (a.kind == A::For) {
@@ -2369,12 +3165,34 @@ public:
         if (!fields.insert(field.name).second)
           duplicate(field.loc, field.name);
         const auto &type = field.type;
-        if (type.reference || type.count || !type.arguments.empty() || !type.countName.empty())
+        if (type.reference || type.count || !type.countName.empty())
           fail(type.loc, DiagnosticCode::InvalidPayload,
                "compound generic field templates are not implemented yet");
-        decl.fields.push_back({field.name, parameters.contains(type.name)
-                                               ? hir::GenericPayload{true, parameters.at(type.name)}
-                                               : hir::GenericPayload{false, getType(type)}});
+        std::function<hir::GenericPayload(const TypeSyntax &)> templateType = [&](const auto &ts) {
+          if (ts.reference || ts.count || !ts.countName.empty() || ts.rawPointer ||
+              ts.functionPointer)
+            fail(ts.loc, DiagnosticCode::InvalidPayload, "unsupported generic field type shape");
+          if (parameters.contains(ts.name)) {
+            if (!ts.arguments.empty())
+              fail(ts.loc, DiagnosticCode::TypeMismatch, "a type parameter cannot take arguments");
+            return hir::GenericPayload{true, parameters.at(ts.name)};
+          }
+          if (ts.arguments.empty())
+            return hir::GenericPayload{false, getType(ts)};
+          GenericDeclId target;
+          if (genericNames.contains(ts.name))
+            target = genericNames.at(ts.name);
+          else if (genericStructNames.contains(ts.name))
+            target = genericStructNames.at(ts.name);
+          else
+            fail(ts.loc, DiagnosticCode::UnknownName,
+                 "unknown generic field type `" + ts.name + "`");
+          hir::GenericPayload application{false, target};
+          for (const auto &arg : ts.arguments)
+            application.arguments.push_back(templateType(arg));
+          return application;
+        };
+        decl.fields.push_back({field.name, templateType(type)});
       }
       if (!a.representation.empty()) {
         if (decl.parameters.size() != 1 || decl.fields.size() != 1 ||
@@ -2492,6 +3310,8 @@ public:
                   ? Access::Own
               : f.intrinsicId == IntrinsicId::String_push_str ||
                       f.intrinsicId == IntrinsicId::String_clear ||
+                      f.intrinsicId == IntrinsicId::String_read_file ||
+                      f.intrinsicId == IntrinsicId::String_env_var ||
                       f.intrinsic.starts_with("string.fmt_")
                   ? Access::Unique
                   : Access::Shared;
@@ -2694,7 +3514,8 @@ void printE(const hir::Expr &e, std::ostream &o) {
                                 "pointer.cast",
                                 "array.repeat",
                                 "function.address",
-                                "foreign.call.indirect"};
+                                "foreign.call.indirect",
+                                "struct.init"};
   o << names[e.kind] << "<T" << e.type << ">";
   if (e.id != None)
     o << " expr=#E" << e.id;
@@ -2705,6 +3526,9 @@ void printE(const hir::Expr &e, std::ostream &o) {
       << " access=" << (e.borrowKind == BorrowKind::Shared ? "Shared" : "Unique");
   if (e.ref != None)
     o << "#" << e.ref;
+  if (e.kind == hir::Expr::StructInit)
+    for (auto field : e.fieldPath)
+      o << " field=#" << field;
   if (!e.text.empty())
     o << " " << (e.kind == hir::Expr::StaticStr ? quoteText(e.text) : e.text);
   if (!e.body.empty()) {
@@ -2869,11 +3693,13 @@ void printHIR(const hir::Program &p, std::ostream &o) {
       o << "  payload.region #v" << region.parameter << " #R" << region.region << " origin=#v"
         << region.origin << " Shared caller-owned"
         << (f.acceptsResultOrigin(region.origin) ? " result-bound\n" : " noescape\n");
+    for (auto id : f.payloadInspectionParameters)
+      o << "  payload.inspect #v" << id << " Shared tag-only noescape\n";
     for (const auto &source : f.payloadResultSources())
       o << "  return.payload-source #v" << source.parameter << " variant=#V" << source.path.variant
         << " field=" << source.path.field << "\n";
     if (f.resultBorrowedContainer)
-      o << "  result.payload-regions: Shared borrowed container\n";
+      o << "  result.payload-regions: " << accessName(f.resultAccess) << " borrowed container\n";
     if (f.resultOrigin != None)
       o << "  return.region #R" << f.resultRegion << " <= #R" << p.symbols[f.resultOrigin].region
         << " origin=#v" << f.resultOrigin << "\n";

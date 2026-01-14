@@ -1,0 +1,30 @@
+@import("std.matriz", "std.box")
+fn main() {
+  let Matriz = Matriz<i32>::filled(2, 3, 7);
+  @assert(Matriz.row_count() == 2 && Matriz.column_count() == 3);
+  @assert(Matriz.replace(1, 2, 42) == 7);
+  @assert(Matriz.at_copy(1, 2) == 42);
+  match Matriz.get(2, 0) {
+    Some(_) => {
+      panic("invalid Matriz index");
+    },
+    None => {}
+  }
+  let transposed = Matriz.transpose();
+  @assert(transposed.at_copy(2, 1) == 42);
+  let product = Matriz.multiply(&transposed);
+  @assert(product.at_copy(0, 0) == 147);
+  @assert(product.at_copy(1, 1) == 1862);
+  let empty = Matriz<i32>::filled(0, 3, 0);
+  @assert(empty.is_empty());
+  let values = Vec<Box<String >>::new();
+  values.push(Box<String>::new(String::from("owned")));
+  let owned = Matriz<Box<String >>::from_vec(1, 1, values.move());
+  match owned.get(0, 0) {
+    Some(value) => {
+      print(value.get());
+    },
+    None => {}
+  }
+  print("Matriz ok");
+}

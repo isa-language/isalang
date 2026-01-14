@@ -1,0 +1,11 @@
+fn bad() -> &i32 {
+  let a: i32[2] = {
+    1,
+    2
+  };
+  for v in &a {
+    return v;
+  }
+  loop {}
+}
+fn main() {}

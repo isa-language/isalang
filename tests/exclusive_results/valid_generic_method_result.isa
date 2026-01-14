@@ -1,0 +1,27 @@
+struct Storage<T> {
+  before: i32,
+  data: T,
+  after: i32,
+}
+impl<T> Storage<T> {
+  fn first_mut(unique self) -> Option<&mut i32> {
+    let values: &mut i32[] = &mut self.data;
+    return values.first_mut();
+  }
+}
+fn main() {
+  let storage = Storage<i32[2]>::new();
+  storage.before = 7;
+  storage.after = 9;
+  let edit = &mut storage;
+  let result = edit.first_mut();
+  match result {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+  print(storage.data[0]);
+  print(storage.before);
+  print(storage.after);
+}

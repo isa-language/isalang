@@ -1,0 +1,28 @@
+@import "std.vec"
+fn leave(values: &mut Vec<String>) {
+  let unused = values.get_mut(0);
+  return;
+}
+fn edit(values: &mut Vec<String>, early: bool) -> i32 {
+  let item = values.get_mut(0);
+  match item {
+    Some(text) => {
+      text.push_str("!");
+      print(text);
+      if early {
+        return 1;
+      }
+    },
+    None => {},
+  }
+  values.clear();
+  return 0;
+}
+fn main() {
+  let values = Vec<String>::new();
+  values.push(String::from("a"));
+  leave(&mut values);
+  print(edit(&mut values, true));
+  print(edit(&mut values, false));
+  print(values.len());
+}

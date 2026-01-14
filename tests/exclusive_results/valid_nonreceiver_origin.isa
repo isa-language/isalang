@@ -1,0 +1,37 @@
+@import "std.vec"
+fn at(index: usize, values: &mut Vec<i32>) -> Option<&mut i32> {
+  return values.get_mut(index);
+}
+struct Inspector {
+  count: i32,
+}
+impl Inspector {
+  fn last(shared self, values: &mut Vec<i32>) -> Option<&mut i32> {
+    return values.last_mut();
+  }
+}
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(10);
+  values.push(20);
+  let edit = &mut values;
+  match at(0, edit) {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+  let inspector = Inspector::new();
+  let result = inspector.last(edit);
+  inspector.count = 1;
+  match result {
+    Some(value) => {
+      value = 99;
+    },
+    None => {}
+  }
+  values.push(30);
+  print(values.at_copy(0));
+  print(values.at_copy(1));
+  print(inspector.count);
+}

@@ -1,0 +1,12 @@
+@import "std.vec"
+fn bad(values: &mut Vec<i32>) {
+  let item = values.get_mut(0);
+  print(values.len());
+  match item {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+}
+fn main() {}

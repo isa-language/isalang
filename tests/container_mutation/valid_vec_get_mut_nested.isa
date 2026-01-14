@@ -1,0 +1,18 @@
+@import("std.vec", "std.box")
+fn main() {
+  let v = Vec<Box<i32 >>::new();
+  v.push(Box<i32>::new(1));
+  match v.get_mut(0) {
+    Some(r) => {
+      let edit = r.get_mut();
+      edit = 8;
+    },
+    None => {}
+  }
+  match v.get(0) {
+    Some(r) => {
+      print(r.get());
+    },
+    None => {}
+  }
+}

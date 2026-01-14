@@ -1,0 +1,114 @@
+@import "std.vec"
+
+pub struct Matriz<T> {
+  values: Vec<T>,
+  rows: usize,
+  columns: usize,
+}
+impl<T> Matriz<T> {
+  pub fn from_vec(rows: usize, columns: usize, values: Vec<T>) -> Matriz<T> {
+    if columns != 0 && rows >(0usize - 1) / columns {
+      panic("Matriz dimensions overflow");
+    }
+    if values.len() != rows * columns {
+      panic("Matriz shape does not match storage");
+    }
+    let Matriz = Matriz<T>::new();
+    Matriz.values = values.move();
+    Matriz.rows = rows;
+    Matriz.columns = columns;
+    return Matriz.move();
+  }
+  pub fn filled(rows: usize, columns: usize, value: T) -> Matriz<T> {
+    if columns != 0 && rows >(0usize - 1) / columns {
+      panic("Matriz dimensions overflow");
+    }
+    let values = Vec<T>::with_capacity(rows * columns);
+    for i in 0usize..rows * columns {
+      values.push(value);
+    }
+    return Matriz<T>::from_vec(rows, columns, values.move());
+  }
+  pub fn row_count(shared self) -> usize {
+    return self.rows;
+  }
+  pub fn column_count(shared self) -> usize {
+    return self.columns;
+  }
+  pub fn len(shared self) -> usize {
+    return self.values.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.values.is_empty();
+  }
+  pub fn get(shared self, row: usize, column: usize) -> Option<&T> {
+    if row >= self.rows || column >= self.columns {
+      return Option::None;
+    }
+    if self.columns != 0 && row >(0usize - 1) / self.columns {
+      return Option::None;
+    }
+    let index = row * self.columns;
+    if index >(0usize - 1) - column {
+      return Option::None;
+    }
+    return self.values.get(index + column);
+  }
+  pub fn at_copy(shared self, row: usize, column: usize) -> T {
+    if row >= self.rows || column >= self.columns {
+      panic("Matriz index out of bounds");
+    }
+    if self.columns != 0 && row >(0usize - 1) / self.columns {
+      panic("Matriz index overflow");
+    }
+    let index = row * self.columns;
+    if index >(0usize - 1) - column {
+      panic("Matriz index overflow");
+    }
+    return self.values.at_copy(index + column);
+  }
+  pub fn replace(unique self, row: usize, column: usize, value: T) -> T {
+    if row >= self.rows || column >= self.columns {
+      panic("Matriz index out of bounds");
+    }
+    if self.columns != 0 && row >(0usize - 1) / self.columns {
+      panic("Matriz index overflow");
+    }
+    let offset = row * self.columns;
+    if offset >(0usize - 1) - column {
+      panic("Matriz index overflow");
+    }
+    let index = offset + column;
+    return self.values.replace(index, value.move());
+  }
+  pub fn transpose(shared self) -> Matriz<T> {
+    let output = Vec<T>::with_capacity(self.values.len());
+    for column in 0usize..self.columns {
+      for row in 0usize..self.rows {
+        output.push(self.at_copy(row, column));
+      }
+    }
+    return Matriz<T>::from_vec(self.columns, self.rows, output.move());
+  }
+
+  pub fn multiply(shared self, other: &Matriz<T>) -> Matriz<T> {
+    if self.columns != other.rows {
+      panic("incompatible Matriz product dimensions");
+    }
+    if other.columns != 0 && self.rows >(0usize - 1) / other.columns {
+      panic("Matriz dimensions overflow");
+    }
+    let output = Vec<T>::with_capacity(self.rows * other.columns);
+    for row in 0usize..self.rows {
+      for column in 0usize..other.columns {
+        let sum = 0 as T;
+        for inner in 0usize..self.columns {
+          sum = sum + self.at_copy(row, inner) * other.at_copy(inner, column);
+        }
+        output.push(sum);
+      }
+    }
+    return Matriz<T>::from_vec(self.rows, other.columns, output.move());
+  }
+
+}

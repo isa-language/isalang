@@ -1,0 +1,19 @@
+@import "std.vec"
+fn edit(values: &mut Vec<i32>) {
+  let item = values.get_mut(0);
+  let transferred = item.move();
+  match transferred {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+  values.push(10);
+}
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(1);
+  edit(&mut values);
+  print(values.at_copy(0));
+  print(values.len());
+}

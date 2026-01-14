@@ -189,7 +189,7 @@ std::vector<Token> lex(const std::string &source, FileId file) {
         advance();
       } else if (two == "->" || two == "::" || two == "==" || two == "!=" || two == "<=" ||
                  two == ">=" || two == "&&" || two == "||" || two == "<<" || two == ">>" ||
-                 two == ".." || two == "=>") {
+                 two == ".." || two == "=>" || two == "++" || two == "--") {
         advance();
         advance();
       } else if (std::string("@$?{}()[];:,.=+-*/%<>!&|^").find(c) != std::string::npos)
@@ -206,6 +206,9 @@ class Parser {
   bool trusted;
   std::string annotation;
   bool allowCast = true;
+  bool allowNamedBrace = true;
+  std::vector<std::string> initializerAttribute;
+  std::vector<std::string> iterationAttribute;
   std::string stringLiteral() {
     auto t = peek();
     if (t.kind != Token::String)
@@ -214,12 +217,32 @@ class Parser {
     return t.text;
   }
   std::string attribute() {
+    initializerAttribute.clear();
+    iterationAttribute.clear();
     if (!eat("@"))
       return "";
+    auto name = ident().text;
+    if (name == "iteration") {
+      need("(");
+      iterationAttribute.push_back(stringLiteral());
+      need(",");
+      iterationAttribute.push_back(stringLiteral());
+      if (eat(","))
+        iterationAttribute.push_back(stringLiteral());
+      need(")");
+      return "";
+    }
+    if (name == "initializer") {
+      need("(");
+      initializerAttribute.push_back(stringLiteral());
+      need(",");
+      initializerAttribute.push_back(stringLiteral());
+      need(")");
+      return "";
+    }
     if (!trusted)
       fail(peek().loc, DiagnosticCode::RestrictedOperation,
            "internal annotations are restricted to bundled libraries");
-    auto name = ident().text;
     if (name == "releases")
       return name;
     if (name != "intrinsic" && name != "representation")
@@ -259,6 +282,10 @@ class Parser {
 
     if (peek().text == ">>") {
       ts[pos].text = ">";
+      return;
+    }
+    if (peek().text == ">=") {
+      ts[pos].text = "=";
       return;
     }
     need(">");
@@ -309,32 +336,42 @@ class Parser {
       } while (eat(","));
       typeClose();
     }
-    if (eat("[")) {
+    bool firstDimension = true;
+    while (eat("[")) {
+      int count = 0;
+      std::string countName;
       if (eat("]")) {
+        if (!firstDimension || peek().text == "[")
+          fail(n.loc, DiagnosticCode::UnexpectedToken, "multidimensional slices are not supported");
         t.count = -1;
         return t;
       }
       auto v = peek();
       if (v.kind == Token::Identifier) {
-        t.countName = ident().text;
-        need("]");
-        return t;
+        countName = ident().text;
+      } else {
+        if (v.kind != Token::Number)
+          fail(v.loc, DiagnosticCode::UnexpectedToken, "static array size or constant required");
+        ++pos;
+        try {
+          auto number = parseNumericLiteral(v.text, v.loc);
+          if (number.floating || (!number.suffix.empty() && number.suffix != "usize"))
+            fail(v.loc, DiagnosticCode::InvalidLiteral,
+                 "array length requires an integer or usize literal");
+          count = std::stoi(number.value);
+        } catch (const std::out_of_range &) {
+          fail(v.loc, DiagnosticCode::UnexpectedToken, "array size out of range");
+        }
+        if (count <= 0 || count > 65536)
+          fail(v.loc, DiagnosticCode::UnexpectedToken, "array size must be in 1..65536");
       }
-      if (v.kind != Token::Number)
-        fail(v.loc, DiagnosticCode::UnexpectedToken, "static array size or constant required");
-      ++pos;
-      try {
-        auto number = parseNumericLiteral(v.text, v.loc);
-        if (number.floating || (!number.suffix.empty() && number.suffix != "usize"))
-          fail(v.loc, DiagnosticCode::InvalidLiteral,
-               "array length requires an integer or usize literal");
-        t.count = std::stoi(number.value);
-      } catch (const std::out_of_range &) {
-        fail(v.loc, DiagnosticCode::UnexpectedToken, "array size out of range");
-      }
-      if (t.count <= 0 || t.count > 65536)
-        fail(v.loc, DiagnosticCode::UnexpectedToken, "array size must be in 1..65536");
       need("]");
+      if (firstDimension) {
+        t.count = count;
+        t.countName = countName;
+      } else
+        t.dimensions.push_back({count, countName});
+      firstDimension = false;
     }
     return t;
   }
@@ -420,6 +457,7 @@ class Parser {
         e.args.push_back({ast::Expr::Name, t.loc, t.name, {}});
         if (t.count)
           e.args.back().text += "[" + std::to_string(t.count) + "]";
+        e.typeArguments.push_back(std::move(t));
         need(">");
       }
       need("(");
@@ -432,7 +470,7 @@ class Parser {
     } else if (eat("match")) {
       e.kind = ast::Expr::Match;
       e.text.clear();
-      e.args.push_back(expr());
+      e.args.push_back(conditionExpr());
       need("{");
       while (!eat("}")) {
         ast::Stmt arm{};
@@ -459,6 +497,22 @@ class Parser {
           continue;
         }
         auto value = expr();
+        if (eat(",")) {
+          if (!e.body.empty())
+            fail(value.loc, DiagnosticCode::UnexpectedToken,
+                 "initializer elements cannot follow block statements");
+          e.kind = ast::Expr::BraceInit;
+          e.args.push_back(std::move(value));
+          e.initializerNames.push_back("");
+          while (peek().text != "}") {
+            e.args.push_back(expr());
+            e.initializerNames.push_back("");
+            if (!eat(","))
+              break;
+          }
+          need("}");
+          break;
+        }
         if (eat(";")) {
           ast::Stmt statement{};
           statement.kind = ast::Stmt::Expression;
@@ -474,7 +528,10 @@ class Parser {
       if (e.args.empty())
         e.args.push_back({ast::Expr::Name, t.loc, "unit", {}});
     } else if (eat("(")) {
+      auto savedBrace = allowNamedBrace;
+      allowNamedBrace = true;
       e = expr();
+      allowNamedBrace = savedBrace;
       need(")");
     } else if (eat("[")) {
       e.kind = ast::Expr::Array;
@@ -531,7 +588,7 @@ class Parser {
             arguments.push_back(type());
           } while (eat(","));
           need(">");
-          if (peek().text == "::")
+          if (peek().text == "::" || (allowNamedBrace && peek().text == "{"))
             e.typeArguments = std::move(arguments);
           else
             pos = saved;
@@ -542,11 +599,17 @@ class Parser {
       while (eat("::"))
         e.text += "::" + ident().text;
     }
+    if (allowNamedBrace && e.kind == ast::Expr::Name && peek().text == "{") {
+      e.kind = ast::Expr::BraceInit;
+      braceEntries(e);
+    }
     for (;;) {
       if (peek().text == "?")
         fail(peek().loc, DiagnosticCode::FutureFeature,
              "error propagation with ? is not implemented; inspect is_ok() and error() explicitly");
       if (eat("(")) {
+        auto savedBrace = allowNamedBrace;
+        allowNamedBrace = true;
         ast::Expr c{ast::Expr::Call, e.loc, e.text, {}};
         c.typeArguments = e.typeArguments;
         if (e.kind != ast::Expr::Name) {
@@ -561,10 +624,13 @@ class Parser {
           need(")");
         }
         e = std::move(c);
+        allowNamedBrace = savedBrace;
       } else if (eat(".")) {
         auto n = ident();
         ast::Expr c{ast::Expr::Member, e.loc, n.text, {std::move(e)}};
         if (eat("(")) {
+          auto savedBrace = allowNamedBrace;
+          allowNamedBrace = true;
           c.kind = ast::Expr::Method;
           if (!eat(")")) {
             do {
@@ -572,12 +638,16 @@ class Parser {
             } while (eat(","));
             need(")");
           }
+          allowNamedBrace = savedBrace;
         }
         e = std::move(c);
       } else if (eat("[")) {
         ast::Expr c{ast::Expr::Index, e.loc, "", {std::move(e), expr()}};
         need("]");
         e = std::move(c);
+      } else if (peek().text == "++" || peek().text == "--") {
+        auto operation = ts[pos++].text;
+        e = {ast::Expr::Unary, e.loc, "post" + operation, {std::move(e)}};
       } else
         break;
     }
@@ -608,6 +678,35 @@ class Parser {
         ts[pos - 1].loc.span.end >= e.loc.span.start)
       e.loc.span.end = ts[pos - 1].loc.span.end;
     return e;
+  }
+  ast::Expr conditionExpr() {
+    auto saved = allowNamedBrace;
+    allowNamedBrace = false;
+    auto value = expr();
+    allowNamedBrace = saved;
+    return value;
+  }
+  void braceEntries(ast::Expr &e) {
+    need("{");
+    if (!eat("}")) {
+      do {
+        if (peek().text == "}")
+          break;
+        if (peek().kind == Token::Identifier && ts[pos + 1].text == ":") {
+          e.initializerNames.push_back(ident().text);
+          need(":");
+          e.args.push_back(expr());
+        } else {
+          e.initializerNames.push_back("");
+          e.args.push_back(expr());
+          if (eat("=>") || eat(":")) {
+            e.initializerNames.back() = ":";
+            e.args.push_back(expr());
+          }
+        }
+      } while (eat(","));
+      need("}");
+    }
   }
   std::vector<ast::Stmt> block() {
     need("{");
@@ -664,7 +763,7 @@ class Parser {
         s.pattern = pattern();
         need("=");
       }
-      s.expr = expr();
+      s.expr = conditionExpr();
       s.body = block();
       if (eat("else")) {
         if (peek().text == "if")
@@ -674,7 +773,7 @@ class Parser {
       }
     } else if (eat("match")) {
       s.kind = ast::Stmt::Match;
-      s.expr = expr();
+      s.expr = conditionExpr();
       need("{");
       while (!eat("}")) {
         ast::Stmt arm{};
@@ -697,22 +796,49 @@ class Parser {
       }
     } else if (eat("while")) {
       s.kind = ast::Stmt::While;
-      s.expr = expr();
+      s.expr = conditionExpr();
       s.body = block();
     } else if (eat("loop")) {
       s.kind = ast::Stmt::Loop;
       s.body = block();
     } else if (eat("for")) {
       s.kind = ast::Stmt::For;
+      bool parenthesized = eat("(");
+      if (parenthesized || peek().text == "let" || peek().text == ";" ||
+          (peek().kind == Token::Identifier && ts.at(pos + 1).text != "in")) {
+        s.classicFor = true;
+        if (!eat(";")) {
+          auto init = stmt();
+          if (init.kind != ast::Stmt::Let && init.kind != ast::Stmt::Expression)
+            fail(init.loc, DiagnosticCode::UnexpectedToken,
+                 "for initializer requires let or an expression");
+          s.headerInit.push_back(std::move(init));
+        }
+        if (eat(";"))
+          s.expr = {ast::Expr::Bool, s.loc, "true", {}};
+        else {
+          s.expr = conditionExpr();
+          need(";");
+        }
+        s.limit = peek().text == (parenthesized ? ")" : "{")
+                      ? ast::Expr{ast::Expr::Name, s.loc, "unit", {}}
+                      : conditionExpr();
+        if (parenthesized)
+          need(")");
+        s.body = block();
+        return s;
+      }
       {
         auto name = ident();
         s.name = name.text;
         s.loc.context = name.loc.context;
       }
       need("in");
-      s.expr = expr();
-      need("..");
-      s.limit = expr();
+      s.expr = conditionExpr();
+      if (eat(".."))
+        s.limit = conditionExpr();
+      else
+        s.collectionIteration = true;
       s.body = block();
     } else if (eat("break")) {
       s.kind = ast::Stmt::Break;
@@ -836,7 +962,32 @@ public:
         continue;
       }
       auto attr = attribute();
+      auto initializer = initializerAttribute;
+      auto iteration = iterationAttribute;
+      while (peek().text == "@") {
+        auto next = attribute();
+        if (!next.empty()) {
+          if (!attr.empty())
+            fail(peek().loc, DiagnosticCode::InvalidDeclaration, "duplicate internal annotation");
+          attr = next;
+        }
+        if (!initializerAttribute.empty()) {
+          if (!initializer.empty())
+            fail(peek().loc, DiagnosticCode::InvalidDeclaration,
+                 "duplicate @initializer annotation");
+          initializer = initializerAttribute;
+        }
+        if (!iterationAttribute.empty()) {
+          if (!iteration.empty())
+            fail(peek().loc, DiagnosticCode::InvalidDeclaration, "duplicate @iteration annotation");
+          iteration = iterationAttribute;
+        }
+      }
       bool pub = eat("pub");
+      if (!initializer.empty() && peek().text != "struct")
+        fail(peek().loc, DiagnosticCode::InvalidDeclaration, "@initializer requires a struct");
+      if (!iteration.empty() && peek().text != "struct")
+        fail(peek().loc, DiagnosticCode::InvalidDeclaration, "@iteration requires a struct");
       if (peek().text == "async" || peek().text == "await")
         ident();
       auto start = peek().loc;
@@ -878,10 +1029,15 @@ public:
         need("{");
         while (!eat("}")) {
           auto ma = attribute();
+          if (!initializerAttribute.empty())
+            fail(peek().loc, DiagnosticCode::InvalidDeclaration, "@initializer requires a struct");
+          if (!iterationAttribute.empty())
+            fail(peek().loc, DiagnosticCode::InvalidDeclaration, "@iteration requires a struct");
           bool mp = eat("pub");
+          bool mu = eat("unsafe");
           need("fn");
           impl.methods.push_back(p.functions.size());
-          p.functions.push_back(function(owner, mp, false, ma));
+          p.functions.push_back(function(owner, mp, false, ma, false, mu));
         }
         p.impls.push_back(std::move(impl));
       } else if (eat("enum")) {
@@ -923,6 +1079,8 @@ public:
         s.trusted = trusted;
         s.foreignC = foreign;
         s.representation = attr;
+        s.initializerMethods = initializer;
+        s.iterationMethods = iteration;
         s.pub = pub;
         s.loc = start;
         {
@@ -1014,15 +1172,19 @@ bool parseFragment(const std::vector<Token> &ts, const std::string &kind) {
 static void printStmts(const std::vector<ast::Stmt> &, std::ostream &, int);
 static void printExpr(const ast::Expr &e, std::ostream &o) {
   static const char *names[] = {
-      "LiteralInt", "LiteralBool",     "Identifier",      "Binary",     "Call",       "MethodCall",
-      "Member",     "Index",           "Array",           "Assignment", "Unary",      "Cast",
-      "Char",       "StringLiteral",   "BlockExpr",       "AtCall",     "BorrowExpr", "MatchExpr",
-      "UnsafeExpr", "DereferenceExpr", "ArrayRepeatExpr", "InvokeExpr"};
+      "LiteralInt",      "LiteralBool", "Identifier",   "Binary",        "Call",
+      "MethodCall",      "Member",      "Index",        "Array",         "Assignment",
+      "Unary",           "Cast",        "Char",         "StringLiteral", "BlockExpr",
+      "AtCall",          "BorrowExpr",  "MatchExpr",    "UnsafeExpr",    "DereferenceExpr",
+      "ArrayRepeatExpr", "InvokeExpr",  "BraceInitExpr"};
   o << "(" << names[e.kind] << " " << (e.kind == ast::Expr::String ? quoteText(e.text) : e.text);
   if (!e.body.empty())
     printStmts(e.body, o, 2);
+  size_t index = 0;
   for (auto &a : e.args) {
     o << " ";
+    if (e.kind == ast::Expr::BraceInit && index < e.initializerNames.size())
+      o << e.initializerNames[index++] << ":";
     printExpr(a, o);
   }
   o << ")";
@@ -1042,6 +1204,13 @@ static void printStmts(const std::vector<ast::Stmt> &ss, std::ostream &o, int de
     }
     printExpr(s.expr, o);
     o << "\n";
+    if (s.classicFor) {
+      o << std::string(depth + 2, ' ') << "initializer\n";
+      printStmts(s.headerInit, o, depth + 4);
+      o << std::string(depth + 2, ' ') << "step ";
+      printExpr(s.limit, o);
+      o << "\n";
+    }
     printStmts(s.body, o, depth + 2);
     if (!s.otherwise.empty()) {
       o << std::string(depth, ' ') << "else\n";
@@ -1070,8 +1239,14 @@ void printAST(const ast::Program &p, std::ostream &o) {
       }
       name += ">";
     }
-    if (t.count)
-      name += "[" + std::to_string(t.count) + "]";
+    if (t.count || !t.countName.empty())
+      name += "[" +
+              (!t.countName.empty() ? t.countName
+               : t.count < 0        ? ""
+                                    : std::to_string(t.count)) +
+              "]";
+    for (const auto &[count, constant] : t.dimensions)
+      name += "[" + (constant.empty() ? std::to_string(count) : constant) + "]";
     return name;
   };
   for (const auto &type : p.foreignTypes) {

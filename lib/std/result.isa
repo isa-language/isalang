@@ -82,3 +82,65 @@ impl ResultString {
   @intrinsic "io.result_error" pub fn error(shared self) -> i32;
   @intrinsic "io.result_str" pub fn value(shared self) -> str;
 }
+
+impl<T, E> Result<T, E> {
+  pub fn is_ok(shared self) -> bool {
+    match &self {
+      Ok(_) => {
+        return true;
+      },
+      Err(_) => {
+        return false;
+      }
+    }
+  }
+  pub fn is_err(shared self) -> bool {
+    return !self.is_ok();
+  }
+  pub fn as_ref(shared self) -> Result<&T, &E> {
+    match &self {
+      Ok(value) => {
+        return Result::Ok(value);
+      },
+      Err(error) => {
+        return Result::Err(error);
+      },
+    }
+  }
+  pub fn unwrap(self) -> T {
+    match self.move() {
+      Ok(value) => {
+        return value.move();
+      },
+      Err(_) => {
+        loop {
+          panic("called Result::unwrap() on Err");
+        }
+      },
+    }
+  }
+  pub fn expect(self, message: str) -> T {
+    match self.move() {
+      Ok(value) => {
+        return value.move();
+      },
+      Err(_) => {
+        loop {
+          panic(message);
+        }
+      },
+    }
+  }
+  pub fn unwrap_err(self) -> E {
+    match self.move() {
+      Err(error) => {
+        return error.move();
+      },
+      Ok(_) => {
+        loop {
+          panic("called Result::unwrap_err() on Ok");
+        }
+      },
+    }
+  }
+}

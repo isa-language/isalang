@@ -1,0 +1,13 @@
+@import "std.collections.vec_deque"
+fn main() {
+  let d = VecDeque<i32>::create();
+  d.push_front(1);
+  let front = d.front();
+  d.pop_front();
+  match front {
+    Some(x) => {
+      print(x);
+    },
+    None => {}
+  }
+}

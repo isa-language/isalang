@@ -1,0 +1,21 @@
+@import "std.box"
+struct Data {
+  x: i32,
+  y: i32,
+}
+fn main() {
+  let d = Data::new();
+  d.x = 1;
+  d.y = 2;
+  let b = Box<Data>::new(d.move());
+  let edit = b.get_mut();
+  edit.y = 8;
+  print(edit.y);
+  print(b.get().y);
+  let a: i32[2] = [3, 4];
+  let boxed = Box<i32[2]>::new(a.move());
+  let elements = boxed.get_mut();
+  elements[1] = 9;
+  print(elements[1]);
+  print(boxed.get()[1]);
+}

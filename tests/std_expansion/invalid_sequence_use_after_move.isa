@@ -1,0 +1,7 @@
+@import "std.collections"
+fn main() {
+  let q = Queue<String>::create();
+  let text = String::from("owned");
+  q.enqueue(text.move());
+  print(text);
+}

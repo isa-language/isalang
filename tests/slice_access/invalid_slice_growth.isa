@@ -1,0 +1,9 @@
+@import "std.vec"
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(1);
+  let s = values.as_slice();
+  let a = s.get(0);
+  values.push(2);
+  print(a.is_some());
+}

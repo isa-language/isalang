@@ -122,6 +122,9 @@ ast::Program resolveNamespaces(const std::vector<modules::Module> &modules,
         t.name = resolve(m.id, t.name, t.loc);
       if (!t.countName.empty())
         t.countName = resolve(m.id, t.countName, t.loc);
+      for (auto &[count, name] : t.dimensions)
+        if (!name.empty())
+          name = resolve(m.id, name, t.loc);
       for (auto &a : t.arguments)
         self(self, a, parameters);
     };
@@ -144,7 +147,8 @@ ast::Program resolveNamespaces(const std::vector<modules::Module> &modules,
           locals.insert({name, pat.loc.context});
     };
     expression = [&](ast::Expr &e, Locals &locals, const std::set<std::string> &parameters) {
-      if ((e.kind == ast::Expr::Name || e.kind == ast::Expr::Call) &&
+      if ((e.kind == ast::Expr::Name || e.kind == ast::Expr::Call ||
+           (e.kind == ast::Expr::BraceInit && !e.text.empty())) &&
           !locals.contains({e.text, e.loc.context}) && !parameters.contains(e.text))
         e.text = resolve(m.id, e.text, e.loc);
       for (auto &t : e.typeArguments)
@@ -156,6 +160,19 @@ ast::Program resolveNamespaces(const std::vector<modules::Module> &modules,
     block = [&](std::vector<ast::Stmt> &body, Locals locals,
                 const std::set<std::string> &parameters) {
       for (auto &s : body) {
+        if (s.classicFor && s.kind == ast::Stmt::For) {
+          auto inner = locals;
+          for (auto &init : s.headerInit) {
+            resolveType(resolveType, init.annotation, parameters);
+            expression(init.expr, inner, parameters);
+            if (init.kind == ast::Stmt::Let)
+              inner.insert({init.name, init.loc.context});
+          }
+          expression(s.expr, inner, parameters);
+          expression(s.limit, inner, parameters);
+          block(s.body, inner, parameters);
+          continue;
+        }
         resolveType(resolveType, s.annotation, parameters);
         expression(s.expr, locals, parameters);
         expression(s.limit, locals, parameters);

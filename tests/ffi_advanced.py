@@ -133,7 +133,12 @@ int main(void){Callback cb=export_callback();
         run([clang, *flags, "-Wno-override-module", "-c", base / "library.ll", "-o", library])
         binary = base / "driver"
         if sanitized:
-            runtime = [root / "runtime/src/isac_runtime.c", "-I", root / "runtime/include"]
+            runtime = [
+                root / "runtime/src/isac_runtime.c",
+                root / "runtime/src/isac_allocator_libc.c",
+                "-I",
+                root / "runtime/include",
+            ]
         else:
             runtime = [root / "build/libisac_runtime.a"]
         run([clang, *flags, driver, library, obj, *runtime, "-o", binary])

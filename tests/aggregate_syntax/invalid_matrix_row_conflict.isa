@@ -1,0 +1,6 @@
+fn main() {
+  let a: i32[2][3];
+  let row = &a[0];
+  a[0][0] = 1;
+  print(row[0]);
+}

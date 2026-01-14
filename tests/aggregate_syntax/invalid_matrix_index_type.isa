@@ -1,0 +1,5 @@
+fn main() {
+  let a: i32[2][3];
+  let i = true;
+  print(a[i][0]);
+}

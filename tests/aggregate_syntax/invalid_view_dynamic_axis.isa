@@ -1,0 +1,5 @@
+fn main() {
+  let a = [1, 2];
+  let axis = 0;
+  for value in a.view().reverse_axis(axis).elements() {}
+}

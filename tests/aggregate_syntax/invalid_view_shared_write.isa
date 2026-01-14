@@ -1,0 +1,6 @@
+fn main() {
+  let a = [1, 2];
+  for v in a.view().elements() {
+    *v = 3;
+  }
+}

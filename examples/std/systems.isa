@@ -1,0 +1,19 @@
+@import("std.env" as env, "std.path", "std.time")
+fn main() {
+  let args = env::args();
+  @println("argument count = {}", args.len());
+  match args.get(1) {
+    Some(value) => {
+      @println("argument = {}", value);
+    },
+    None => {
+      @println("no additional argument");
+    },
+  }
+  let path = Path::from("examples").join("std/systems.isa");
+  print(path.to_string());
+  let now = Instant::now();
+  let duration = Duration::from_millis(1);
+  sleep(&duration).unwrap();
+  @println("elapsed ns = {}", now.elapsed_nanos());
+}

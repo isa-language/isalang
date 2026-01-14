@@ -1,0 +1,9 @@
+@import "std.string" struct P {
+  s: String,
+}
+fn main() {
+  let s = String::from("x");
+  let p = P {
+    s: s
+  };
+}

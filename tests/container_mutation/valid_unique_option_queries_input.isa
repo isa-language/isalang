@@ -1,0 +1,21 @@
+@import "std.vec" fn edit(v: &mut Vec<i32>) {
+  let a = v.first_mut();
+  print(a.is_some());
+  match a {
+    Some(x) => {
+      x = 9;
+    },
+    None => {}
+  }
+  let b = v.last_mut();
+  print(b.is_none());
+  b.drop();
+  v.push(3);
+}
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(2);
+  edit(&mut v);
+  print(v.at_copy(0));
+  print(v.len());
+}

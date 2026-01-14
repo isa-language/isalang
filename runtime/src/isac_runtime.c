@@ -2,13 +2,18 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "isac_runtime.h"
+#include "isac_allocator.h"
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 uint64_t isac_rt_monotonic_ns(void) {
   struct timespec value;
@@ -44,7 +49,7 @@ _Noreturn void isac_rt_panic(const char *message) {
   abort();
 }
 void *isac_rt_alloc(size_t size) {
-  void *p = malloc(size ? size : 1);
+  void *p = isac_allocator_allocate(size ? size : 1, 0);
   if (!p)
     isac_rt_panic("allocation failed");
 #ifdef ISAC_RT_TESTING
@@ -53,7 +58,7 @@ void *isac_rt_alloc(size_t size) {
   return p;
 }
 void *isac_rt_alloc_zeroed(size_t size) {
-  void *p = calloc(1, size ? size : 1);
+  void *p = isac_allocator_allocate(size ? size : 1, 1);
   if (!p)
     isac_rt_panic("allocation failed");
 #ifdef ISAC_RT_TESTING
@@ -62,11 +67,13 @@ void *isac_rt_alloc_zeroed(size_t size) {
   return p;
 }
 void isac_rt_free(void *ptr) {
+  if (!ptr)
+    return;
 #ifdef ISAC_RT_TESTING
   if (ptr)
     ++frees;
 #endif
-  free(ptr);
+  isac_allocator_deallocate(ptr);
 }
 void *isac_rt_memcpy(void *d, const void *s, size_t n) {
   return memcpy(d, s, n);
@@ -159,7 +166,7 @@ void *isac_rt_realloc(void *ptr, size_t size) {
     isac_rt_free(ptr);
     return NULL;
   }
-  void *result = realloc(ptr, size);
+  void *result = isac_allocator_reallocate(ptr, size);
   if (!result)
     isac_rt_panic("allocation failed");
   return result;
@@ -807,6 +814,9 @@ size_t isac_rt_vec_len(const void *ptr) {
 size_t isac_rt_vec_capacity(const void *ptr) {
   return ((const IsacVecStorage *)ptr)->capacity;
 }
+void *isac_rt_vec_data(void *ptr) {
+  return ((IsacVecStorage *)ptr)->data;
+}
 void *isac_rt_vec_at(void *ptr, size_t index) {
   IsacVecStorage *vec = ptr;
   isac_rt_index_check(index, vec->len);
@@ -832,6 +842,35 @@ void *isac_rt_vec_pop_slot(void *ptr) {
     return NULL;
   return vec->data + --vec->len * vec->element_size;
 }
+void *isac_rt_vec_insert_slot(void *ptr, size_t index) {
+  IsacVecStorage *vec = ptr;
+  if (index > vec->len)
+    isac_rt_panic("vector insertion index out of bounds");
+  size_t old_len = vec->len;
+  isac_rt_vec_push_slot(ptr);
+  uint8_t *slot = vec->data + index * vec->element_size;
+  memmove(slot + vec->element_size, slot, (old_len - index) * vec->element_size);
+  return slot;
+}
+void isac_rt_vec_remove_slot(void *ptr, size_t index) {
+  IsacVecStorage *vec = ptr;
+  isac_rt_index_check(index, vec->len);
+  uint8_t *slot = vec->data + index * vec->element_size;
+  memmove(slot, slot + vec->element_size, (vec->len - index - 1) * vec->element_size);
+  --vec->len;
+}
+void isac_rt_vec_swap(void *ptr, size_t left, size_t right) {
+  IsacVecStorage *vec = ptr;
+  isac_rt_index_check(left, vec->len);
+  isac_rt_index_check(right, vec->len);
+  uint8_t *a = vec->data + left * vec->element_size;
+  uint8_t *b = vec->data + right * vec->element_size;
+  for (size_t i = 0; i < vec->element_size; ++i) {
+    uint8_t byte = a[i];
+    a[i] = b[i];
+    b[i] = byte;
+  }
+}
 void isac_rt_vec_clear_storage(void *ptr) {
   ((IsacVecStorage *)ptr)->len = 0;
 }
@@ -839,4 +878,199 @@ void isac_rt_vec_drop_storage(void *ptr) {
   IsacVecStorage *vec = ptr;
   isac_rt_free(vec->data);
   isac_rt_free(vec);
+}
+
+static int os_cstr(const IsacStr *view, char **out) {
+  *out = NULL;
+  if (view->len == SIZE_MAX || (view->len && memchr(view->ptr, 0, view->len)))
+    return EINVAL;
+  char *text = isac_rt_alloc(view->len + 1);
+  if (view->len)
+    memcpy(text, view->ptr, view->len);
+  text[view->len] = 0;
+  *out = text;
+  return 0;
+}
+int32_t isac_rt_string_read_file(IsacString *out, const IsacStr *path) {
+  char *name;
+  int error = os_cstr(path, &name);
+  if (error)
+    return error;
+  FILE *file = fopen(name, "rb");
+  error = file ? 0 : (errno ? errno : EIO);
+  isac_rt_free(name);
+  if (error)
+    return error;
+
+  uint8_t *data = NULL;
+  size_t len = 0, capacity = 0;
+  uint8_t chunk[4096];
+  for (;;) {
+    size_t n = fread(chunk, 1, sizeof chunk, file);
+    if (n) {
+      if (len > SIZE_MAX - n) {
+        error = EOVERFLOW;
+        break;
+      }
+      size_t required = len + n;
+      if (required > capacity) {
+        size_t grown = capacity > SIZE_MAX / 2 ? SIZE_MAX : capacity * 2;
+        if (grown < 4096)
+          grown = 4096;
+        capacity = required > grown ? required : grown;
+        data = isac_rt_realloc(data, capacity);
+      }
+      memcpy(data + len, chunk, n);
+      len += n;
+    }
+    if (n < sizeof chunk) {
+      if (ferror(file))
+        error = errno ? errno : EIO;
+      break;
+    }
+  }
+  if (fclose(file) != 0 && !error)
+    error = errno ? errno : EIO;
+  if (!error && !input_utf8(data, len))
+    error = EILSEQ;
+  if (error) {
+    isac_rt_free(data);
+    return error;
+  }
+  isac_rt_string_drop(out);
+  *out = (IsacString){data, len, capacity};
+  return 0;
+}
+int32_t isac_rt_string_env_var(IsacString *out, const IsacStr *name) {
+  char *key;
+  int error = os_cstr(name, &key);
+  if (error)
+    return error;
+  if (!name->len || strchr(key, '=')) {
+    isac_rt_free(key);
+    return EINVAL;
+  }
+  const char *value = getenv(key);
+  isac_rt_free(key);
+  if (!value)
+    return ENOENT;
+  size_t len = strlen(value);
+  if (!input_utf8((const uint8_t *)value, len))
+    return EILSEQ;
+  IsacStr view = {(const uint8_t *)value, len};
+  IsacString temporary;
+  isac_rt_string_from(&temporary, &view);
+  isac_rt_string_drop(out);
+  *out = temporary;
+  return 0;
+}
+int32_t isac_rt_fs_write_text(const IsacStr *path, const IsacStr *text) {
+  char *name;
+  int error = os_cstr(path, &name);
+  if (error)
+    return error;
+  FILE *file = fopen(name, "wb");
+  error = file ? 0 : (errno ? errno : EIO);
+  isac_rt_free(name);
+  if (error)
+    return error;
+  size_t written = 0;
+  while (written < text->len) {
+    size_t n = fwrite(text->ptr + written, 1, text->len - written, file);
+    if (!n) {
+      error = errno ? errno : EIO;
+      break;
+    }
+    written += n;
+  }
+  if (fclose(file) != 0 && !error)
+    error = errno ? errno : EIO;
+  return error;
+}
+int32_t isac_rt_fs_exists(const IsacStr *path) {
+  char *name;
+  int error = os_cstr(path, &name);
+  if (error)
+    return -error;
+  struct stat info;
+  int result = stat(name, &info);
+  error = result == 0 ? 0 : errno;
+  isac_rt_free(name);
+  return !result ? 1 : error == ENOENT || error == ENOTDIR ? 0 : -error;
+}
+int32_t isac_rt_fs_remove_file(const IsacStr *path) {
+  char *name;
+  int error = os_cstr(path, &name);
+  if (error)
+    return error;
+  if (unlink(name))
+    error = errno;
+  isac_rt_free(name);
+  return error;
+}
+int32_t isac_rt_fs_create_dir(const IsacStr *path) {
+  char *name;
+  int error = os_cstr(path, &name);
+  if (error)
+    return error;
+  if (mkdir(name, 0777))
+    error = errno;
+  isac_rt_free(name);
+  return error;
+}
+int64_t isac_rt_process_run(const IsacStr *program, const IsacStr *argument, int32_t has_argument) {
+  char *name, *arg = NULL;
+  int error = os_cstr(program, &name);
+  if (error)
+    return -error;
+  if (has_argument)
+    error = os_cstr(argument, &arg);
+  if (error) {
+    isac_rt_free(name);
+    return -error;
+  }
+  if (fflush(stdout) != 0 || fflush(stderr) != 0) {
+    error = errno ? errno : EIO;
+    isac_rt_free(name);
+    isac_rt_free(arg);
+    return -error;
+  }
+  char *argv[3] = {name, arg, NULL};
+  extern char **environ;
+  pid_t child;
+  error = posix_spawnp(&child, name, NULL, NULL, argv, environ);
+  isac_rt_free(name);
+  isac_rt_free(arg);
+  if (error)
+    return -error;
+  int status;
+  while (waitpid(child, &status, 0) < 0) {
+    if (errno != EINTR)
+      return -errno;
+  }
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+  if (WIFSIGNALED(status))
+    return 128 + WTERMSIG(status);
+  return -EIO;
+}
+int32_t isac_rt_sleep_ns(uint64_t nanos) {
+  uint64_t seconds = nanos / UINT64_C(1000000000);
+  time_t sec = (time_t)seconds;
+  if (sec < 0 || (uint64_t)sec != seconds)
+    return EOVERFLOW;
+  struct timespec request = {sec, (long)(nanos % UINT64_C(1000000000))};
+  while (nanosleep(&request, &request)) {
+    if (errno != EINTR)
+      return errno;
+  }
+  return 0;
+}
+uint64_t isac_rt_unix_ns(void) {
+  struct timespec value;
+  if (clock_gettime(CLOCK_REALTIME, &value))
+    isac_rt_panic("wall clock unavailable");
+  if (value.tv_sec < 0 || (uint64_t)value.tv_sec > (UINT64_MAX - 999999999) / 1000000000)
+    isac_rt_panic("wall clock exceeds nanosecond representation");
+  return (uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec;
 }

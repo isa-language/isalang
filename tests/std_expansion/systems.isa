@@ -1,0 +1,58 @@
+@import("std.fs" as fs, "std.path", "std.process" as process, "std.env" as env, "std.time")
+fn main() {
+  let args = env::args();
+  let file = String::new();
+  match args.get(1) {
+    Some(value) => {
+      file.push_str(value.as_str());
+    },
+    None => {
+      panic("test path required");
+    }
+  }
+  let path = Path::from(file.as_str());
+  @assert(path.is_absolute());
+  let relative = Path::from("folder");
+  let joined = relative.join("Olá.txt");
+  print(joined.to_string());
+  print(joined.file_name().unwrap());
+  @assert(relative.join("/absolute").is_absolute());
+  @assert(Path::from("folder/").file_name().is_none());
+  fs::write(file.as_str(), "Olá, filesystem!\n").unwrap();
+  @assert(fs::exists(file.as_str()).unwrap());
+  print(fs::read_to_string(file.as_str()).unwrap());
+  fs::remove_file(file.as_str()).unwrap();
+  @assert(!fs::exists(file.as_str()).unwrap());
+  @assert(fs::read_to_string(file.as_str()).is_err());
+  @assert(fs::write("bad\0path", "text").is_err());
+  let directory = @format("{}.dir", file);
+  fs::create_dir(directory.as_str()).unwrap();
+  @assert(fs::exists(directory.as_str()).unwrap());
+  @assert(fs::create_dir(directory.as_str()).is_err());
+  @assert(fs::read_to_string("bad\0path").is_err());
+  match args.get(2) {
+    Some(value) => {
+      @assert(fs::read_to_string(value.as_str()).is_err());
+    },
+    None => {}
+  }
+  print(process::run("/usr/bin/true").unwrap());
+  print(process::run("/usr/bin/false").unwrap());
+  @assert(process::run("/nonexistent/isac-test-program").is_err());
+  @assert(process::run("bad\0program").is_err());
+
+  process::run_with_arg("/usr/bin/printf", "argument;literal").unwrap();
+  @println();
+  print(env::var("ISAC_STD_TEST_VAR").unwrap());
+  @assert(env::var("ISAC_STD_TEST_MISSING").is_err());
+  @assert(env::var("bad\0name").is_err());
+  @assert(env::var("ISAC_STD_INVALID_UTF8").is_err());
+  let now = Instant::now();
+  let duration = Duration::from_millis(1);
+  sleep(&duration).unwrap();
+  @assert(now.elapsed_nanos()>0);
+  @assert(unix_nanos()>0u64);
+  @assert(duration.as_millis() == 1u64);
+  @assert(args.len() == 3);
+  print("systems ok");
+}

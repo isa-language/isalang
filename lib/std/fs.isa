@@ -1,0 +1,38 @@
+@import("std.string", "std.result", "core.runtime")
+
+pub fn read_to_string(path: str) -> Result<String, i32> {
+  let text = String::new();
+  let error = text.read_file_internal(path);
+  if error != 0 {
+    return Result::Err(error);
+  }
+  return Result::Ok(text.move());
+}
+pub fn write(path: str, text: str) -> Result<bool, i32> {
+  let error = isac_rt_fs_write_text(path, text);
+  if error != 0 {
+    return Result::Err(error);
+  }
+  return Result::Ok(true);
+}
+pub fn exists(path: str) -> Result<bool, i32> {
+  let result = isac_rt_fs_exists(path);
+  if result < 0 {
+    return Result::Err(-result);
+  }
+  return Result::Ok(result != 0);
+}
+pub fn remove_file(path: str) -> Result<bool, i32> {
+  let error = isac_rt_fs_remove_file(path);
+  if error != 0 {
+    return Result::Err(error);
+  }
+  return Result::Ok(true);
+}
+pub fn create_dir(path: str) -> Result<bool, i32> {
+  let error = isac_rt_fs_create_dir(path);
+  if error != 0 {
+    return Result::Err(error);
+  }
+  return Result::Ok(true);
+}

@@ -1,0 +1,21 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  loop {
+    let p = &mut v;
+    let item = p.get_mut(0);
+    break;
+  }
+  v.push(2);
+  print(v.len());
+  let i = 0;
+  while i<3 {
+    let p = &mut v;
+    let item = p.get_mut(0);
+    i = i + 1;
+    continue;
+  }
+  v.push(3);
+  print(v.len());
+}

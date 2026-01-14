@@ -1,0 +1,8 @@
+@import "std.string"
+fn main() {
+  let data = String::from("live");
+  let parent = &mut data;
+  let reader = &*parent;
+  data.drop();
+  print(reader);
+}

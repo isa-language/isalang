@@ -1,0 +1,28 @@
+@import "std.vec"
+fn main() {
+  let values = Vec<i32> {
+    1,
+    2,
+    3
+  };
+  for value in values.as_mut_slice() {
+    *value = *value + 1;
+  }
+  for value in values.as_mut_slice().view_mut().elements_mut() {
+    *value = *value + 1;
+  }
+  for value in values.as_slice().view().elements().rev() {
+    print(value);
+  }
+  let array = [7, 8];
+  let parent = &mut array;
+  for value in parent.view_mut().elements() {
+    print(value);
+  }
+  for value in parent.view_mut().elements_mut() {
+    *value = *value + 1;
+  }
+  for value in parent {
+    print(value);
+  }
+}

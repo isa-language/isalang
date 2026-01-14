@@ -1,0 +1,34 @@
+@import "std.vec"
+
+struct Holder<T> {
+  values: T,
+}
+
+fn suffix(values: &mut Vec<String>) {
+  let pending = values.get_mut(0);
+  let transferred = pending.move();
+  match transferred {
+    Some(text) => {
+      text.push_str("!");
+    },
+    None => {},
+  }
+
+  values.push(String::from("next"));
+}
+
+fn main() -> i32 {
+  let holder = Holder<Vec<String >>::new();
+  holder.values = Vec<String>::new();
+  holder.values.push(String::from("Isalang"));
+
+  suffix(&mut holder.values);
+  match holder.values.get(0) {
+    Some(text) => {
+      @println("{}", text);
+    },
+    None => {},
+  }
+  @println("elements = {}", holder.values.len());
+  return 0;
+}

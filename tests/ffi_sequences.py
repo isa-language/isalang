@@ -100,7 +100,12 @@ int main(int argc,char**argv){
             run([compiler, exports, level, "--library", "--emit-obj", "-o", library])
         program = base / "exported"
         runtime = (
-            [root / "runtime/src/isac_runtime.c", "-I", root / "runtime/include"]
+            [
+                root / "runtime/src/isac_runtime.c",
+                root / "runtime/src/isac_allocator_libc.c",
+                "-I",
+                root / "runtime/include",
+            ]
             if sanitized
             else [root / "build/libisac_runtime.a"]
         )

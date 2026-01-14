@@ -1,0 +1,29 @@
+@import "std.vec"
+struct Numbers {
+  signed: i64,
+  unsigned: u64,
+  real: f64,
+}
+fn main() {
+  let i = 42i32;
+  let u = 7u32;
+  let f = 1.5f32;
+  let n = Numbers {
+    real: f,
+    signed: i,
+    unsigned: u
+  };
+  @println("{} {} {}", n.signed, n.unsigned, n.real);
+  let v = Vec<i64> {
+    i,
+    u
+  };
+  print(v.at_copy(0));
+  print(v.at_copy(1));
+  let a: f64[2] = {
+    i,
+    f
+  };
+  print(a[0]);
+  print(a[1]);
+}

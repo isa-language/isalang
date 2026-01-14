@@ -1,0 +1,19 @@
+@import "std.vec"
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(1);
+  let parent = &mut values;
+  let item = parent.get_mut(0);
+  {
+    let parent = 100;
+    print(parent);
+  };
+  match item {
+    Some(value) => {
+      value = 2;
+    },
+    None => {}
+  }
+  values.push(3);
+  print(values.len());
+}

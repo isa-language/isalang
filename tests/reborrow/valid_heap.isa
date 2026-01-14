@@ -1,0 +1,15 @@
+@import "std.string"
+fn inspect(text: &String) {
+  print(text);
+}
+fn main() {
+  let text = String::from("a");
+  let parent = &mut text;
+  let reader = &*parent;
+  let alias = &reader;
+  inspect(alias);
+  let child = &mut * parent;
+  child.push_str("b");
+  parent.push_str("c");
+  print(text);
+}

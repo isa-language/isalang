@@ -1,0 +1,7 @@
+struct N {
+  x: i32,
+}
+impl N {
+  @initializer("new", "push") fn read(shared self) {}
+}
+fn main() {}

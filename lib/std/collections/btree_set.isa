@@ -1,0 +1,43 @@
+@import "std.collections.btree_map"
+@initializer("create", "insert")
+pub struct BTreeSet<T> {
+  map: BTreeMap<T, bool>,
+}
+impl<T> BTreeSet<T> {
+  pub fn create() -> BTreeSet<T> {
+    let set = BTreeSet<T>::new();
+    set.map = BTreeMap<T, bool>::create();
+    return set.move();
+  }
+  pub fn len(shared self) -> usize {
+    return self.map.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.map.is_empty();
+  }
+  pub fn contains(shared self, value: T) -> bool {
+    return self.map.contains_key(value.move());
+  }
+  pub fn insert(unique self, value: T) -> bool {
+    return self.map.insert(value.move(), true).is_none();
+  }
+  pub fn remove(unique self, value: T) -> bool {
+    return self.map.remove(value.move()).is_some();
+  }
+  pub fn contains_ref(shared self, value: &T) -> bool {
+    return self.map.contains_key_ref(value);
+  }
+  pub fn remove_ref(unique self, value: &T) -> bool {
+    match self.map.remove_ref(value) {
+      Some(_) => {
+        return true;
+      },
+      None => {
+        return false;
+      },
+    }
+  }
+  pub fn clear(unique self) {
+    self.map.clear();
+  }
+}

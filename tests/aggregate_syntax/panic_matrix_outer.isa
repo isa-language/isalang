@@ -1,0 +1,17 @@
+fn main() {
+  let a: i32[2][3] = {
+    {
+      1,
+      2,
+      3
+    },
+    {
+      4,
+      5,
+      6
+    }
+  };
+  let i = 2usize;
+  let j = 0usize;
+  print(a[i][j]);
+}

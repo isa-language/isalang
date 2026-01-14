@@ -1,0 +1,14 @@
+@import "std.vec" fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  v.push(2);
+  let a = v.first_mut();
+  let b = v.last_mut();
+  match a {
+    Some(x) => {
+      print(x);
+    },
+    None => {}
+  }
+  b.drop();
+}

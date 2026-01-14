@@ -22,6 +22,7 @@ add_library(
   src/runtime.cpp
   src/liveness.cpp
   src/regions.cpp
+  src/references.cpp
   src/consteval.cpp
   src/ffi.cpp)
 target_include_directories(isac_frontend PUBLIC include)
@@ -36,7 +37,12 @@ target_link_libraries(isac PRIVATE isac_frontend)
 
 find_package(MLIR REQUIRED CONFIG HINTS /usr/local/lib/cmake/mlir)
 find_program(ISAC_CLANG NAMES clang-${LLVM_VERSION_MAJOR} clang REQUIRED)
-add_library(isac_runtime STATIC runtime/src/isac_runtime.c)
+set(ISAC_ALLOCATOR_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/isac_allocator_libc.c"
+    CACHE FILEPATH "Single allocator provider linked into the Isac runtime")
+get_filename_component(ISAC_ALLOCATOR_SOURCE "${ISAC_ALLOCATOR_SOURCE}" ABSOLUTE BASE_DIR
+                       "${CMAKE_CURRENT_SOURCE_DIR}")
+add_library(isac_runtime STATIC runtime/src/isac_runtime.c "${ISAC_ALLOCATOR_SOURCE}")
 target_include_directories(isac_runtime PUBLIC runtime/include)
 target_compile_options(isac_runtime PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -48,6 +54,7 @@ target_compile_definitions(
   PRIVATE ${LLVM_DEFINITIONS}
           ISAC_CLANG="${ISAC_CLANG}"
           ISAC_RUNTIME_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/isac_runtime.c"
+          ISAC_ALLOCATOR_SOURCE="${ISAC_ALLOCATOR_SOURCE}"
           ISAC_RUNTIME_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/runtime/include"
           ISAC_RUNTIME_LIBRARY="$<TARGET_FILE:isac_runtime>")
 add_dependencies(isac_backend isac_runtime)
@@ -79,6 +86,13 @@ if(NOT LLVM_ENABLE_RTTI)
 endif()
 
 include(CTest)
+if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(
+    NAME aggregate_syntax_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aggregate_syntax_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   file(GLOB STD_FOUNDATION_CASES CONFIGURE_DEPENDS tests/std_foundations/*.isa)
@@ -140,6 +154,11 @@ if(BUILD_TESTING)
     RESULT_VARIABLE ISAC_SANITIZER_STATUS
     OUTPUT_QUIET ERROR_QUIET)
   if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME aggregate_syntax_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aggregate_syntax_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(aggregate_syntax_sanitized_pipeline PROPERTIES LABELS "sanitizers")
     foreach(CASE IN LISTS STD_FOUNDATION_CASES)
       get_filename_component(NAME ${CASE} NAME_WE)
       if(NAME MATCHES "^valid_")
@@ -170,7 +189,8 @@ if(BUILD_TESTING)
   endforeach()
 endif()
 if(BUILD_TESTING)
-  add_executable(isac_runtime_test tests/runtime_test.c runtime/src/isac_runtime.c)
+  add_executable(isac_runtime_test tests/runtime_test.c runtime/src/isac_runtime.c
+                                   "${ISAC_ALLOCATOR_SOURCE}")
   target_include_directories(isac_runtime_test PRIVATE runtime/include)
   target_compile_definitions(isac_runtime_test PRIVATE ISAC_RT_TESTING)
   add_test(NAME runtime_abi COMMAND isac_runtime_test)
@@ -240,7 +260,8 @@ if(BUILD_TESTING)
   add_executable(isac_diagnostics_test tests/diagnostics_unit.cpp)
   target_link_libraries(isac_diagnostics_test PRIVATE isac_frontend)
   add_test(NAME diagnostic_model COMMAND isac_diagnostics_test)
-  add_executable(isac_string_runtime_test tests/string_runtime.c runtime/src/isac_runtime.c)
+  add_executable(isac_string_runtime_test tests/string_runtime.c runtime/src/isac_runtime.c
+                                          "${ISAC_ALLOCATOR_SOURCE}")
   target_include_directories(isac_string_runtime_test PRIVATE runtime/include)
   target_compile_definitions(isac_string_runtime_test PRIVATE ISAC_RT_TESTING)
   add_test(NAME string_runtime_abi COMMAND isac_string_runtime_test)
@@ -393,6 +414,17 @@ if(BUILD_TESTING)
     NAME container_access_pipeline
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/container_access_pipeline.py
             $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME container_mutation_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/container_mutation_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME slice_access_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/slice_access_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME exclusive_results_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/exclusive_results_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
   if(ISAC_SANITIZER_STATUS EQUAL 0)
     add_test(NAME imports_sanitized_pipeline
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/imports_pipeline.py
@@ -401,6 +433,22 @@ if(BUILD_TESTING)
       NAME container_access_sanitized_pipeline
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/container_access_pipeline.py
               $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    add_test(
+      NAME container_mutation_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/container_mutation_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(container_mutation_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME slice_access_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/slice_access_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(slice_access_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME exclusive_results_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/exclusive_results_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(exclusive_results_sanitized_pipeline PROPERTIES LABELS "sanitizers")
     set_tests_properties(imports_sanitized_pipeline container_access_sanitized_pipeline
                          PROPERTIES LABELS "sanitizers")
   endif()
@@ -470,6 +518,31 @@ if(BUILD_TESTING)
 endif()
 
 if(BUILD_TESTING)
+  add_test(NAME reborrow_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reborrow_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME allocator_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/allocator_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG})
+  add_executable(isac_semantic_regions_test tests/semantic_regions_test.cpp)
+  target_link_libraries(isac_semantic_regions_test PRIVATE isac_frontend)
+  add_test(NAME semantic_region_invariants COMMAND isac_semantic_regions_test)
+  add_executable(isac_reference_schema_test tests/reference_schema_test.cpp)
+  target_link_libraries(isac_reference_schema_test PRIVATE isac_frontend)
+  add_test(NAME reference_schema_invariants COMMAND isac_reference_schema_test)
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(NAME reborrow_sanitized_pipeline
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reborrow_pipeline.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    add_test(NAME allocator_sanitized_pipeline
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/allocator_pipeline.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG} sanitized)
+    set_tests_properties(reborrow_sanitized_pipeline allocator_sanitized_pipeline
+                         PROPERTIES LABELS "sanitizers")
+  endif()
+endif()
+
+if(BUILD_TESTING)
   add_test(NAME ffi_advanced
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_advanced.py
                    $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG})
@@ -478,5 +551,30 @@ if(BUILD_TESTING)
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ffi_advanced.py
                      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} ${ISAC_CLANG} sanitized)
     set_tests_properties(ffi_advanced_sanitized PROPERTIES LABELS "sanitizers")
+  endif()
+endif()
+
+if(BUILD_TESTING)
+  add_test(
+    NAME std_expansion_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/std_expansion_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME collections_refinement_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/collections_refinement_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME std_expansion_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/std_expansion_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(std_expansion_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME collections_refinement_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/collections_refinement_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(collections_refinement_sanitized_pipeline PROPERTIES LABELS "sanitizers")
   endif()
 endif()

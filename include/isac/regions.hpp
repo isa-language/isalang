@@ -92,6 +92,7 @@ struct FunctionGraph {
   std::vector<Loan> loans;
   std::map<RegionId, Region> regions;
   std::vector<Constraint> constraints;
+  std::map<SymbolId, std::set<SymbolId>> storedResultParents;
 };
 
 void infer(core::Program &);

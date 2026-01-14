@@ -1,0 +1,289 @@
+@import "std.string"
+
+impl i8 {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &i8) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &i8) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl i16 {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &i16) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &i16) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl i32 {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &i32) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &i32) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl i64 {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &i64) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &i64) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl u8 {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &u8) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &u8) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl u16 {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &u16) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &u16) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl u32 {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &u32) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &u32) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl u64 {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &u64) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &u64) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl isize {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &isize) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &isize) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl usize {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &usize) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &usize) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl bool {
+  pub fn hash(shared self) -> usize {
+    if self {
+      return 1;
+    }
+    return 0;
+  }
+  pub fn equals(shared self, other: &bool) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &bool) -> i32 {
+    if self == other {
+      return 0;
+    }
+    if self {
+      return 1;
+    }
+    return -1;
+  }
+}
+impl char {
+  pub fn hash(shared self) -> usize {
+    let bits = self as usize;
+    return bits ^(bits >> 16usize);
+  }
+  pub fn equals(shared self, other: &char) -> bool {
+    return self == other;
+  }
+  pub fn compare(shared self, other: &char) -> i32 {
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl f32 {
+  pub fn compare(shared self, other: &f32) -> i32 {
+    if self != self || other != other {
+      panic("unordered comparison");
+    }
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl f64 {
+  pub fn compare(shared self, other: &f64) -> i32 {
+    if self != self || other != other {
+      panic("unordered comparison");
+    }
+    if self < other {
+      return -1;
+    }
+    if self > other {
+      return 1;
+    }
+    return 0;
+  }
+}
+impl String {
+
+  pub fn hash(shared self) -> usize {
+    let result = 2166136261usize;
+    for i in 0usize..self.len() {
+      if self.is_char_boundary(i) {
+        let scalar = self.char_at(i).unwrap() as usize;
+        result =(result ^ scalar) * 16777619usize;
+      }
+    }
+    return result;
+  }
+  pub fn equals(shared self, other: &String) -> bool {
+    return self.compare(other) == 0;
+  }
+  pub fn compare(shared self, other: &String) -> i32 {
+    let count = self.len();
+    if other.len() < count {
+      count = other.len();
+    }
+    for i in 0usize..count {
+      if self.is_char_boundary(i) {
+        let left = self.char_at(i).unwrap() as u32;
+        let right = other.char_at(i).unwrap() as u32;
+        if left < right {
+          return -1;
+        }
+        if left > right {
+          return 1;
+        }
+      }
+    }
+    if self.len() < other.len() {
+      return -1;
+    }
+    if self.len() > other.len() {
+      return 1;
+    }
+    return 0;
+  }
+}

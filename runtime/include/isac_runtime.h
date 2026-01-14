@@ -5,6 +5,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 void *isac_rt_alloc(size_t size);
 uint64_t isac_rt_monotonic_ns(void);
 void *isac_rt_alloc_zeroed(size_t size);
@@ -48,6 +49,16 @@ void isac_rt_string_fmt_bool(IsacString *, int32_t);
 void isac_rt_string_fmt_char(IsacString *, uint32_t);
 void isac_rt_string_fmt_debug_str(IsacString *, const IsacStr *);
 void isac_rt_string_fmt_debug_char(IsacString *, uint32_t);
+
+int32_t isac_rt_string_read_file(IsacString *, const IsacStr *);
+int32_t isac_rt_string_env_var(IsacString *, const IsacStr *);
+int32_t isac_rt_fs_write_text(const IsacStr *, const IsacStr *);
+int32_t isac_rt_fs_exists(const IsacStr *);
+int32_t isac_rt_fs_remove_file(const IsacStr *);
+int32_t isac_rt_fs_create_dir(const IsacStr *);
+int64_t isac_rt_process_run(const IsacStr *, const IsacStr *, int32_t);
+int32_t isac_rt_sleep_ns(uint64_t);
+uint64_t isac_rt_unix_ns(void);
 void isac_rt_string_fmt_str(IsacString *, const IsacStr *);
 typedef struct {
   IsacString text;
@@ -93,13 +104,18 @@ void isac_rt_input_read_f64(IsacInputResult *);
 double isac_rt_input_result_f64(const IsacInputResult *);
 void isac_rt_input_read_bool(IsacInputResult *);
 int32_t isac_rt_input_result_bool(const IsacInputResult *);
+
 void *isac_rt_realloc(void *ptr, size_t size);
 
 void *isac_rt_vec_new(size_t element_size, size_t capacity);
 size_t isac_rt_vec_len(const void *vec);
 size_t isac_rt_vec_capacity(const void *vec);
 void *isac_rt_vec_at(void *vec, size_t index);
+void *isac_rt_vec_data(void *vec);
 void *isac_rt_vec_push_slot(void *vec);
+void *isac_rt_vec_insert_slot(void *vec, size_t index);
+void isac_rt_vec_remove_slot(void *vec, size_t index);
+void isac_rt_vec_swap(void *vec, size_t left, size_t right);
 void *isac_rt_vec_pop_slot(void *vec);
 void isac_rt_vec_clear_storage(void *vec);
 void isac_rt_vec_drop_storage(void *vec);

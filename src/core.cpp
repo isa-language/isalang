@@ -10,6 +10,7 @@ class Builder {
   std::vector<Inst> *out = nullptr;
   std::vector<SymbolId> temporaries;
   std::map<ValueId, SymbolId> referenceResults;
+  std::map<SymbolId, SymbolId> temporaryParents;
   bool referenceReturn = false;
   RegionId nextRegion = 0;
   Inst make(Inst::Kind k, Loc l, TypeId t = Unit) {
@@ -49,6 +50,9 @@ class Builder {
         binding.fieldIndex = binding.fieldPath.back();
       } else {
         binding.placeProjection = Inst::PlaceProjection::Index;
+        binding.slot =
+            receiver(source.args.at(0),
+                     e.borrowKind == BorrowKind::Unique ? Access::Unique : Access::Shared);
         if (source.ref != None) {
           auto index = make(Inst::Constant, source.loc, USize);
           index.text = std::to_string(source.ref);
@@ -60,7 +64,8 @@ class Builder {
       binding.slot = source.ref;
   }
   SymbolId receiver(const hir::Expr &e, Access access = Access::Shared) {
-    if (e.kind == hir::Expr::Field && p.semantics.types[e.type].kind == hir::Type::Array) {
+    if ((e.kind == hir::Expr::Field || e.kind == hir::Expr::Index) &&
+        p.semantics.types[e.type].kind == hir::Type::Array) {
       hir::Expr borrow{};
       borrow.kind = hir::Expr::Borrow;
       borrow.loc = e.loc;
@@ -96,6 +101,7 @@ class Builder {
       binding.region = e.region;
       binding.access = symbol.access;
       binding.quantity = Quantity::One;
+      temporaryParents[id] = binding.slot;
     } else
       binding.args = {value};
     p.semantics.symbols.push_back(std::move(symbol));
@@ -129,13 +135,15 @@ class Builder {
       temporaries.clear();
     }
   }
-  std::pair<SymbolId, uint32_t> place(const hir::Expr &e) {
+  std::pair<SymbolId, uint32_t> place(const hir::Expr &e, Access access = Access::Shared) {
     if (e.kind == hir::Expr::Variable)
       return {e.ref, 0};
     if (e.kind != hir::Expr::Field && e.kind != hir::Expr::Index)
       return {receiver(e), 0};
-    auto [id, off] = place(e.args[0]);
-    return {id, off + e.ref};
+    if (e.kind == hir::Expr::Index && e.ref == None)
+      return {receiver(e, access), 0};
+    auto [id, off] = place(e.args[0], access);
+    return {id, off + e.ref * (e.kind == hir::Expr::Index ? p.semantics.storageWidth(e.type) : 1)};
   }
   ValueId expr(const hir::Expr &e) {
     using E = hir::Expr;
@@ -190,9 +198,10 @@ class Builder {
       auto value = expr(e.args.at(0));
       if (e.type != Str)
         emit(make(Inst::EndViews, e.loc), false);
+
+      emit(cleanup, false);
       for (auto &end : endReferences)
         emit(end, false);
-      emit(cleanup, false);
       return value;
     }
     case E::Length:
@@ -311,20 +320,47 @@ class Builder {
         emit(i, false);
         return None;
       }
-      if (target.kind == E::Index && target.ref == None) {
+      if (target.kind == E::Index && (target.ref == None || target.args.at(0).kind == E::Index)) {
         i.kind = Inst::Write;
         auto container = target.args.at(0);
-        if (container.kind == E::Field) {
+        if (container.kind == E::Field || container.kind == E::Index) {
 
           auto *root = &container;
-          while (root->kind == E::Field)
+          while (root->kind == E::Field || root->kind == E::Index)
             root = &root->args.at(0);
           auto owner = receiver(*root);
           root->kind = E::Variable;
           root->ref = owner;
           root->args.clear();
           auto start = temporaries.size();
-          auto index = expr(target.args.at(1));
+
+          std::function<void(hir::Expr &)> snapshot = [&](hir::Expr &part) {
+            if (part.kind != E::Field && part.kind != E::Index)
+              return;
+            snapshot(part.args.at(0));
+            if (part.kind != E::Index)
+              return;
+            auto indexExpr = part.args.at(1);
+            if (part.ref != None)
+              indexExpr.type = USize;
+            auto value = expr(indexExpr);
+            auto slot = static_cast<SymbolId>(p.semantics.symbols.size());
+            p.semantics.symbols.push_back({slot, "$index" + std::to_string(slot), indexExpr.type,
+                                           Access::Own, false, false, part.loc});
+            auto bind = make(Inst::Bind, part.loc, indexExpr.type);
+            bind.slot = slot;
+            bind.args = {value};
+            emit(bind, false);
+            part.args[1].kind = E::Variable;
+            part.args[1].type = indexExpr.type;
+            part.args[1].ref = slot;
+            part.args[1].args.clear();
+          };
+          snapshot(container);
+          auto indexExpr = target.args.at(1);
+          if (target.ref != None)
+            indexExpr.type = USize;
+          auto index = expr(indexExpr);
           auto value = expr(e.args.at(1));
           endTemporaryReferences(start, e.loc);
           i.slot = receiver(container, Access::Unique);
@@ -338,7 +374,7 @@ class Builder {
         emit(i, false);
         return None;
       }
-      auto [id, off] = place(e.args[0]);
+      auto [id, off] = place(e.args[0], Access::Unique);
       i.kind = Inst::Write;
       i.slot = id;
       i.offset = off;
@@ -360,6 +396,12 @@ class Builder {
       return emit(i);
     case E::Construct:
       i.kind = Inst::Create;
+      return emit(i);
+    case E::StructInit:
+      i.kind = Inst::StructInit;
+      i.fieldPath = e.fieldPath;
+      for (auto &value : e.args)
+        i.args.push_back(expr(value));
       return emit(i);
     case E::ArrayRepeat:
     case E::Array:
@@ -597,6 +639,9 @@ class Builder {
         emit(i, false);
         break;
       case hir::Stmt::BorrowEnd:
+
+        if (p.semantics.symbols[s.symbol].inferredRegion && !s.unconditional)
+          break;
         i.kind = Inst::EndBorrow;
         i.quantity = p.semantics.linear(i.type) ? Quantity::One : Quantity::Omega;
         i.slot = s.symbol;
@@ -607,6 +652,14 @@ class Builder {
       case hir::Stmt::Borrow:
         i.kind = s.access == Access::Shared ? Inst::BorrowShared : Inst::BorrowUnique;
         borrowSource(s.expr, i);
+
+        for (auto parent = i.slot; temporaryParents.contains(parent);
+             parent = temporaryParents.at(parent)) {
+          p.semantics.symbols[parent].inferredRegion = true;
+          temporaries.erase(std::remove(temporaries.begin(), temporaries.end(), parent),
+                            temporaries.end());
+          locals.push_back(parent);
+        }
         i.region = s.expr.region;
         i.projection = s.expr.ref == None ? 0 : s.expr.ref;
         i.offset = s.symbol;
@@ -708,6 +761,12 @@ struct Resource {
   std::vector<uint32_t> ownedProjection = {};
   SymbolId loanParent = None;
   VariantId knownVariant = None;
+  std::set<uint32_t> uniqueLoans = {};
+  unsigned exclusiveLoans = 0;
+  bool exclusiveCarrier = false;
+
+  std::map<uint32_t, SymbolId> uniqueLoanParents = {};
+  bool opaquePayloads = false;
   MemoryState memory() const {
     return !live                      ? MemoryState::Dead
            : access == Access::Shared ? MemoryState::Shared
@@ -718,10 +777,12 @@ struct Resource {
     return memory() == other.memory() && state == other.state && root == other.root &&
            ownedProjection == other.ownedProjection && loanParent == other.loanParent &&
            extraRoots == other.extraRoots && shared == other.shared && unique == other.unique &&
-           allocation == other.allocation &&
+           allocation == other.allocation && exclusiveLoans == other.exclusiveLoans &&
+           exclusiveCarrier == other.exclusiveCarrier && opaquePayloads == other.opaquePayloads &&
            (!live || (fields == other.fields && absentFields == other.absentFields &&
                       movedPayloads == other.movedPayloads && loans == other.loans &&
-                      knownVariant == other.knownVariant));
+                      knownVariant == other.knownVariant && uniqueLoans == other.uniqueLoans &&
+                      uniqueLoanParents == other.uniqueLoanParents));
   }
 };
 struct Temporary {
@@ -733,6 +794,8 @@ struct Temporary {
   std::map<uint32_t, std::set<SymbolId>> loans = {};
   std::set<uint32_t> absentFields = {};
   std::map<uint32_t, OwnedFieldState> fields = {};
+  std::set<uint32_t> uniqueLoans = {};
+  std::map<uint32_t, SymbolId> uniqueLoanParents = {};
 };
 struct VariantTest {
   SymbolId symbol;
@@ -836,6 +899,18 @@ class Checker {
   const hir::Symbol &symbol(SymbolId id) {
     return p.semantics.symbols.at(id);
   }
+  bool liveOnBackedge(SymbolId carrier) const {
+    for (const auto &graph : p.regionGraphs) {
+      if (graph.function != function->id)
+        continue;
+      for (const auto &loan : graph.loans)
+        if (loan.carrier == carrier)
+          for (auto point : loan.points)
+            if (graph.blocks.at(point).terminator == regions::Terminator::LoopBackedge)
+              return true;
+    }
+    return false;
+  }
   Resource &live(Context &c, SymbolId id, Loc l) {
     auto it = c.vars.find(id);
     if (it == c.vars.end() || !it->second.live) {
@@ -880,6 +955,32 @@ class Checker {
       --r.shared;
     }
   }
+  void releaseLoan(Context &c, const std::set<SymbolId> &owners, bool unique, Loc loc) {
+    if (!unique) {
+      releaseOrigins(c, owners, loc);
+      return;
+    }
+    for (auto owner : owners) {
+      auto &r = live(c, owner, loc);
+      if (!r.exclusiveLoans)
+        fail(loc, DiagnosticCode::InvalidCore, "unbalanced exclusive provenance carrier");
+      --r.exclusiveLoans;
+    }
+  }
+  void resumeParent(Context &c, SymbolId parent, Loc loc) {
+    if (parent == None)
+      return;
+    auto &r = live(c, parent, loc);
+    if (r.access != Access::Unique || !r.unique)
+      fail(loc, DiagnosticCode::InvalidCore, "unbalanced suspended parent borrow");
+    r.unique = false;
+  }
+  template <class Carrier>
+  void releaseCarriedLoan(Context &c, const Carrier &carrier, uint32_t offset, Loc loc) {
+    releaseLoan(c, carrier.loans.at(offset), carrier.uniqueLoans.contains(offset), loc);
+    if (carrier.uniqueLoanParents.contains(offset))
+      resumeParent(c, carrier.uniqueLoanParents.at(offset), loc);
+  }
   void setAliasOrigins(Resource &alias, const std::set<SymbolId> &owners) {
     alias.root = *owners.begin();
     alias.extraRoots = owners;
@@ -916,6 +1017,9 @@ class Checker {
     if (auto *state = projectedState(c, id, loc))
       return state->fields;
     auto &alias = live(c, id, loc);
+
+    if (alias.root != None && symbol(id).type != symbol(alias.root).type)
+      return alias.fields;
     return c.vars.at(alias.root == None ? id : alias.root).fields;
   }
   std::set<uint32_t> missingFields(TypeId type, const std::map<uint32_t, OwnedFieldState> &fields) {
@@ -955,7 +1059,9 @@ class Checker {
         continue;
       }
       if (!fields.contains(index))
-        fail(loc, DiagnosticCode::InvalidCore, "missing owned-field state");
+        fail(loc, DiagnosticCode::InvalidCore,
+             "missing owned-field state for `" + name + "." +
+                 p.semantics.types[type].fields[index].name + "`");
       const auto &value = fields.at(index);
       const auto &field = p.semantics.types[type].fields[index];
       final(field.type, value.state, name + "." + field.name, loc, value.origin);
@@ -971,18 +1077,48 @@ class Checker {
       live(c, owner, l);
     auto &root = r.root == None ? r : live(c, r.root, l);
     if (r.root != None || symbol(id).reference) {
-      if (r.unique || (requested != Access::Shared && r.shared))
-        fail(l, DiagnosticCode::InvalidReborrow,
-             "reference parameter is unavailable while a derived borrow is active");
+      if (r.unique || (requested != Access::Shared && r.shared)) {
+        auto diagnostic =
+            DiagnosticEngine()
+                .error(DiagnosticCode::InvalidReborrow, l,
+                       "reference `" + symbol(id).name +
+                           "` is unavailable while a derived borrow is active")
+                .label(l, "incompatible parent access requested here")
+                .note(
+                    "a unique reborrow suspends all parent access; a shared reborrow suspends mutation")
+                .help(
+                    "use the child reference or wait until its last use before accessing the parent");
+        bool backedge = false;
+        for (const auto &[alias, loan] : c.vars) {
+          if (!loan.live || loan.loanParent != id)
+            continue;
+          diagnostic.secondary(loan.borrowAt, "derived borrow created here");
+          if (symbol(alias).lastUse.span.file != NoFile)
+            diagnostic.secondary(symbol(alias).lastUse, "derived reference last used here");
+          backedge |= liveOnBackedge(alias);
+        }
+        for (const auto &[carrier, resource] : c.vars)
+          if (resource.live)
+            for (const auto &[offset, parent] : resource.uniqueLoanParents) {
+              (void)offset;
+              if (parent == id)
+                diagnostic.secondary(symbol(carrier).loc,
+                                     "this container retains the exclusive reborrow");
+            }
+        if (backedge)
+          diagnostic.note(
+              "this borrow is live on a loop backedge; the marked use can execute again");
+        diagnostic.emit();
+      }
       if (requested == Access::Own)
         fail(l, DiagnosticCode::BorrowConflict,
              "cannot move, drop or transition borrowed resource `" + symbol(id).name + "`");
       if (requested == Access::Unique && root.shared && r.access == Access::Unique)
         DiagnosticEngine()
             .error(DiagnosticCode::InvalidReborrow, l,
-                   "cannot mutate while a derived str view is active")
-            .secondary(root.borrowAt, "view created here")
-            .help("end the view scope before mutation")
+                   "cannot mutate while a derived shared reference is active")
+            .secondary(root.borrowAt, "shared reference created here")
+            .help("end the shared reference before mutation")
             .emit();
       if (requested == Access::Unique && r.access == Access::Shared)
         DiagnosticEngine()
@@ -993,15 +1129,18 @@ class Checker {
             .help("use a unique borrow after the shared borrow ends")
             .emit();
     } else {
-      if (r.unique || (requested != Access::Shared && r.shared)) {
-        std::string reason = r.unique ? "resource already has an active unique borrow"
-                                      : "incompatible access while shared borrows are active";
+      if (r.unique || r.exclusiveLoans || (requested != Access::Shared && r.shared)) {
+        std::string reason = r.unique || r.exclusiveLoans
+                                 ? "resource already has an active unique borrow"
+                                 : "incompatible access while shared borrows are active";
         Loc activeOrigin = r.borrowAt;
         Loc lastUse;
+        bool backedge = false;
         for (auto &[alias, resource] : c.vars)
           if (resource.live && (resource.root == id || resource.extraRoots.contains(id))) {
             activeOrigin = resource.borrowAt;
             lastUse = symbol(alias).lastUse;
+            backedge = liveOnBackedge(alias);
             break;
           }
         auto diagnostic =
@@ -1017,11 +1156,17 @@ class Checker {
             for (const auto &[offset, owner] : state.loans) {
               (void)offset;
               if (owner.contains(id))
-                diagnostic.secondary(symbol(container).loc,
-                                     "this container retains a shared reference to the resource");
+                diagnostic.secondary(
+                    symbol(container).loc,
+                    state.uniqueLoans.contains(offset)
+                        ? "this container retains a unique reference to the resource"
+                        : "this container retains a shared reference to the resource");
             }
         if (lastUse.span.file != NoFile)
           diagnostic.secondary(lastUse, "reference last used in this statement");
+        if (backedge)
+          diagnostic.note(
+              "this borrow is live on a loop backedge; the marked use can execute again");
         diagnostic.emit();
       }
     }
@@ -1122,7 +1267,8 @@ class Checker {
       endBorrow(c, id);
       return;
     }
-    if (it != c.vars.end() && symbol(id).temporary && it->second.shared)
+    if (it != c.vars.end() && symbol(id).temporary &&
+        (it->second.shared || it->second.unique || it->second.exclusiveLoans))
       DiagnosticEngine()
           .error(DiagnosticCode::EscapingView, l, "borrowed value outlives temporary owner")
           .secondary(symbol(id).loc, "temporary owner created here")
@@ -1144,11 +1290,11 @@ class Checker {
       site.movedPayloads[id] = {r.movedPayloads.begin(), r.movedPayloads.end()};
       site.absentFields[id] = {r.absentFields.begin(), r.absentFields.end()};
     }
-    for (auto [offset, owner] : r.loans) {
-      (void)offset;
-      releaseOrigins(c, owner, l);
-    }
+    for (const auto &[offset, owner] : r.loans)
+      releaseCarriedLoan(c, r, offset, l);
     r.loans.clear();
+    r.uniqueLoans.clear();
+    r.uniqueLoanParents.clear();
     r.allocation = false;
     c.vars[id].live = false;
     c.vars[id].consumedBy = "drop";
@@ -1170,7 +1316,25 @@ class Checker {
     for (auto &[child, loan] : c.vars)
       if (loan.live && loan.loanParent == id)
         endBorrow(c, child);
+    for (const auto &[carrier, resource] : c.vars)
+      if (resource.live)
+        for (const auto &[offset, parent] : resource.uniqueLoanParents)
+          if (parent == id)
+            fail(r.borrowAt, DiagnosticCode::InvalidReborrow,
+                 "cannot end a parent borrow while an exclusive result is retained");
+    for (const auto &[value, temporary] : c.values)
+      if (temporary.available)
+        for (const auto &[offset, parent] : temporary.uniqueLoanParents)
+          if (parent == id)
+            fail(r.borrowAt, DiagnosticCode::InvalidReborrow,
+                 "cannot end a parent borrow while an exclusive temporary is retained");
     auto &root = c.vars.at(r.root);
+    if (r.exclusiveCarrier) {
+      releaseLoan(c, origins(c, id, {}), true, r.borrowAt);
+      resumeParent(c, r.loanParent, r.borrowAt);
+      r.live = false;
+      return;
+    }
     if (r.access == Access::Shared) {
       releaseOrigins(c, origins(c, id, {}), {});
       if (r.loanParent != None)
@@ -1195,6 +1359,13 @@ class Checker {
   }
   void finish(Context &c, Loc l, Inst &site) {
     endViews(c);
+    for (auto &[id, r] : c.vars)
+      if (r.live && r.root != None && !c.vars.at(r.root).uniqueLoans.empty())
+        endBorrow(c, id);
+
+    for (auto &[id, r] : c.vars)
+      if (r.live && r.root == None && !r.uniqueLoans.empty())
+        drop(c, id, l, true, site);
     for (auto &[id, r] : c.vars)
       if (r.live && r.root != None)
         endBorrow(c, id);
@@ -1348,9 +1519,11 @@ class Checker {
             fail(i.loc, DiagnosticCode::InvalidCore,
                  "argument loans do not match result source path");
         }
-        for (auto [offset, owner] : value.loans)
-          releaseOrigins(c, owner, i.loc);
+        for (const auto &[offset, owner] : value.loans)
+          releaseCarriedLoan(c, value, offset, i.loc);
         value.loans.clear();
+        value.uniqueLoans.clear();
+        value.uniqueLoanParents.clear();
       }
     }
     if (f.consumesSelf && i.slot != None) {
@@ -1545,10 +1718,17 @@ class Checker {
             fail(i.loc, DiagnosticCode::AllocationContract,
                  "enum payloads with protocolled fields require a payload state contract");
           auto &payload = take(c, i.args[n], i.loc);
+          if (!payload.uniqueLoans.empty())
+            fail(
+                i.loc, DiagnosticCode::InvalidReborrow,
+                "storing an exclusive reference in another container requires a transfer contract");
           if (!payload.absentFields.empty())
             fail(i.loc, DiagnosticCode::ConsumedResource,
                  "cannot store a struct with uninitialized owned fields");
           if (p.semantics.reference(tid)) {
+            if (p.semantics.types[tid].referenceAccess != Access::Shared)
+              fail(i.loc, DiagnosticCode::InvalidCore,
+                   "exclusive stored references require a storage transfer contract");
             if (payload.loans.size() != 1 || !payload.loans.contains(0))
               fail(i.loc, DiagnosticCode::InvalidCore, "stored reference has no origin");
             loans[p.semantics.payloadOffset(i.type, i.offset, n)] = payload.loans.at(0);
@@ -1563,9 +1743,30 @@ class Checker {
                               None,   std::move(loans)};
         break;
       }
+      case Inst::StructInit: {
+        Temporary result{i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
+        for (size_t n = 0; n < i.args.size(); ++n) {
+          auto index = i.fieldPath[n];
+          auto type = p.semantics.types[i.type].fields[index].type;
+          if (!p.semantics.linear(type))
+            continue;
+          auto &value = take(c, i.args[n], i.loc);
+          if (!value.loans.empty() || !value.uniqueLoans.empty() || !value.absentFields.empty())
+            fail(i.loc, DiagnosticCode::AllocationContract,
+                 "struct initializer requires fully initialized, non-borrowed field owners");
+          if (p.semantics.ownedFieldType(type))
+            result.fields[index] = {value.state, value.allocation, value.fields, i.loc};
+        }
+        c.values[i.result] = std::move(result);
+        break;
+      }
       case Inst::Create:
       case Inst::ArrayRepeat:
       case Inst::Array:
+        if (i.kind == Inst::Array)
+          for (auto argument : i.args)
+            if (p.semantics.linear(p.semantics.types[i.type].element))
+              (void)take(c, argument, i.loc);
         c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
         c.values[i.result].absentFields = p.semantics.ownedFields(i.type);
         break;
@@ -1641,9 +1842,13 @@ class Checker {
           c.variantSets.erase(i.slot);
         }
         c.values[i.result] = {i.type, r.state, true, r.allocation, i.slot, std::move(r.loans)};
+        c.values[i.result].uniqueLoans = std::move(r.uniqueLoans);
+        c.values[i.result].uniqueLoanParents = std::move(r.uniqueLoanParents);
         c.values[i.result].fields = std::move(r.fields);
         r.fields.clear();
         r.loans.clear();
+        r.uniqueLoans.clear();
+        r.uniqueLoanParents.clear();
         c.vars[i.slot].allocation = false;
         c.vars[i.slot].live = false;
         c.vars[i.slot].consumedBy = "move";
@@ -1653,6 +1858,11 @@ class Checker {
       case Inst::Copy:
       case Inst::Read: {
         auto &resource = access(c, i.slot, Access::Shared, i.loc);
+        auto &carrier = c.vars.at(c.vars.at(i.slot).root == None ? i.slot : c.vars.at(i.slot).root);
+        if (carrier.opaquePayloads &&
+            (i.kind == Inst::Copy || i.offset != 0 || i.type != I64 || !i.args.empty()))
+          fail(i.loc, DiagnosticCode::InvalidCore,
+               "opaque payload inspection permits only discriminant reads");
         if (i.kind == Inst::Read && i.offset == 0 && i.type == I64 &&
             p.semantics.types[symbol(i.slot).type].kind == hir::Type::Enum &&
             resource.knownVariant != None)
@@ -1685,7 +1895,8 @@ class Checker {
           auto &temp = take(c, i.args[0], i.loc);
           state = temp.state;
           allocation = temp.allocation;
-          if (temp.movedFrom != None)
+
+          if (temp.movedFrom != None && c.vars.contains(temp.movedFrom))
             c.vars[temp.movedFrom].movedTo = i.slot;
         }
         c.vars[i.slot] = {true,  state,     Access::Own, None, 0,
@@ -1699,6 +1910,8 @@ class Checker {
         }
         if (p.semantics.linear(i.type)) {
           c.vars[i.slot].loans = c.values.at(i.args[0]).loans;
+          c.vars[i.slot].uniqueLoans = c.values.at(i.args[0]).uniqueLoans;
+          c.vars[i.slot].uniqueLoanParents = c.values.at(i.args[0]).uniqueLoanParents;
           c.vars[i.slot].absentFields = c.values.at(i.args[0]).absentFields;
           c.vars[i.slot].fields = c.values.at(i.args[0]).fields;
         }
@@ -1723,11 +1936,11 @@ class Checker {
               fieldDropPlan(t.type, t.fields, t.absentFields, "temporary", i.loc);
           i.freeTemporary = t.allocation;
           i.temporaryAbsentFields = {t.absentFields.begin(), t.absentFields.end()};
-          for (auto [offset, owner] : t.loans) {
-            (void)offset;
-            releaseOrigins(c, owner, i.loc);
-          }
+          for (const auto &[offset, owner] : t.loans)
+            releaseCarriedLoan(c, t, offset, i.loc);
           t.loans.clear();
+          t.uniqueLoans.clear();
+          t.uniqueLoanParents.clear();
         }
         break;
       case Inst::BorrowShared:
@@ -1737,6 +1950,11 @@ class Checker {
           fail(i.loc, DiagnosticCode::InvalidCore,
                "returned borrow origin does not match call contract");
         if (i.projection) {
+          const auto &carrier =
+              c.vars.at(c.vars.at(i.slot).root == None ? i.slot : c.vars.at(i.slot).root);
+          if (carrier.opaquePayloads)
+            fail(i.loc, DiagnosticCode::InvalidReborrow,
+                 "a shared tag-only inspection cannot project a payload");
           if (!c.variants.contains(i.slot))
             fail(i.loc, DiagnosticCode::InvalidCore, "payload borrow requires a proven variant");
           auto tid = symbol(i.slot).type;
@@ -1752,19 +1970,37 @@ class Checker {
           if (stored) {
             i.storedPayloadReference = true;
             access(c, i.slot, Access::Shared, i.loc);
-            const auto &container = c.vars.at(i.slot);
+            auto &container = c.vars.at(i.slot);
             const auto &loans =
                 container.root == None ? container.loans : c.vars.at(container.root).loans;
-            if (i.kind != Inst::BorrowShared || !loans.contains(i.projection))
+            bool unique = container.uniqueLoans.contains(i.projection);
+            if ((i.kind == Inst::BorrowUnique) != unique || !loans.contains(i.projection))
               fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
             auto owners = loans.at(i.projection);
             if (owners.empty())
               fail(i.loc, DiagnosticCode::InvalidCore, "empty stored-reference origins");
             auto owner = *owners.begin();
             auto &root = live(c, owner, i.loc);
-            retainOrigins(c, owners, i.loc);
-            c.vars[i.offset] = {true,  root.state,   Access::Shared, owner, 0,
-                                false, root.version, false,          "",    None};
+            SymbolId parent = None;
+            if (unique) {
+              access(c, i.slot, Access::Own, i.loc);
+              if (container.root != None || !container.movedPayloads.insert(i.projection).second)
+                fail(i.loc, DiagnosticCode::InvalidCore,
+                     "exclusive payload must be transferred once");
+              container.loans.erase(i.projection);
+              container.uniqueLoans.erase(i.projection);
+              if (container.uniqueLoanParents.contains(i.projection)) {
+                parent = container.uniqueLoanParents.at(i.projection);
+                container.uniqueLoanParents.erase(i.projection);
+              }
+            } else
+              retainOrigins(c, owners, i.loc);
+            c.vars[i.offset] = {true,         root.state, unique ? Access::Unique : Access::Shared,
+                                owner,        0,          false,
+                                root.version, false,      "",
+                                None};
+            c.vars[i.offset].exclusiveCarrier = unique;
+            c.vars[i.offset].loanParent = parent;
             setAliasOrigins(c.vars[i.offset], owners);
             c.vars[i.offset].borrowAt = i.loc;
             break;
@@ -1778,10 +2014,11 @@ class Checker {
         if (!ownedProjection)
           complete(source, i.loc);
         bool shared = i.kind == Inst::BorrowShared;
-        bool derivedUnique = source.root != None && source.access == Access::Unique &&
-                             i.placeProjection == Inst::PlaceProjection::Field;
+
+        bool derivedUnique = source.root != None && source.access == Access::Unique;
         if (source.root != None && !derivedUnique && (!shared || source.access != Access::Shared))
-          fail(i.loc, DiagnosticCode::InvalidReborrow, "exclusive reborrowing is outside this PoC");
+          fail(i.loc, DiagnosticCode::InvalidReborrow,
+               "cannot create a unique reborrow through a shared reference");
         auto &root = access(c, i.slot, shared ? Access::Shared : Access::Unique, i.loc);
         auto path = source.ownedProjection;
         if (i.placeProjection == Inst::PlaceProjection::Field) {
@@ -1849,10 +2086,12 @@ class Checker {
                    p.semantics.linear(i.type)) {
           c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
           const auto &target = p.semantics.functions[i.function];
-          if (i.kind == Inst::ContainerCall)
+          if (i.kind == Inst::ContainerCall ||
+              p.semantics.types[i.type].kind == hir::Type::Structure)
             c.values[i.result].fields = initialFields(i.type);
           if (target.resultBorrowedContainer) {
             auto resultOrigins = payloadOrigin;
+            SymbolId resultInput = None;
             if (!target.resultPayloadSource) {
               auto index =
                   std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
@@ -1860,6 +2099,7 @@ class Checker {
               auto alias = i.slot != None && index == 0
                                ? i.slot
                                : c.references.at(i.args.at(index - (i.slot != None)));
+              resultInput = alias;
               auto more = origins(c, alias, i.loc);
               resultOrigins.insert(more.begin(), more.end());
             }
@@ -1869,7 +2109,10 @@ class Checker {
                 continue;
               auto index = std::find(target.params.begin(), target.params.end(), input) -
                            target.params.begin();
-              auto more = origins(c, c.references.at(i.args.at(index)), i.loc);
+              auto alias = i.slot != None && index == 0
+                               ? i.slot
+                               : c.references.at(i.args.at(index - (i.slot != None)));
+              auto more = origins(c, alias, i.loc);
               resultOrigins.insert(more.begin(), more.end());
             }
             if (resultOrigins.empty()) {
@@ -1881,13 +2124,41 @@ class Checker {
             }
             for (auto offset : p.semantics.borrowedPayloadOffsets(i.type)) {
               c.values[i.result].loans[offset] = resultOrigins;
-              retainOrigins(c, resultOrigins, i.loc);
+              if (target.resultAccess == Access::Unique) {
+                if (resultOrigins.size() != 1)
+                  fail(i.loc, DiagnosticCode::InvalidReborrow,
+                       "exclusive stored results require a single input origin");
+                auto &owner = live(c, *resultOrigins.begin(), i.loc);
+                auto &receiver = live(c, resultInput, i.loc);
+                bool derived = receiver.root != None || symbol(resultInput).reference;
+                if (derived) {
+                  if (receiver.access != Access::Unique || receiver.unique || receiver.shared)
+                    fail(i.loc, DiagnosticCode::InvalidReborrow,
+                         "exclusive result requires an available unique input borrow");
+                  receiver.unique = true;
+                  c.values[i.result].uniqueLoanParents[offset] = resultInput;
+                } else if (owner.exclusiveLoans || owner.unique || owner.shared)
+                  fail(i.loc, DiagnosticCode::InvalidReborrow, "conflicting exclusive result loan");
+                ++owner.exclusiveLoans;
+                owner.borrowAt = i.loc;
+                c.values[i.result].uniqueLoans.insert(offset);
+              } else
+                retainOrigins(c, resultOrigins, i.loc);
             }
           }
         }
         break;
       }
       case Inst::ScopeEnd:
+        for (auto id : i.locals)
+          if (c.vars.contains(id) && c.vars.at(id).live && !c.vars.at(id).uniqueLoans.empty())
+            drop(c, id, i.loc, true, i);
+        for (auto &[id, r] : c.vars)
+          if (r.live && r.root != None && !symbol(r.root).temporary &&
+              (std::find(i.locals.begin(), i.locals.end(), r.root) != i.locals.end() ||
+               std::any_of(i.locals.begin(), i.locals.end(),
+                           [&](auto local) { return r.extraRoots.contains(local); })))
+            endBorrow(c, id);
         for (auto it = i.locals.rbegin(); it != i.locals.rend(); ++it)
           drop(c, *it, i.loc, true, i);
         for (auto id : i.locals) {
@@ -1913,9 +2184,19 @@ class Checker {
           }
         } else if (p.semantics.linear(function->result)) {
           auto &result = take(c, i.args.at(0), i.loc);
+          const bool aggregate = p.semantics.types[function->result].kind == hir::Type::Structure &&
+                                 !p.semantics.heap(function->result);
+          if (aggregate) {
+            completeFields(function->result, result.fields, i.loc);
+            initialFieldContract(function->result, result.fields, i.loc);
+          }
           if (function->resultBorrowedContainer) {
             const auto allowed = p.semantics.borrowedPayloadOffsets(function->result);
             for (const auto &[offset, owners] : result.loans) {
+              if (function->resultAccess == Access::Unique &&
+                  (!result.uniqueLoans.contains(offset) || owners.size() != 1))
+                fail(i.loc, DiagnosticCode::InvalidCore,
+                     "exclusive payload return is missing its unique provenance obligation");
               for (auto origin : owners) {
                 if (!allowed.contains(offset))
                   fail(i.loc, DiagnosticCode::InvalidCore, "invalid returned payload path");
@@ -1927,11 +2208,13 @@ class Checker {
                               ? "borrowed payload cannot escape through an unrelated result region"
                               : "reference stored in returned container escapes its local owner")
                       .label(i.loc, "container returned here")
-                      .secondary(
-                          symbol(origin).loc,
-                          (symbol(origin).parameter ? "borrowed input `" : "owner `") +
-                              symbol(origin).name +
-                              (symbol(origin).parameter ? "` received here" : "` created here"))
+                      .secondary(symbol(origin).loc,
+                                 symbol(origin).temporary
+                                     ? "temporary owner created here"
+                                     : (symbol(origin).parameter ? "borrowed input `" : "owner `") +
+                                           symbol(origin).name +
+                                           (symbol(origin).parameter ? "` received here"
+                                                                     : "` created here"))
                       .note("returned payloads may borrow only from the contracted input origins")
                       .help("borrow from the input or return an owned payload")
                       .emit();
@@ -1939,7 +2222,8 @@ class Checker {
             }
           }
           if ((!function->resultBorrowedContainer && !result.loans.empty()) ||
-              result.state != None || result.allocation != p.semantics.needsDrop(function->result))
+              result.state != None ||
+              (!aggregate && result.allocation != p.semantics.needsDrop(function->result)))
             fail(i.loc, DiagnosticCode::InvalidCore, "unsupported resource return contract");
         }
         recordFieldPostStates(c, i.loc);
@@ -1951,6 +2235,13 @@ class Checker {
         if (loops.empty() || loops.back().id != i.loop)
           fail(i.loc, DiagnosticCode::InvalidCore, "invalid loop target in Core");
         auto &entry = loops.back().entry;
+        for (auto &[id, r] : c.vars)
+          if (!entry.vars.contains(id) && r.live && r.root != None &&
+              !c.vars.at(r.root).uniqueLoans.empty())
+            endBorrow(c, id);
+        for (auto &[id, r] : c.vars)
+          if (!entry.vars.contains(id) && r.live && r.root == None && !r.uniqueLoans.empty())
+            drop(c, id, i.loc, true, i);
         for (auto &[id, r] : c.vars)
           if (!entry.vars.contains(id) && r.live && r.root != None)
             endBorrow(c, id);
@@ -2109,6 +2400,8 @@ class Checker {
           ++origin.shared;
         }
       }
+      for (auto id : function->payloadInspectionParameters)
+        c.vars.at(id).opaquePayloads = true;
       block(cf.body, c);
       if (!c.returned) {
         if (function->result != Unit)
@@ -2190,7 +2483,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                                 "raw.store",
                                 "array.repeat",
                                 "function.address",
-                                "foreign.call.indirect"};
+                                "foreign.call.indirect",
+                                "struct.init"};
   for (auto &i : ops) {
     if (i.kind == Inst::Loop)
       dump(i.condition, p, o, d + 2);
@@ -2222,6 +2516,9 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
     o << names[i.kind];
     if (i.kind == Inst::FieldStore || i.kind == Inst::FieldTake || i.kind == Inst::FieldDrop)
       o << " field=#" << i.fieldIndex << (i.replaceField ? " drop-previous" : "");
+    if (i.kind == Inst::StructInit)
+      for (auto field : i.fieldPath)
+        o << " field=#" << field;
     if ((i.kind == Inst::FieldStore || i.kind == Inst::FieldTake || i.kind == Inst::FieldDrop) &&
         i.protocol != None) {
       auto state = i.kind == Inst::FieldStore ? i.to : i.from;
@@ -2358,8 +2655,10 @@ void print(const Program &p, std::ostream &o) {
     for (const auto &source : hf.payloadResultSources())
       o << "  return.payload-source #v" << source.parameter << " variant=#V" << source.path.variant
         << " field=" << source.path.field << "\n";
+    for (auto id : hf.payloadInspectionParameters)
+      o << "  payload.inspect #v" << id << " Shared tag-only noescape\n";
     if (hf.resultBorrowedContainer)
-      o << "  result.payload-regions: Shared borrowed container\n";
+      o << "  result.payload-regions: " << accessName(hf.resultAccess) << " borrowed container\n";
     if (hf.resultOrigin != None)
       o << "  return.region #R" << hf.resultRegion << " <= #R"
         << p.semantics.symbols[hf.resultOrigin].region << " origin=#v" << hf.resultOrigin << "\n";

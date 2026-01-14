@@ -1,0 +1,8 @@
+@import "std.vec"
+fn bad(values: &mut Vec<i32>) {
+  let a = values.get_mut(0);
+  let b = values.get_mut(1);
+  a.drop();
+  b.drop();
+}
+fn main() {}

@@ -1,0 +1,13 @@
+fn inspect(value: &i32) {
+  print(value);
+}
+fn modify(value: &mut i32) {
+  value = 20;
+}
+fn main() {
+  let data = 10;
+  let parent = &mut data;
+  let reader = &*parent;
+  modify(parent);
+  inspect(reader);
+}

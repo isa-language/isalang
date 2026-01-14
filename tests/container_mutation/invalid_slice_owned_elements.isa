@@ -1,0 +1,7 @@
+@import("std.vec", "std.box")
+fn main() {
+  let v = Vec<String>::new();
+  v.push(String::from("a"));
+  let s = v.as_slice();
+  print(s.len());
+}

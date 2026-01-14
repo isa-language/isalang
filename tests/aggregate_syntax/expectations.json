@@ -1,0 +1,334 @@
+{
+  "valid_structs": {
+    "stdout": "owned\n1\n2\n4\ngeneric\n9\n99\n5\n",
+    "heap": true
+  },
+  "valid_collections": {
+    "stdout": "2\n2\n0\n7\n1\nlast\n1\n2\nm\n10\n40\n60\n8\n2\n2\n",
+    "heap": true
+  },
+  "valid_evaluation_order": {
+    "stdout": "1\n2\n2\n1\n3\n4\n2\n5\n6\n1\n1\n0\n4\n",
+    "heap": true
+  },
+  "valid_iteration": {
+    "stdout": "1\n3\n10\n20\n30\n40\n6\n7\n8\n8\n9\n",
+    "heap": true
+  },
+  "valid_iteration_linear": {
+    "stdout": "42\nonce\ntwo\na!\nb!\ncleanup\n7\n",
+    "heap": true
+  },
+  "valid_matrices": {
+    "stdout": "9\n9\n2\n70\n0\n10\n",
+    "heap": false
+  },
+  "valid_three_dimensions": {
+    "stdout": "13\n0\n26\n2\n96\n",
+    "heap": false
+  },
+  "valid_custom_recipe": {
+    "stdout": "3\n",
+    "heap": true
+  },
+  "invalid_missing_field": {
+    "invalid": true,
+    "error": "struct initializer must specify every field exactly once"
+  },
+  "invalid_duplicate_field": {
+    "invalid": true,
+    "error": "duplicate initializer field `x`"
+  },
+  "invalid_unknown_field": {
+    "invalid": true,
+    "error": "unknown initializer field `other`"
+  },
+  "invalid_field_type": {
+    "invalid": true,
+    "error": "expected `i32`, found `bool`"
+  },
+  "invalid_unknown_context": {
+    "invalid": true,
+    "error": "brace initialization requires a type name or an expected array/collection type"
+  },
+  "invalid_array_length": {
+    "invalid": true,
+    "error": "array initializer length does not match its type"
+  },
+  "invalid_implicit_owned_copy": {
+    "invalid": true,
+    "error": "resource `s` cannot be copied; use .move()"
+  },
+  "invalid_duplicate_move": {
+    "invalid": true,
+    "error": "use of moved value `s`"
+  },
+  "invalid_stored_reference": {
+    "invalid": true,
+    "error": "generic heap containers require reference-free owned elements with a final initial protocol state"
+  },
+  "invalid_map_entry": {
+    "invalid": true,
+    "error": "map initializer requires key => value entries"
+  },
+  "invalid_recipe_signature": {
+    "invalid": true,
+    "error": "@initializer requires a zero-argument owned factory and a unique insertion with one or two owned arguments"
+  },
+  "invalid_recipe_unsafe": {
+    "invalid": true,
+    "error": "unsafe initializer call requires unsafe"
+  },
+  "invalid_annotation_target": {
+    "invalid": true,
+    "error": "@initializer requires a struct"
+  },
+  "invalid_method_annotation": {
+    "invalid": true,
+    "error": "@initializer requires a struct"
+  },
+  "invalid_for_shared_write": {
+    "invalid": true,
+    "error": "cannot write through shared borrow `v`"
+  },
+  "invalid_for_vec_growth": {
+    "invalid": true,
+    "error": "incompatible access while shared borrows are active for `v`"
+  },
+  "invalid_for_owner_drop": {
+    "invalid": true,
+    "error": "incompatible access while shared borrows are active for `v`"
+  },
+  "invalid_for_unique_overlap": {
+    "invalid": true,
+    "error": "incompatible access while shared borrows are active for `a`"
+  },
+  "invalid_for_escape": {
+    "invalid": true,
+    "error": "reference return requires a compatible shared input-region contract; local owners cannot escape"
+  },
+  "invalid_for_unsupported": {
+    "invalid": true,
+    "error": "collection for requires an array, slice or a type declaring @iteration"
+  },
+  "invalid_matrix_ragged": {
+    "invalid": true,
+    "error": "array initializer length does not match its type"
+  },
+  "invalid_matrix_size_type": {
+    "invalid": true,
+    "error": "array size must be in 1..65536"
+  },
+  "invalid_matrix_overflow": {
+    "invalid": true,
+    "error": "fixed arrays require scalar leaves and at most 65536 storage cells"
+  },
+  "invalid_matrix_index_type": {
+    "invalid": true,
+    "error": "expected `usize`, found `bool`"
+  },
+  "invalid_matrix_row_conflict": {
+    "invalid": true,
+    "error": "incompatible access while shared borrows are active for `a`"
+  },
+  "invalid_matrix_mut_rows": {
+    "invalid": true,
+    "error": "resource already has an active unique borrow for `a`"
+  },
+  "invalid_multidim_slice": {
+    "invalid": true,
+    "error": "multidimensional slices are not supported"
+  },
+  "panic_matrix_outer": {
+    "panic": "bounds"
+  },
+  "panic_matrix_inner": {
+    "panic": "bounds"
+  },
+  "valid_string_conversions": {
+    "stdout": "1\na\nb\nconst\nonce\nfield\nlist\nvalue\n1\n1\n",
+    "heap": true
+  },
+  "invalid_conversion_narrow": {
+    "invalid": true,
+    "error": "integer literal out of range"
+  },
+  "invalid_conversion_resource": {
+    "invalid": true,
+    "error": "expected `i32`, found `String`"
+  },
+  "valid_protocol_fields": {
+    "stdout": "42\n",
+    "heap": true
+  },
+  "invalid_protocol_nonfinal": {
+    "invalid": true,
+    "error": "resource leaves scope in a non-final protocol state"
+  },
+  "valid_lossless_conversions": {
+    "stdout": "42 7 1.5\n42\n7\n42\n1.5\n",
+    "heap": true
+  },
+  "invalid_conversion_typed_narrow": {
+    "invalid": true,
+    "error": "expected `i8`, found `i32`"
+  },
+  "invalid_conversion_signed_unsigned": {
+    "invalid": true,
+    "error": "expected `u64`, found `i32`"
+  },
+  "invalid_conversion_float_precision": {
+    "invalid": true,
+    "error": "expected `f32`, found `u32`"
+  },
+  "invalid_conversion_owner_copy": {
+    "invalid": true,
+    "error": "resource `text` cannot be copied; use .move()"
+  },
+  "valid_macro_and_slice_iteration": {
+    "stdout": "1\n2\n3\n15\n5\n6\n7\n",
+    "heap": true
+  },
+  "valid_matrix_owned_neighbor": {
+    "stdout": "board\n12\n",
+    "heap": true
+  },
+  "valid_classic_for": {
+    "stdout": "8\n3\n2\n1\n2\n2 3\n0\n",
+    "heap": true
+  },
+  "valid_classic_for_cleanup": {
+    "stdout": "iteration\n99 1\n",
+    "heap": true
+  },
+  "invalid_classic_for_condition": {
+    "invalid": true,
+    "error": "expected `bool`, found `i32`"
+  },
+  "invalid_classic_for_scope": {
+    "invalid": true,
+    "error": "unknown name `i`"
+  },
+  "invalid_postfix_const": {
+    "invalid": true,
+    "error": "cannot assign to constant `I`"
+  },
+  "invalid_postfix_shared": {
+    "invalid": true,
+    "error": "cannot write through shared borrow"
+  },
+  "invalid_postfix_type": {
+    "invalid": true,
+    "error": "postfix increment/decrement requires an integer"
+  },
+  "invalid_postfix_complex_place": {
+    "invalid": true,
+    "error": "postfix increment/decrement requires a named integer place"
+  },
+  "valid_recursive_iteration": {
+    "stdout": "1\n2\n3\n4\n5\n6\n2\n4\n6\n8\n10\n12\n11\n12\n13\n14\n",
+    "heap": false
+  },
+  "valid_iteration_protocol": {
+    "stdout": "11\n12\n13\na\nb\n",
+    "heap": true
+  },
+  "valid_iteration_views": {
+    "stdout": "1\n2\n3\n4\n5\n6\n6\n5\n4\n3\n2\n1\n1\n4\n2\n5\n3\n6\n4\n5\n6\n1\n2\n3\n3\n2\n1\n6\n5\n4\n5\n6\n6\n3\n5\n2\n4\n1\n2\n4\n6\n8\n10\n12\n6\n4\n12\n10\n",
+    "heap": false
+  },
+  "valid_iteration_view_collections": {
+    "stdout": "99\n10\n20\nc\nb\n4\n13\n12\n1\n7\n6\n5\na!\nb!\n",
+    "heap": true
+  },
+  "invalid_view_axis": {
+    "invalid": true,
+    "error": "view axis is outside the source rank"
+  },
+  "invalid_view_permutation": {
+    "invalid": true,
+    "error": "permute_axes() cannot duplicate an axis"
+  },
+  "invalid_view_shared_write": {
+    "invalid": true,
+    "error": "cannot write through shared borrow"
+  },
+  "invalid_view_growth": {
+    "invalid": true,
+    "error": "incompatible access while shared borrows are active"
+  },
+  "invalid_view_mut_shared_source": {
+    "invalid": true,
+    "error": "mutable iteration requires unique access to the source"
+  },
+  "invalid_view_mut_iterator": {
+    "invalid": true,
+    "error": "elements_mut() requires view_mut()"
+  },
+  "invalid_view_stored": {
+    "invalid": true,
+    "error": "no method `view`"
+  },
+  "invalid_iteration_protocol": {
+    "invalid": true,
+    "error": "@iteration requires len(shared self)"
+  },
+  "panic_view_bounds": {
+    "panic": "view slice bounds out of range"
+  },
+  "panic_view_reverse_bounds": {
+    "panic": "view slice bounds out of range"
+  },
+  "valid_iteration_view_reborrows": {
+    "stdout": "5\n4\n3\n7\n8\n8\n9\n",
+    "heap": true
+  },
+  "valid_view_four_dimensions": {
+    "stdout": "1\n3\n2\n4\n11\n12\n13\n14\n",
+    "heap": false
+  },
+  "valid_view_control_flow": {
+    "stdout": "1\n2\n30\n4\n9\n0\n1\n0\n",
+    "heap": true
+  },
+  "invalid_unique_index_overlap": {
+    "invalid": true,
+    "error": "resource already has an active unique borrow"
+  },
+  "invalid_shared_index_unique_overlap": {
+    "invalid": true,
+    "error": "incompatible access while shared borrows are active"
+  },
+  "invalid_view_dynamic_axis": {
+    "invalid": true,
+    "error": "view axes must be nonnegative compile-time integer constants"
+  },
+  "invalid_view_transform_after_elements": {
+    "invalid": true,
+    "error": "view transformations must precede elements()"
+  },
+  "invalid_view_escape": {
+    "invalid": true,
+    "error": "reference return requires a compatible shared input-region contract"
+  },
+  "invalid_classic_resource_backedge": {
+    "invalid": true,
+    "error": "incompatible resource state at loop backedge"
+  },
+  "invalid_iteration_unsafe": {
+    "invalid": true,
+    "error": "call to unsafe method requires unsafe"
+  },
+  "invalid_view_slice_mutation": {
+    "invalid": true,
+    "error": "incompatible access while shared borrows are active"
+  },
+  "valid_view_method_receiver": {
+    "stdout": "99\n1\n2\n99\n2\n1\n",
+    "heap": true
+  },
+  "valid_view_owned_neighbor": {
+    "stdout": "11\n12\n13\n14\nboard\n",
+    "heap": true
+  }
+}

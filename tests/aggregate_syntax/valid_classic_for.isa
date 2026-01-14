@@ -1,0 +1,29 @@
+fn main() {
+  let sum: i32 = 0;
+  for let i = 0;
+  i < 5;
+  i++ {
+    if i == 2 {
+      continue;
+    }
+    sum = sum + i;
+  }
+  @println("{}", sum);
+  for (let j = 3; j > 0; j--) {
+    @println("{}", j);
+  }
+  let k = 0;
+  for;
+  ;
+  k++ {
+    if k == 2 {
+      break;
+    }
+  }
+  @println("{}", k);
+  let old = k++;
+  @println("{} {}", old, k);
+  let original: u8 = 255u8;
+  original++;
+  @println("{}", original);
+}

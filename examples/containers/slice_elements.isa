@@ -1,0 +1,37 @@
+@import "std.vec"
+
+fn first(values: &i32[]) -> Option<&i32> {
+  return values.first();
+}
+
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(10);
+  values.push(20);
+
+  let edit = values.as_mut_slice();
+  let item = edit.get_mut(1);
+  @println("has second = {}", item.is_some());
+  match item {
+    Some(value) => {
+      value = 42;
+    },
+    None => {},
+  }
+
+  values.push(30);
+  let view = values.as_slice();
+  match first(view) {
+    Some(value) => {
+      @println("first = {}", value);
+    },
+    None => {},
+  }
+  match view.last() {
+    Some(value) => {
+      @println("last = {}", value);
+    },
+    None => {},
+  }
+  @println("missing = {}", view.get(99).is_none());
+}

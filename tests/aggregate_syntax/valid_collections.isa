@@ -1,0 +1,85 @@
+@import "std.collections"
+fn main() {
+  let strings = Vec<String> {
+    String::from("a"),
+    String::from("b")
+  };
+  print(strings.len());
+  let nested = Vec<Vec<i32 >> {
+    Vec<i32> {
+      1,
+      2
+    },
+    Vec<i32> {
+      3
+    }
+  };
+  print(nested.len());
+  let empty: Vec<i32> = {};
+  let single: Vec<i32> = {
+    7
+  };
+  print(empty.len());
+  print(single.at_copy(0));
+  let map = HashMap<String, String> {
+    String::from("k") => String::from("first"),
+    String::from("k") => String::from("last")
+  };
+  print(map.len());
+  match map.get(String::from("k")) {
+    Some(value) => {
+      print(value.as_str());
+    },
+    None => {
+      panic("missing");
+    },
+  }
+  let set = HashSet<String> {
+    String::from("same"),
+    String::from("same")
+  };
+  print(set.len());
+  let list = List<String> {
+    String::from("l"),
+    String::from("m")
+  };
+  print(list.len());
+  match list.pop() {
+    Some(value) => {
+      print(value);
+    },
+    None => {},
+  }
+  let queue = Queue<i32> {
+    10,
+    20
+  };
+  print(queue.dequeue().unwrap());
+  let deque = VecDeque<i32> {
+    30,
+    40
+  };
+  print(deque.pop_back().unwrap());
+  let stack = Stack<i32> {
+    50,
+    60
+  };
+  print(stack.pop().unwrap());
+  let heap = BinaryHeap<i32> {
+    4,
+    8,
+    2
+  };
+  print(heap.pop().unwrap());
+  let tree = BTreeMap<i32, i32> {
+    2 => 20,
+    1 => 10
+  };
+  print(tree.len());
+  let treeSet = BTreeSet<i32> {
+    3,
+    3,
+    1
+  };
+  print(treeSet.len());
+}

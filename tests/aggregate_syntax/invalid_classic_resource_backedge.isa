@@ -1,0 +1,9 @@
+@import "std.string"
+fn main() {
+  let a = String::from("x");
+  for let i = 0;
+  i<2;
+  i++ {
+    a.drop();
+  }
+}

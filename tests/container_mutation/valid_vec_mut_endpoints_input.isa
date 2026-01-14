@@ -1,0 +1,36 @@
+@import "std.vec" fn edit(v: &mut Vec<String>) {
+  let first = v.first_mut();
+  let moved = first.move();
+  match moved {
+    Some(x) => {
+      x.push_str("!");
+    },
+    None => {}
+  }
+  match v.last_mut() {
+    Some(x) => {
+      x.push_str("?");
+    },
+    None => {}
+  }
+  v.push(String::from("next"));
+}
+fn main() {
+  let v = Vec<String>::new();
+  v.push(String::from("Olá"));
+  v.push(String::from("Isalang"));
+  edit(&mut v);
+  match v.get(0) {
+    Some(x) => {
+      print(x);
+    },
+    None => {}
+  }
+  match v.get(1) {
+    Some(x) => {
+      print(x);
+    },
+    None => {}
+  }
+  print(v.len());
+}

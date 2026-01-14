@@ -1,0 +1,15 @@
+@import "std.algorithms"
+struct Item {
+  id: i32,
+}
+impl Item {
+  pub fn compare(unique self, other: &Item) -> i32 {
+    self.id = 0;
+    return 0;
+  }
+}
+fn main() {
+  let v = Vec<Item>::new();
+  v.push(Item::new());
+  Algorithms<Item>::heap_sort(&mut v);
+}

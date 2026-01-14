@@ -1,0 +1,8 @@
+fn main() {
+  let data = 10;
+  let parent = &mut data;
+  borrow shared parent as reader {
+    print(reader);
+    parent = 20;
+  }
+}

@@ -1,0 +1,8 @@
+fn create() -> i32[2] {
+  print(10);
+  return[1, 2];
+}
+fn main() {
+  print(create().get(1).is_some());
+  print(create().last_mut().is_none());
+}

@@ -1,0 +1,46 @@
+@import "std.collections"
+fn main() {
+  let hash = HashMap<i32, String>::create();
+  let tree = BTreeMap<i32, String>::create();
+  for i in 0..200 {
+    let key =(i * 73) % 200;
+    @assert(hash.insert(key, String::from("value")).is_none());
+    @assert(tree.insert(key, String::from("value")).is_none());
+  }
+  for i in 0..200 {
+    @assert(hash.contains_key(i));
+    @assert(tree.contains_key(i));
+  }
+  @assert(!hash.contains_key(-1) && !tree.contains_key(-1));
+  print(hash.insert(73, String::from("replacement")).unwrap());
+  print(tree.insert(73, String::from("replacement")).unwrap());
+  match hash.get(73) {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+  match tree.get(73) {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+  for i in 0..100 {
+    @assert(hash.remove(i * 2).is_some());
+    @assert(tree.remove(i * 2).is_some());
+  }
+  for i in 0..200 {
+    @assert(hash.contains_key(i) ==(i % 2 == 1));
+    @assert(tree.contains_key(i) ==(i % 2 == 1));
+  }
+  @assert(hash.len() == 100 && tree.len() == 100);
+  hash.clear();
+  tree.clear();
+  @assert(hash.is_empty() && tree.is_empty());
+  hash.insert(-1, String::from("negative"));
+  tree.insert(-1, String::from("negative"));
+  print(hash.remove(-1).unwrap());
+  print(tree.remove(-1).unwrap());
+  print("maps ok");
+}

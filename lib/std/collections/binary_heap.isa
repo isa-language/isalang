@@ -1,0 +1,59 @@
+@import("std.vec", "std.algorithms")
+@initializer("create", "push")
+pub struct BinaryHeap<T> {
+  values: Vec<T>,
+}
+impl<T> BinaryHeap<T> {
+  pub fn create() -> BinaryHeap<T> {
+    let heap = BinaryHeap<T>::new();
+    heap.values = Vec<T>::new();
+    return heap.move();
+  }
+  pub fn len(shared self) -> usize {
+    return self.values.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.values.is_empty();
+  }
+  pub fn peek(shared self) -> Option<&T> {
+    return self.values.first();
+  }
+  pub fn clear(unique self) {
+    self.values.clear();
+  }
+  pub fn push(unique self, value: T) {
+    value.compare(&value);
+    self.values.push(value.move());
+    let child = self.values.len() - 1;
+    while child > 0 {
+      let parent =(child - 1) / 2;
+      if Algorithms<T>::compare_at(&self.values, parent, child) >= 0 {
+        break;
+      }
+      self.values.swap(parent, child);
+      child = parent;
+    }
+  }
+  pub fn pop(unique self) -> Option<T> {
+    if self.values.is_empty() {
+      return Option::None;
+    }
+    let last = self.values.len() - 1;
+    self.values.swap(0, last);
+    let result = self.values.pop();
+    let parent = 0usize;
+    let count = self.values.len();
+    while parent < count / 2 {
+      let child = parent * 2 + 1;
+      if child + 1 < count && Algorithms<T>::compare_at(&self.values, child, child + 1) < 0 {
+        child = child + 1;
+      }
+      if Algorithms<T>::compare_at(&self.values, parent, child) >= 0 {
+        break;
+      }
+      self.values.swap(parent, child);
+      parent = child;
+    }
+    return result.move();
+  }
+}

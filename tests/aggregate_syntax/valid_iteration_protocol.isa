@@ -1,0 +1,39 @@
+@import "std.vec"
+@import "std.collections.list"
+@iteration("count", "item", "item_mut")
+struct Values<T> {
+  storage: Vec<T>,
+}
+impl<T> Values<T> {
+  pub fn count(shared self) -> usize {
+    return self.storage.len();
+  }
+  pub fn item(shared self, index: usize) -> Option<&T> {
+    return self.storage.get(index);
+  }
+  pub fn item_mut(unique self, index: usize) -> Option<&mut T> {
+    return self.storage.get_mut(index);
+  }
+}
+fn main() {
+  let values = Values<i32> {
+    storage: Vec<i32> {
+      1,
+      2,
+      3
+    }
+  };
+  for value in &mut values {
+    *value = *value + 10;
+  }
+  for value in values {
+    print(value);
+  }
+  let list = List<String> {
+    "a",
+    "b"
+  };
+  for value in list {
+    print(value);
+  }
+}

@@ -1,0 +1,16 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let first = v.get_mut(0);
+  let second = first.move();
+  match second {
+    Some(r) => {
+      r = 7;
+    },
+    None => {}
+  }
+  v.push(9);
+  print(v.at_copy(0));
+  print(v.len());
+}

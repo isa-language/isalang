@@ -1,0 +1,14 @@
+@import "std.vec"
+fn start(values: &mut Vec<i32>) -> usize {
+  values.push(3);
+  return 0;
+}
+fn main() {
+  let values = Vec<i32> {
+    1,
+    2
+  };
+  for value in values.view().slice(0, start(&mut values), 2).elements() {
+    print(value);
+  }
+}

@@ -25,6 +25,16 @@ impl<T> Option<T> {
   pub fn is_none(shared self) -> bool {
     return !self.is_some();
   }
+  pub fn as_ref(shared self) -> Option<&T> {
+    match &self {
+      Some(value) => {
+        return Option::Some(value);
+      },
+      None => {
+        return Option::None;
+      },
+    }
+  }
   pub fn unwrap(self) -> T {
     match self.move() {
       Some(value) => {

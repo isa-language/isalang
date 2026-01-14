@@ -1,0 +1,24 @@
+@import "std.vec"
+struct Maker {
+  value: i32,
+}
+impl Maker {
+  pub fn view(shared self) -> Vec<i32> {
+    print(self.value);
+    return Vec<i32> {
+      1,
+      2
+    };
+  }
+}
+fn main() {
+  let maker = Maker {
+    value: 99
+  };
+  for value in maker.view() {
+    print(value);
+  }
+  for value in maker.view().view().elements().rev() {
+    print(value);
+  }
+}

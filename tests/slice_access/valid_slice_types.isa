@@ -1,0 +1,41 @@
+fn main() {
+  let integers = [255u8, 1u8];
+  match integers.get_mut(0) {
+    Some(value) => {
+      value = 128u8;
+      print(value);
+    },
+    None => {}
+  }
+  let floats = [1.5f32, 2.0f32];
+  match floats.last_mut() {
+    Some(value) => {
+      value = 2.5f32;
+      print(value);
+    },
+    None => {}
+  }
+  let flags = [false, false];
+  match flags.first_mut() {
+    Some(value) => {
+      value = true;
+      print(value);
+    },
+    None => {}
+  }
+  let chars = ['a', 'á'];
+  match chars.last() {
+    Some(value) => print(value),
+    None => {}
+  }
+  let signed = [-1i64, 9223372036854775807i64];
+  match signed.first() {
+    Some(value) => print(value),
+    None => {}
+  }
+  let unsigned = [18446744073709551615u64];
+  match unsigned.first() {
+    Some(value) => print(value),
+    None => {}
+  }
+}

@@ -1,0 +1,6 @@
+fn main() {
+  let data = 10;
+  let parent = &data;
+  let child = &mut * parent;
+  child = 20;
+}

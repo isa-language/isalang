@@ -1,0 +1,14 @@
+@import "std.option"
+fn main() {
+  let data = 10;
+  let parent = &mut data;
+  let reader = &*parent;
+  let first = Option::Some(reader);
+  let second = first.move();
+  match second {
+    Some(view) => print(view),
+    None => {},
+  }
+  parent = 20;
+  print(data);
+}

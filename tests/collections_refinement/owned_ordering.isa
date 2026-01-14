@@ -1,0 +1,75 @@
+@import("std.collections", "std.algorithms")
+struct Item {
+  value: i32,
+  serial: i32,
+}
+impl Item {
+  pub fn make(value: i32, serial: i32) -> Item {
+    let x = Item::new();
+    x.value = value;
+    x.serial = serial;
+    return x.move();
+  }
+  pub fn compare(shared self, other: &Item) -> i32 {
+    if self.value<other.value {
+      return -1;
+    }
+    if self.value>other.value {
+      return 1;
+    }
+    return 0;
+  }
+}
+fn main() {
+  let stable = Vec<Item>::new();
+  stable.push(Item::make(2, 0));
+  stable.push(Item::make(1, 1));
+  stable.push(Item::make(2, 2));
+  Algorithms<Item>::insertion_sort(&mut stable);
+  let a = stable.remove(0);
+  @assert(a.serial == 1);
+  let b = stable.remove(0);
+  @assert(b.serial == 0);
+  let c = stable.remove(0);
+  @assert(c.serial == 2);
+  let values = Vec<String>::new();
+  values.push(String::from("z"));
+  values.push(String::from("á"));
+  values.push(String::from("a"));
+  Algorithms<String>::heap_sort(&mut values);
+  let a = values.remove(0);
+  let b = values.remove(0);
+  let c = values.remove(0);
+  @assert(a == "a");
+  @assert(b == "z");
+  @assert(c == "á");
+  values.push(a.move());
+  values.push(b.move());
+  values.push(c.move());
+  let needle = String::from("z");
+  @assert(Algorithms<String>::binary_search_ref(&values, &needle).unwrap() == 1);
+  @assert(Algorithms<String>::linear_search_ref(&values, &needle).unwrap() == 1);
+  let heap = BinaryHeap<String>::create();
+  heap.push(String::from("a"));
+  heap.push(String::from("z"));
+  heap.push(String::from("á"));
+  @assert(heap.pop().unwrap() == "á");
+  @assert(heap.pop().unwrap() == "z");
+  @assert(heap.pop().unwrap() == "a");
+  let custom = BinaryHeap<Item>::create();
+  for i in 0..100 {
+    custom.push(Item::make(i, 0));
+  }
+  let previous = 100;
+  while !custom.is_empty() {
+    let item = custom.pop().unwrap();
+    @assert(item.value<previous);
+    previous = item.value;
+  }
+  let floats = Vec<f64>::new();
+  floats.push(2.0);
+  floats.push(-1.0);
+  Algorithms<f64>::heap_sort(&mut floats);
+  @assert(floats.at_copy(0) == -1.0);
+  print("owned ordering ok");
+}

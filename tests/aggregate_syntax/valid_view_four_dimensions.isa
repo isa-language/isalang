@@ -1,0 +1,34 @@
+const LAST: usize = 3;
+fn main() {
+  let a: i32[2][1][2][1] = {
+    {
+      {
+        {
+          1
+        },
+        {
+          2
+        }
+      }
+    },
+    {
+      {
+        {
+          3
+        },
+        {
+          4
+        }
+      }
+    }
+  };
+  for value in a.view().permute_axes(2, 1, 0, LAST).elements() {
+    print(value);
+  }
+  for value in a.view_mut().transpose().reverse_axis(1).elements_mut().rev() {
+    *value = *value + 10;
+  }
+  for value in a.view().elements() {
+    print(value);
+  }
+}

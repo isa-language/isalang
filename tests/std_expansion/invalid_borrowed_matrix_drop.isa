@@ -1,0 +1,12 @@
+@import "std.matriz"
+fn main() {
+  let Matriz = Matriz<i32>::filled(2, 2, 0);
+  let view = Matriz.get(0, 0);
+  Matriz.drop();
+  match view {
+    Some(v) => {
+      print(v);
+    },
+    None => {}
+  }
+}

@@ -1,0 +1,26 @@
+@import "std.vec"
+@initializer("empty", "add")
+struct Numbers {
+  storage: Vec<i32>,
+}
+impl Numbers {
+  pub fn empty() -> Numbers {
+    let n = Numbers::new();
+    n.storage = Vec<i32>::new();
+    return n.move();
+  }
+  pub fn add(unique self, value: i32) {
+    self.storage.push(value);
+  }
+  pub fn len(shared self) -> usize {
+    return self.storage.len();
+  }
+}
+fn main() {
+  let n = Numbers {
+    1,
+    2,
+    3
+  };
+  print(n.len());
+}

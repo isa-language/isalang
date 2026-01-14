@@ -1,0 +1,30 @@
+@import "std.vec"
+@initializer("create", "push")
+pub struct Stack<T> {
+  values: Vec<T>,
+}
+impl<T> Stack<T> {
+  pub fn create() -> Stack<T> {
+    let stack = Stack<T>::new();
+    stack.values = Vec<T>::new();
+    return stack.move();
+  }
+  pub fn len(shared self) -> usize {
+    return self.values.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.values.is_empty();
+  }
+  pub fn push(unique self, value: T) {
+    self.values.push(value.move());
+  }
+  pub fn pop(unique self) -> Option<T> {
+    return self.values.pop();
+  }
+  pub fn peek(shared self) -> Option<&T> {
+    return self.values.last();
+  }
+  pub fn clear(unique self) {
+    self.values.clear();
+  }
+}

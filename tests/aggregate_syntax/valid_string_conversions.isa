@@ -1,0 +1,46 @@
+@import "std.collections"
+const LABEL: str = "const";
+struct Entry {
+  name: String,
+}
+fn main() {
+  let strings = Vec<String> {
+    "a",
+    "b",
+    LABEL,
+    {
+      print(1);
+      "once"
+    }
+  };
+  for value in &strings {
+    print(value);
+  }
+  let entry = Entry {
+    name: "field"
+  };
+  print(entry.name.as_str());
+  let list: List<String >= {
+    "list"
+  };
+  print(list.pop().unwrap());
+  let map = HashMap<String, String> {
+    "key" => "value"
+  };
+  let key = String::from("key");
+  match map.get_ref(&key) {
+    Some(value) => {
+      print(value);
+    }, None => {},
+  }
+  let set = HashSet<String> {
+    "same", "same"
+  };
+  print(set.len());
+  let nested = Vec<Vec<String >> {
+    Vec<String> {
+      "nested"
+    }
+  };
+  print(nested.len());
+}

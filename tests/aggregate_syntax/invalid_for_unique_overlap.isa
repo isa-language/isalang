@@ -1,0 +1,11 @@
+fn main() {
+  let a: i32[2] = {
+    1,
+    2
+  };
+  let r = &a;
+  for v in &mut a {
+    v = 1;
+  }
+  print(r[0]);
+}

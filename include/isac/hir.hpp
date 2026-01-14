@@ -93,6 +93,7 @@ struct Type {
   std::string cName = {};
   bool foreignUnion = false;
   std::vector<TypeId> parameters = {};
+  Access referenceAccess = Access::Shared;
 };
 struct Operation {
   OperationId id;
@@ -154,7 +155,8 @@ struct Expr {
     PointerCast,
     ArrayRepeat,
     FunctionAddress,
-    IndirectCall
+    IndirectCall,
+    StructInit
   } kind;
   Loc loc;
   bool inferredLiteral = false;
@@ -220,6 +222,26 @@ struct PayloadPath {
   uint32_t field;
   bool operator==(const PayloadPath &) const = default;
 };
+
+struct ReferenceInfo {
+  TypeId referent;
+  Access capability;
+  RegionId region = None;
+  bool operator==(const ReferenceInfo &) const = default;
+};
+enum class ReferenceProjectionKind { Field, VariantPayload, Element };
+struct ReferenceProjection {
+  ReferenceProjectionKind kind;
+  uint32_t index = None;
+  VariantId variant = None;
+  bool operator==(const ReferenceProjection &) const = default;
+};
+struct BorrowedReference {
+  ReferenceInfo reference;
+
+  std::vector<ReferenceProjection> path;
+  bool operator==(const BorrowedReference &) const = default;
+};
 struct PayloadResultSource {
   SymbolId parameter;
   PayloadPath path;
@@ -238,6 +260,8 @@ struct Function {
   std::vector<SymbolId> params;
   std::vector<ParameterRegion> parameterRegions;
   std::vector<PayloadParameterRegion> payloadParameterRegions;
+
+  std::vector<SymbolId> payloadInspectionParameters;
   SymbolId resultOrigin = None;
   std::optional<PayloadResultSource> resultPayloadSource;
 
@@ -262,6 +286,7 @@ struct Function {
     return resultOrigin != None && !resultBorrowedContainer;
   }
   RegionId resultRegion = None;
+  Access resultAccess = Access::Shared;
   std::vector<OperationId> operations;
   std::vector<Stmt> body = {};
   Loc loc;
@@ -282,6 +307,7 @@ struct ConstDecl {
 struct GenericPayload {
   bool parameter;
   uint32_t id;
+  std::vector<GenericPayload> arguments = {};
 };
 struct GenericVariant {
   std::string name;
@@ -331,6 +357,10 @@ struct Program {
   std::vector<Symbol> symbols;
   std::vector<Function> functions;
   bool library = false;
+  std::optional<ReferenceInfo> referenceInfo(TypeId, RegionId = None) const;
+  std::optional<ReferenceInfo> symbolReference(SymbolId) const;
+  std::optional<ReferenceInfo> functionReferenceResult(FunctionId) const;
+  std::vector<BorrowedReference> borrowedReferences(TypeId) const;
   bool rawPointer(TypeId t) const {
     return types.at(t).kind == Type::RawPointer;
   }
@@ -351,7 +381,7 @@ struct Program {
     return offset;
   }
   bool supportsStoredSharedReference(TypeId t) const {
-    if (t >= types.size() || types[t].protocol != None)
+    if (t >= types.size() || types[t].protocol != None || containsReferences(t))
       return false;
     if (heap(t) || scalar(t))
       return true;
@@ -375,55 +405,73 @@ struct Program {
       return true;
     const auto &from = types.at(input);
     if (dynamicContainer(input))
-      return from.element == result && supportsStoredSharedReference(result);
-    if (!scalar(result))
-      return false;
+      return (from.element == result && supportsStoredSharedReference(result)) ||
+             (types[result].kind == Type::Slice && scalar(from.element) &&
+              types[result].element == from.element);
     if (from.kind == Type::Array || from.kind == Type::Slice)
       return from.element == result;
+    if (from.kind == Type::Enum)
+      for (const auto &variant : from.variants)
+        for (auto payload : variant.payload)
+          if (!reference(payload) && borrowResultCompatible(payload, result))
+            return true;
     if (from.kind == Type::Structure && from.representation == Representation::Stack)
       for (const auto &field : from.fields)
-        if (field.type == result)
+        if (borrowResultCompatible(field.type, result))
           return true;
     return false;
   }
   bool borrowedPayloadResultCompatible(TypeId input, TypeId result) const {
     if (types.at(result).kind != Type::Enum || needsDrop(result))
       return false;
-    bool found = false;
-    for (const auto &variant : types[result].variants)
-      for (auto payload : variant.payload) {
-        if (reference(payload)) {
-          if (!borrowResultCompatible(input, types[payload].element))
-            return false;
-          found = true;
-        } else if (containsReferences(payload))
-          return false;
-      }
-    return found;
+    const auto references = borrowedReferences(result);
+    for (const auto &stored : references)
+      if (stored.path.size() != 1 ||
+          stored.path[0].kind != ReferenceProjectionKind::VariantPayload ||
+          !borrowResultCompatible(input, stored.reference.referent))
+        return false;
+    return !references.empty();
+  }
+
+  bool exclusivePayloadResult(const Function &function) const {
+    if (function.external || function.foreignC || !function.intrinsic.empty() ||
+        function.intrinsicId != IntrinsicId::None || function.resultAccess != Access::Unique ||
+        !function.resultBorrowedContainer || function.resultOrigin >= symbols.size() ||
+        function.resultRegion == None || !function.additionalResultOrigins.empty() ||
+        !function.payloadResultSources().empty() || !function.payloadParameterRegions.empty() ||
+        !function.payloadInspectionParameters.empty() ||
+        types.at(function.result).kind != Type::Enum ||
+        !referenceCapability(function.result, Access::Unique) ||
+        borrowedPayloadOffsets(function.result).size() != 1 ||
+        std::find(function.params.begin(), function.params.end(), function.resultOrigin) ==
+            function.params.end())
+      return false;
+    const auto &input = symbols[function.resultOrigin];
+    const auto reference = symbolReference(function.resultOrigin);
+    return input.reference && reference && reference->capability == Access::Unique &&
+           borrowedPayloadResultCompatible(reference->referent, function.result);
   }
   TypeId borrowedPayloadInputType(TypeId container) const {
     if (types.at(container).kind != Type::Enum)
       return None;
-    for (const auto &variant : types[container].variants)
-      for (auto payload : variant.payload)
-        if (reference(payload)) {
-          auto element = types[payload].element;
-          return borrowedPayloadResultCompatible(element, container) ? element : None;
-        }
-    return None;
+    const auto references = borrowedReferences(container);
+    if (references.empty())
+      return None;
+    for (const auto &stored : references)
+      if (stored.reference.capability != Access::Shared)
+        return None;
+    auto element = references.front().reference.referent;
+    return borrowedPayloadResultCompatible(element, container) ? element : None;
   }
   std::optional<PayloadPath> singleBorrowedPayloadPath(TypeId container) const {
-    std::optional<PayloadPath> path;
     if (types.at(container).kind != Type::Enum)
       return {};
-    for (const auto &variant : types[container].variants)
-      for (uint32_t n = 0; n < variant.payload.size(); ++n)
-        if (containsReferences(variant.payload[n])) {
-          if (path || !reference(variant.payload[n]))
-            return {};
-          path = PayloadPath{variant.id, n};
-        }
-    return path;
+    const auto references = borrowedReferences(container);
+    if (references.size() != 1 || references[0].path.size() != 1 ||
+        references[0].path[0].kind != ReferenceProjectionKind::VariantPayload)
+      return {};
+    const auto &position = references[0].path[0];
+    return PayloadPath{position.variant, position.index};
   }
 
   std::set<VariantId> unborrowedVariants(TypeId container) const {
@@ -448,14 +496,18 @@ struct Program {
   bool reference(TypeId t) const {
     return types[t].kind == Type::Reference;
   }
-  bool containsReferences(TypeId t) const {
-    if (reference(t))
-      return true;
+  bool containsReferences(TypeId) const;
+  bool referenceCapability(TypeId, Access) const;
+  bool opaqueBorrowedPayload(TypeId t) const {
+    if (types.at(t).kind != Type::Enum || !containsReferences(t) || needsDrop(t) ||
+        !referenceCapability(t, Access::Unique))
+      return false;
     for (const auto &variant : types[t].variants)
       for (auto payload : variant.payload)
-        if (containsReferences(payload))
-          return true;
-    return false;
+        if ((reference(payload) && !supportsStoredSharedReference(types[payload].element)) ||
+            (!reference(payload) && containsReferences(payload)))
+          return false;
+    return true;
   }
   bool dynamicContainer(TypeId t) const {
     auto r = types.at(t).representation;

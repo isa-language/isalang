@@ -1,0 +1,34 @@
+fn edit(values: &mut i32[], stop: bool) -> i32 {
+  let a = values.first_mut();
+  if stop {
+    print(a.is_some());
+    return 1;
+  }
+  match a {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+  return 0;
+}
+fn main() {
+  let a = [1, 2];
+  print(edit(&mut a, true));
+  print(edit(&mut a, false));
+  loop {
+    let s: &mut i32[] = &mut a;
+    let x = s.first_mut();
+    print(x.is_some());
+    break;
+  }
+  let i = 0;
+  while i < 2 {
+    let s: &mut i32[] = &mut a;
+    let x = s.last_mut();
+    print(x.is_some());
+    i = i + 1;
+    continue;
+  }
+  print(a[0]);
+}

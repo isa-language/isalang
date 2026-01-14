@@ -1,0 +1,20 @@
+@import "std.string"
+
+fn inspect(value: &String) {
+  @println("{}", value);
+}
+
+fn main() {
+  let text = String::from("Isalang");
+  let writer = &mut text;
+
+  let reader = &*writer;
+  let alias = &reader;
+  inspect(alias);
+
+  let edit = &mut * writer;
+  edit.push_str(" / regions");
+
+  writer.push_str(" / ownership");
+  @println("{}", text);
+}

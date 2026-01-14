@@ -1,0 +1,8 @@
+@import "std.buffer"
+fn main() {
+  let data = Buffer::new(2);
+  let parent = &mut data;
+  let reader = &*parent;
+  reader.release();
+  data.release();
+}

@@ -1,5 +1,7 @@
 @import "std.option"
 @representation "generic_vec"
+@initializer("new", "push")
+@iteration("len", "get", "get_mut")
 pub struct Vec<T> {
   element: T,
 }
@@ -10,6 +12,14 @@ impl<T> Vec<T> {
   pub fn with_capacity(capacity: usize) -> Vec<T>;
   @intrinsic "vec.push"
   pub fn push(unique self, value: T);
+  @intrinsic "vec.insert"
+  pub fn insert(unique self, index: usize, value: T);
+  @intrinsic "vec.remove"
+  pub fn remove(unique self, index: usize) -> T;
+  @intrinsic "vec.replace"
+  pub fn replace(unique self, index: usize, value: T) -> T;
+  @intrinsic "vec.swap"
+  pub fn swap(unique self, left: usize, right: usize);
   @intrinsic "vec.pop"
   pub fn pop(unique self) -> Option<T>;
   @intrinsic "vec.len"
@@ -19,12 +29,35 @@ impl<T> Vec<T> {
   pub fn is_empty(shared self) -> bool {
     return self.len() == 0;
   }
+
+  pub fn at_copy(shared self, index: usize) -> T {
+    match self.get(index) {
+      Some(value) => {
+        return value;
+      },
+      None => {
+        loop {
+          panic("vector index out of bounds");
+        }
+      },
+    }
+  }
   @intrinsic "vec.get"
   pub fn get(shared self, index: usize) -> Option<&T>;
+  @intrinsic "vec.get_mut"
+  pub fn get_mut(unique self, index: usize) -> Option<&mut T>;
+  @intrinsic "vec.as_slice"
+  pub fn as_slice(shared self) -> &T[];
+  @intrinsic "vec.as_mut_slice"
+  pub fn as_mut_slice(unique self) -> &mut T[];
   @intrinsic "vec.first"
   pub fn first(shared self) -> Option<&T>;
   @intrinsic "vec.last"
   pub fn last(shared self) -> Option<&T>;
+  @intrinsic "vec.first_mut"
+  pub fn first_mut(unique self) -> Option<&mut T>;
+  @intrinsic "vec.last_mut"
+  pub fn last_mut(unique self) -> Option<&mut T>;
   @intrinsic "vec.clear"
   pub fn clear(unique self);
 }

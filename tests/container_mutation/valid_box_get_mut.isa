@@ -1,0 +1,10 @@
+@import "std.box"
+fn main() {
+  let b = Box<i32>::new(1);
+  let r = b.get_mut();
+  r = 42;
+  print(r);
+  print(b.get());
+  let b2 = b.move();
+  print(b2.into_inner());
+}

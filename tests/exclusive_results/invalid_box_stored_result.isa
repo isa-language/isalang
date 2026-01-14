@@ -1,0 +1,10 @@
+@import "std.box"
+fn first(values: &mut i32[]) -> Option<&mut i32> {
+  return values.first_mut();
+}
+fn main() {
+  let data = [1, 2];
+  let edit: &mut i32[] = &mut data;
+  let result = first(edit);
+  let box = Box<Option<&mut i32 >>::new(result.move());
+}

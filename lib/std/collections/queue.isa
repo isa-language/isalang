@@ -1,0 +1,30 @@
+@import "std.collections.vec_deque"
+@initializer("create", "enqueue")
+pub struct Queue<T> {
+  values: VecDeque<T>,
+}
+impl<T> Queue<T> {
+  pub fn create() -> Queue<T> {
+    let queue = Queue<T>::new();
+    queue.values = VecDeque<T>::create();
+    return queue.move();
+  }
+  pub fn len(shared self) -> usize {
+    return self.values.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.values.is_empty();
+  }
+  pub fn enqueue(unique self, value: T) {
+    self.values.push_back(value.move());
+  }
+  pub fn dequeue(unique self) -> Option<T> {
+    return self.values.pop_front();
+  }
+  pub fn front(shared self) -> Option<&T> {
+    return self.values.front();
+  }
+  pub fn clear(unique self) {
+    self.values.clear();
+  }
+}

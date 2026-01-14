@@ -1,0 +1,28 @@
+fn inspect(value: &i32) {
+  print(value);
+}
+fn modify(value: &mut i32) {
+  value = value + 1;
+}
+fn from_parameter(parent: &mut i32) {
+  let child = &mut * parent;
+  modify(child);
+  let reader = &*parent;
+  inspect(reader);
+  modify(parent);
+}
+fn main() {
+  let data = 10;
+  let parent = &mut data;
+  let first = &*parent;
+  let second = &*parent;
+  inspect(first);
+  inspect(second);
+  let child = &mut * parent;
+  let grandchild = &mut * child;
+  modify(grandchild);
+  modify(child);
+  modify(parent);
+  from_parameter(parent);
+  print(data);
+}

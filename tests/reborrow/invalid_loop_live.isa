@@ -1,0 +1,14 @@
+fn modify(value: &mut i32) {
+  value = 20;
+}
+fn main() {
+  let data = 10;
+  let parent = &mut data;
+  let reader = &*parent;
+  let i = 0;
+  while i < 2 {
+    print(reader);
+    modify(parent);
+    i = i + 1;
+  }
+}

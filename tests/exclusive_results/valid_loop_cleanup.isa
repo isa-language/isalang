@@ -1,0 +1,38 @@
+fn at(values: &mut i32[], index: usize) -> Option<&mut i32> {
+  return values.get_mut(index);
+}
+fn inspect(values: &mut i32[], stop: bool) -> i32 {
+  let value = at(values, 0);
+  if stop {
+    print(value.is_some());
+    return 1;
+  }
+  match value {
+    Some(item) => {
+      item = 42;
+    },
+    None => {}
+  }
+  return 0;
+}
+fn main() {
+  let data = [1, 2];
+  let edit: &mut i32[] = &mut data;
+  print(inspect(edit, true));
+  print(inspect(edit, false));
+  loop {
+    let item = at(edit, 0);
+    print(item.is_some());
+    break;
+  }
+  let i = 0;
+  while i < 2 {
+    let item = at(edit, 1);
+    print(item.is_some());
+    i = i + 1;
+    continue;
+  }
+  edit[1] = 20;
+  print(data[0]);
+  print(data[1]);
+}

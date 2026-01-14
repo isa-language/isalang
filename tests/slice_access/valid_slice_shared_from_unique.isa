@@ -1,0 +1,18 @@
+fn edit(s: &mut i32[]) {
+  let a = s.get(0);
+  let b = s.last();
+  match a {
+    Some(value) => print(value),
+    None => {}
+  }
+  match b {
+    Some(value) => print(value),
+    None => {}
+  }
+  s[0] = 42;
+}
+fn main() {
+  let data = [1, 2];
+  edit(&mut data);
+  print(data[0]);
+}

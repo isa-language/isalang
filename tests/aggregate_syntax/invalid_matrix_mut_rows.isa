@@ -1,0 +1,7 @@
+fn main() {
+  let a: i32[2][3];
+  let one = &mut a[0];
+  let two = &mut a[1];
+  print(one[0]);
+  print(two[0]);
+}

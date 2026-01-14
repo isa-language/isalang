@@ -1,0 +1,76 @@
+@import("std.collections", "std.box")
+fn main() {
+  let deque = VecDeque<i32>::create();
+  for i in 0..1024 {
+    deque.push_back(i);
+  }
+  for i in 0..512 {
+    @assert(deque.pop_front().unwrap() == i);
+  }
+  for i in 1024..1536 {
+    deque.push_back(i);
+  }
+  for i in 0..1024 {
+    match deque.get(i as usize) {
+      Some(value) => {
+        @assert(value == i + 512);
+      },
+      None => {
+        @assert(false);
+      }
+    }
+  }
+  for i in 0..512 {
+    deque.push_front(-i - 1);
+  }
+  for i in 0..512 {
+    @assert(deque.pop_front().unwrap() == i - 512);
+  }
+  for i in 0..1024 {
+    @assert(deque.pop_back().unwrap() == 1535 - i);
+  }
+  @assert(deque.is_empty() && deque.pop_front().is_none() && deque.pop_back().is_none());
+  for i in 0..1000 {
+    deque.push_front(i);
+    @assert(deque.pop_back().unwrap() == i);
+    deque.push_back(i);
+    @assert(deque.pop_front().unwrap() == i);
+  }
+  deque.clear();
+  deque.push_back(7);
+  match deque.front() {
+    Some(x) => {
+      @assert(x == 7);
+    },
+    None => {
+      @assert(false);
+    }
+  }
+  match deque.back() {
+    Some(x) => {
+      @assert(x == 7);
+    },
+    None => {
+      @assert(false);
+    }
+  }
+  let owned = VecDeque<Box<String >>::create();
+  for i in 0..100 {
+    owned.push_front(Box<String>::new(String::from("owned")));
+  }
+  for i in 0..50 {
+    let box = owned.pop_back().unwrap();
+    @assert(box.get() == "owned");
+  }
+  owned.clear();
+  owned.push_back(Box<String>::new(String::from("after clear")));
+  let queue = Queue<String>::create();
+  for i in 0..100 {
+    queue.enqueue(String::from("queued"));
+  }
+  for i in 0..100 {
+    @assert(queue.dequeue().unwrap() == "queued");
+  }
+  @assert(queue.is_empty());
+  print("circular deque ok");
+}

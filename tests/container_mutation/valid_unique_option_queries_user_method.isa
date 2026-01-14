@@ -1,0 +1,21 @@
+@import "std.vec" impl<T> Option<T> {
+  fn present(shared self) -> bool {
+    match &self {
+      Some(_) => {
+        return true;
+      },
+      None => {
+        return false;
+      }
+    }
+  }
+}
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let a = v.first_mut();
+  print(a.present());
+  a.drop();
+  v.clear();
+  print(v.len());
+}

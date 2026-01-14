@@ -1,0 +1,36 @@
+@import("std.collections", "std.algorithms")
+fn main() {
+  let names = HashMap<String, String>::create();
+  names.insert(String::from("language"), String::from("Isalang"));
+  let key = String::from("language");
+  match names.get_ref(&key) {
+    Some(name) => {
+      print(name);
+    },
+    None => {}
+  }
+  let words = Vec<String>::new();
+  words.push(String::from("z"));
+  words.push(String::from("a"));
+  Algorithms<String>::heap_sort(&mut words);
+  match words.first() {
+    Some(first) => {
+      print(first);
+    },
+    None => {}
+  }
+  let queue = Queue<String>::create();
+  queue.enqueue(String::from("first"));
+  queue.enqueue(String::from("second"));
+  print(queue.dequeue().unwrap());
+  print(queue.dequeue().unwrap());
+  let optional = Option::Some(String::from("borrowed"));
+  let view = optional.as_ref();
+  @assert(view.is_some());
+  match view {
+    Some(text) => {
+      print(text);
+    },
+    None => {}
+  }
+}

@@ -1,0 +1,9 @@
+@import "std.algorithms"
+struct NoOrder {
+  id: i32,
+}
+fn main() {
+  let v = Vec<NoOrder>::new();
+  v.push(NoOrder::new());
+  Algorithms<NoOrder>::heap_sort(&mut v);
+}

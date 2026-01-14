@@ -1,0 +1,5 @@
+@import "std.vec" fn main() {
+  let v = Vec<i32> {
+    String::from("x")
+  };
+}

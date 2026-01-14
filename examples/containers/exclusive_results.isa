@@ -1,0 +1,29 @@
+@import "std.vec"
+
+fn first(values: &mut Vec<String>) -> Option<&mut String> {
+  return values.first_mut();
+}
+
+fn main() -> i32 {
+  let values = Vec<String>::new();
+  values.push(String::from("Olá"));
+
+  let edit = &mut values;
+  let result = first(edit);
+  match result {
+    Option::Some(text) => {
+      text.push_str(", Isalang!");
+    },
+    Option::None => {},
+  }
+
+  match edit.get(0) {
+    Option::Some(text) => {
+      @println("{}", text);
+    },
+    Option::None => {},
+  }
+  values.push(String::from("second"));
+  @println("len = {}", values.len());
+  return 0;
+}

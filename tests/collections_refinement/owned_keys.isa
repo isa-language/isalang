@@ -1,0 +1,100 @@
+@import "std.collections"
+struct Key {
+  id: i32,
+}
+impl Key {
+  pub fn make(id: i32) -> Key {
+    let key = Key::new();
+    key.id = id;
+    return key.move();
+  }
+
+  pub fn hash(shared self) -> usize {
+    return 0;
+  }
+  pub fn equals(shared self, other: &Key) -> bool {
+    return self.id == other.id;
+  }
+  pub fn compare(shared self, other: &Key) -> i32 {
+    if self.id<other.id {
+      return -1;
+    }
+    if self.id>other.id {
+      return 1;
+    }
+    return 0;
+  }
+}
+fn main() {
+  let map = HashMap<Key, String>::create();
+  let tree = BTreeMap<Key, String>::create();
+  for i in 0..100 {
+    map.insert(Key::make(i), String::from("stored"));
+    tree.insert(Key::make(i), String::from("stored"));
+  }
+  for i in 0..100 {
+    let key = Key::make(i);
+    @assert(map.contains_key_ref(&key) && tree.contains_key_ref(&key));
+    match map.get_ref(&key) {
+      Some(value) => {
+        @assert(value == "stored");
+      },
+      None => {
+        @assert(false);
+      }
+    }
+    match tree.get_ref(&key) {
+      Some(value) => {
+        @assert(value == "stored");
+      },
+      None => {
+        @assert(false);
+      }
+    }
+  }
+  for i in 0..50 {
+    let key = Key::make(i * 2);
+    @assert(map.remove_ref(&key).unwrap() == "stored");
+    @assert(tree.remove_ref(&key).unwrap() == "stored");
+  }
+  @assert(map.len() == 50 && tree.len() == 50);
+  let text = HashMap<String, String>::create();
+  let ordered = BTreeMap<String, String>::create();
+  text.insert(String::from("Olá"), String::from("first"));
+  @assert(text.insert(String::from("Olá"), String::from("second")).unwrap() == "first");
+  ordered.insert(String::from("á"), String::from("accent"));
+  ordered.insert(String::from("a"), String::from("ascii"));
+  let key = String::from("Olá");
+  match text.get_ref(&key) {
+    Some(value) => {
+      @assert(value == "second");
+    },
+    None => {
+      @assert(false);
+    }
+  }
+  @assert(text.remove_ref(&key).unwrap() == "second");
+  @assert(text.is_empty());
+  let sets = HashSet<String>::create();
+  let trees = BTreeSet<String>::create();
+  @assert(sets.insert(String::from("same")) && trees.insert(String::from("same")));
+  @assert(!sets.insert(String::from("same")) && !trees.insert(String::from("same")));
+  let same = String::from("same");
+  @assert(sets.contains_ref(&same) && trees.contains_ref(&same));
+  @assert(sets.remove_ref(&same) && trees.remove_ref(&same));
+  let alpha = String::from("a");
+  let accent = String::from("á");
+  @assert(alpha.compare(&accent)<0 && accent.compare(&alpha)>0);
+  let prefix = String::from("á");
+  let longer = String::from("áb");
+  @assert(prefix.compare(&longer)<0);
+  let wide = HashMap<u64, i32>::create();
+  wide.insert(0xffff_ffff_ffff_ffffu64, 1);
+  @assert(wide.contains_key(0xffff_ffff_ffff_ffffu64));
+  let bits = HashSet<bool>::create();
+  @assert(bits.insert(true) && bits.insert(false));
+  let chars = HashSet<char>::create();
+  @assert(chars.insert('á'));
+  @assert(chars.contains('á'));
+  print("owned keys ok");
+}

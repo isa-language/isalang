@@ -1,0 +1,11 @@
+@import "std.vec"
+fn bad() -> Option<&i32> {
+  let a = Vec<i32>::new();
+  a.push(1);
+  let s = a.as_slice();
+  return s.last();
+}
+fn main() {
+  let a = bad();
+  print(a.is_some());
+}

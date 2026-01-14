@@ -1,0 +1,8 @@
+fn read(data: &i32[]) {
+  let a = data.get_mut(0);
+  print(a.is_some());
+}
+fn main() {
+  let data = [1, 2];
+  read(&data);
+}

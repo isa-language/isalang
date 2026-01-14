@@ -1,0 +1,44 @@
+@import "std.iter"
+
+fn main() {
+  for let i = 0;
+  i < 3;
+  i++ {
+    @println("index = {}", i);
+  }
+
+  let matrix: i32[2][3] = {
+    {
+      1,
+      2,
+      3
+    },
+    {
+      4,
+      5,
+      6
+    }
+  };
+  for row in &matrix {
+    for value in row {
+      @println("row value = {}", value);
+    }
+  }
+  for value in matrix.view().transpose().elements() {
+    @println("column value = {}", value);
+  }
+  for value in matrix.view_mut().reverse_axis(1).elements_mut() {
+    *value = *value * 2;
+  }
+  for value in matrix.view().slice(0, 1, 2).elements().rev() {
+    @println("selected = {}", value);
+  }
+
+  let words = List<String> {
+    "Isalang",
+    "iteration"
+  };
+  for word in words.view().elements().rev() {
+    @println("{}", word);
+  }
+}

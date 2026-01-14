@@ -1,0 +1,20 @@
+@import "std.vec"
+struct Holder<T> {
+  values: T,
+}
+fn main() {
+  let holder = Holder<Vec<i32 >>::new();
+  holder.values = Vec<i32>::new();
+  holder.values.push(1);
+  let parent = &mut holder.values;
+  let item = parent.get_mut(0);
+  match item {
+    Some(value) => {
+      value = 17;
+    },
+    None => {}
+  }
+  parent.push(2);
+  print(holder.values.at_copy(0));
+  print(holder.values.len());
+}

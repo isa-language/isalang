@@ -1,0 +1,4 @@
+@import "std.matriz"
+fn main() {
+  let Matriz = Matriz<String>::filled(2, 2, String::from("no implicit copy"));
+}

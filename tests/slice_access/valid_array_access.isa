@@ -1,0 +1,38 @@
+fn main() {
+  let values: i32[3] = [10, 20, 30];
+  match values.get(1) {
+    Some(value) => print(value),
+    None => print(0)
+  }
+  match values.first() {
+    Some(value) => print(value),
+    None => print(0)
+  }
+  match values.last() {
+    Some(value) => print(value),
+    None => print(0)
+  }
+  print(values.get(3).is_none());
+  print(values.get(18446744073709551615usize).is_none());
+  match values.first_mut() {
+    Some(value) => {
+      value = 11;
+    },
+    None => {}
+  }
+  match values.last_mut() {
+    Some(value) => {
+      value = 31;
+    },
+    None => {}
+  }
+  match values.get_mut(1) {
+    Some(value) => {
+      value = 21;
+    },
+    None => {}
+  }
+  print(values[0]);
+  print(values[1]);
+  print(values[2]);
+}

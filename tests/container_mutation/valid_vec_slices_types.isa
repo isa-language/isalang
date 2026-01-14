@@ -1,0 +1,21 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<u8>::new();
+  v.push(255u8);
+  let s = v.as_mut_slice();
+  s[0] = 128u8;
+  print(s[0]);
+  let f = Vec<f32>::new();
+  f.push(1.5f32);
+  let r = f.as_mut_slice();
+  r[0] = 2.5f32;
+  print(r[0]);
+  let b = Vec<bool>::new();
+  b.push(false);
+  let a = b.as_mut_slice();
+  a[0] = true;
+  print(a[0]);
+  let c = Vec<char>::new();
+  c.push('á');
+  print(c.as_slice()[0]);
+}

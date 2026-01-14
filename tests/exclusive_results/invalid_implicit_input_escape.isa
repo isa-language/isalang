@@ -1,0 +1,8 @@
+fn first(values: &mut i32[]) -> Option<&mut i32> {
+  return values.first_mut();
+}
+fn main() {
+  let data = [1, 2];
+  let item = first(&mut data);
+  print(item.is_some());
+}

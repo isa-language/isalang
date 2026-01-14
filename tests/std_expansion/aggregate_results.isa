@@ -1,0 +1,30 @@
+@import "std.vec"
+struct Item<T> {
+  data: T,
+  suffix: String,
+}
+fn nested() -> Option<Result<String, i32 >> {
+  return Option::Some(Result<String, i32>::Ok(String::from("nested")));
+}
+fn item() -> Item<String> {
+  let x = Item<String>::new();
+  x.data = String::from("item");
+  x.suffix = String::from("suffix");
+  return x.move();
+}
+fn main() {
+  print(nested().unwrap().unwrap());
+  let values = Vec<Item<String >>::new();
+  values.push(item());
+  values.insert(0, item());
+  let x = values.remove(0);
+  print(x.data.as_str());
+  print(x.suffix.as_str());
+  let y = values.replace(0, item());
+  print(y.data.as_str());
+  values.clear();
+  let result: Result<String, i32> = Result::Ok(String::from("result"));
+  print(result.expect("unexpected"));
+  let error: Result<i32, String> = Result::Err(String::from("error"));
+  print(error.unwrap_err());
+}

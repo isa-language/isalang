@@ -1,0 +1,30 @@
+@import "std.string"
+struct Board {
+  cells: i32[2][3],
+  title: String,
+}
+fn main() {
+  let b = Board {
+    cells: {
+      {
+        1,
+        2,
+        3
+      },
+      {
+        4,
+        5,
+        6
+      }
+    },
+    title: "board"
+  };
+  for i in 0usize..2usize {
+    let row = &mut b.cells[i];
+    for cell in row {
+      cell = cell * 2;
+    }
+  }
+  print(b.title.as_str());
+  print(b.cells[1][2]);
+}

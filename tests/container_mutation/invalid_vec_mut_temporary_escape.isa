@@ -1,0 +1,4 @@
+@import "std.vec" fn main() {
+  let item = Vec<i32>::new().get_mut(0);
+  item.drop();
+}

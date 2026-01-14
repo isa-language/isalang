@@ -20,3 +20,11 @@ extern "C" fn isac_rt_stdout_write(data: str);
 extern "C" fn isac_rt_stderr_write(data: str);
 
 extern "C" fn isac_rt_str_equal(left: str, right: str) -> bool;
+
+extern "C" fn isac_rt_fs_write_text(path: str, text: str) -> i32;
+extern "C" fn isac_rt_fs_exists(path: str) -> i32;
+extern "C" fn isac_rt_fs_remove_file(path: str) -> i32;
+extern "C" fn isac_rt_fs_create_dir(path: str) -> i32;
+extern "C" fn isac_rt_process_run(program: str, argument: str, has_argument: bool) -> i64;
+extern "C" fn isac_rt_sleep_ns(nanos: u64) -> i32;
+extern "C" fn isac_rt_unix_ns() -> u64;

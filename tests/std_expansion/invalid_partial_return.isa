@@ -1,0 +1,14 @@
+struct Owner {
+  one: String,
+  two: String,
+}
+fn bad() -> Owner {
+  let x = Owner::new();
+  x.one = String::from("one");
+  x.two = String::from("two");
+  let moved = x.one.move();
+  return x.move();
+}
+fn main() {
+  let x = bad();
+}

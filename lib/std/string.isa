@@ -5,6 +5,11 @@ pub struct String {
   capacity: usize,
 }
 impl String {
+
+  @intrinsic "string.read_file"
+  fn read_file_internal(unique self, path: str) -> i32;
+  @intrinsic "string.env_var"
+  fn env_var_internal(unique self, name: str) -> i32;
   @intrinsic "string.new"
   pub fn new() -> String;
   @intrinsic "string.from"

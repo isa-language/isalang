@@ -1,0 +1,46 @@
+@import "std.string"
+struct Point {
+  x: i32,
+  y: i32,
+}
+struct Data {
+  text: String,
+  point: Point,
+  cells: i32[2],
+}
+pub struct Holder<T> {
+  item: T,
+}
+fn make() -> Data {
+  return Data {
+    cells: {
+      3,
+      4
+    },
+    text: String::from("owned"),
+    point: Point {
+      y: 2,
+      x: 1
+    }
+  };
+}
+fn main() {
+  let data = make();
+  print(data.text.as_str());
+  print(data.point.x);
+  print(data.point.y);
+  print(data.cells[1]);
+  let holder = Holder<String> {
+    item: String::from("generic")
+  };
+  print(holder.item.as_str());
+  let single: i32[1] = {
+    9
+  };
+  print(single[0]);
+  let block = {
+    print(99);
+    5
+  };
+  print(block);
+}

@@ -1,0 +1,92 @@
+{
+  "valid_array_access": {
+    "stdout": "20\n10\n30\n1\n1\n11\n21\n31\n"
+  },
+  "valid_slice_parameters": {
+    "stdout": "1\n0\n42\n30\n20\n"
+  },
+  "valid_slice_types": {
+    "stdout": "128\n2.5\n1\n225\n-1\n18446744073709551615\n"
+  },
+  "valid_vec_slice_access": {
+    "stdout": "1\n2\n22\n33\n4\n",
+    "heap": true
+  },
+  "valid_empty_slice_access": {
+    "stdout": "1\n1\n1\n1\n1\n1\n42\n",
+    "heap": true
+  },
+  "valid_slice_cleanup": {
+    "stdout": "1\n1\n0\n1\n1\n1\n42\n"
+  },
+  "valid_array_field_slice": {
+    "stdout": "42\n30\n"
+  },
+  "valid_array_field_access": {
+    "stdout": "42\n7\n9\n"
+  },
+  "valid_slice_shared_queries": {
+    "stdout": "1\n1\n1\n2\n1\n42\n"
+  },
+  "valid_slice_single": {
+    "stdout": "1\n20\n20\n2\n",
+    "heap": true
+  },
+  "valid_slice_shared_from_unique": {
+    "stdout": "1\n2\n42\n"
+  },
+  "valid_array_temporary_query": {
+    "stdout": "10\n1\n10\n0\n"
+  },
+  "valid_slice_multiple_origins": {
+    "stdout": "10\n40\n11\n41\n"
+  },
+  "valid_slice_shadow_branch": {
+    "stdout": "100\n10\n42\n"
+  },
+  "invalid_slice_multiple_origin_mutation": {
+    "error": "shared borrows"
+  },
+  "invalid_array_two_mut": {
+    "error": "active unique borrow"
+  },
+  "invalid_array_shared_mut": {
+    "error": "shared borrows"
+  },
+  "invalid_slice_parent_access": {
+    "error": "derived borrow"
+  },
+  "invalid_slice_shared_parent_mutation": {
+    "error": "derived borrow"
+  },
+  "invalid_slice_shared_receiver": {
+    "error": "cannot write through shared borrow"
+  },
+  "invalid_array_owner_drop": {
+    "error": "shared borrows"
+  },
+  "invalid_slice_growth": {
+    "error": "shared borrows"
+  },
+  "invalid_slice_mut_growth": {
+    "error": "active unique borrow"
+  },
+  "invalid_return_array_local": {
+    "error": "escapes its local owner"
+  },
+  "invalid_return_slice_local": {
+    "error": "local owners cannot escape"
+  },
+  "invalid_array_temporary_escape": {
+    "error": "borrowed value outlives temporary owner"
+  },
+  "invalid_slice_index_type": {
+    "error": "expected `usize`, found `i32`"
+  },
+  "invalid_slice_write_shared_payload": {
+    "error": "cannot write through shared borrow"
+  },
+  "invalid_field_receiver_result": {
+    "error": "cannot end a parent borrow"
+  }
+}

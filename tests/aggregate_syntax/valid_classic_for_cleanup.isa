@@ -1,0 +1,29 @@
+@import "std.string"
+fn count() -> i32 {
+  let outer = String::from("outer");
+  for let i = 0;
+  i < 3;
+  i++ {
+    let text = String::from("temporary");
+    if i == 0 {
+      continue;
+    }
+    if i == 1 {
+      return i;
+    }
+  }
+  return 9;
+}
+fn main() {
+  let i = 99;
+  for let i = 0;
+  i < 2;
+  i++ {
+    let text = String::from("iteration");
+    if i == 1 {
+      break;
+    }
+    @println("{}", text);
+  }
+  @println("{} {}", i, count());
+}

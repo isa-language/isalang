@@ -1,0 +1,19 @@
+fn at(values: &mut i32[], index: usize) -> Result<&mut i32, i32> {
+
+  return missing(values);
+}
+fn missing(values: &mut i32[]) -> Result<&mut i32, i32> {
+  return Result<&mut i32, i32>::Err(7);
+}
+fn main() {
+  let data = [1, 2];
+  let s: &mut i32[] = &mut data;
+  match at(s, 0) {
+    Ok(value) => {
+      value = 42;
+    },
+    Err(error) => print(error)
+  }
+  s[0] = 10;
+  print(data[0]);
+}

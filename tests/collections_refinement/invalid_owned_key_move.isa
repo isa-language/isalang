@@ -1,0 +1,7 @@
+@import "std.collections.hash_map"
+fn main() {
+  let map = HashMap<String, i32>::create();
+  let key = String::from("key");
+  map.insert(key.move(), 1);
+  print(key);
+}

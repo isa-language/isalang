@@ -1,0 +1,21 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<String>::new();
+  v.push(String::from("Olá"));
+  match v.get_mut(0) {
+    Some(r) => {
+      r.push_str("!");
+      print(r.as_str());
+      r.clear();
+      r.push_str("Isalang");
+    },
+    None => {}
+  }
+  match v.get(0) {
+    Some(r) => {
+      print(r);
+    },
+    None => {}
+  }
+  v.clear();
+}

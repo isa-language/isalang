@@ -1,0 +1,4 @@
+fn nested(values: &mut i32[]) -> Option<Option<&mut i32 >> {
+  return Option::Some(values.first_mut());
+}
+fn main() {}

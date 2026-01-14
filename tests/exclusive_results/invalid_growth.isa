@@ -1,0 +1,12 @@
+@import "std.vec"
+fn first(values: &mut Vec<String>) -> Option<&mut String> {
+  return values.first_mut();
+}
+fn main() {
+  let data = Vec<String>::new();
+  data.push(String::from("text"));
+  let edit = &mut data;
+  let result = first(edit);
+  data.push(String::from("other"));
+  print(result.is_some());
+}

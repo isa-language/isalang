@@ -1,0 +1,14 @@
+@initializer("empty", "insert") struct N {
+  x: i32,
+}
+impl N {
+  pub fn empty() -> N {
+    return N::new();
+  }
+  pub fn insert(shared self, v: i32) {}
+}
+fn main() {
+  let n = N {
+    1
+  };
+}

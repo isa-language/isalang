@@ -1,0 +1,27 @@
+@import("std.collections", "std.matriz", "std.algorithms")
+fn main() {
+  let Matriz = Matriz<i32>::filled(2, 3, 7);
+  Matriz.replace(1, 2, 42);
+  @println("Matriz[1,2] = {}", Matriz.at_copy(1, 2));
+  let map = HashMap<i32, String>::create();
+  map.insert(1, String::from("owned value"));
+  match map.get(1) {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+  let tree = BTreeMap<i32, i32>::create();
+  tree.insert(2, 20);
+  tree.insert(1, 10);
+  @println("B-tree entries = {}", tree.len());
+  let values = Vec<i32>::new();
+  values.push(3);
+  values.push(1);
+  values.push(2);
+  Algorithms<i32>::heap_sort(&mut values);
+  @println("sorted first = {}", values.at_copy(0));
+  let queue = Queue<String>::create();
+  queue.enqueue(String::from("fifo"));
+  print(queue.dequeue().unwrap());
+}

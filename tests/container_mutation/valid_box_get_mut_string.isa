@@ -1,0 +1,8 @@
+@import "std.box"
+fn main() {
+  let b = Box<String>::new(String::from("hello"));
+  let edit = b.get_mut();
+  edit.push_str("!");
+  print(edit);
+  print(b.get());
+}

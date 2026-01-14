@@ -1,0 +1,4 @@
+fn bad(a: &i32[]) -> Option<&mut i32> {
+  return a.first_mut();
+}
+fn main() {}

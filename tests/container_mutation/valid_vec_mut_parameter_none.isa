@@ -1,0 +1,19 @@
+@import "std.vec"
+fn edit(values: &mut Vec<i32>) {
+  let absent = values.get_mut(9);
+  match absent {
+    Some(value) => {
+      print(value);
+    },
+    None => {
+      print(0);
+    }
+  }
+  values.push(3);
+  let unused = values.get_mut(9);
+}
+fn main() {
+  let values = Vec<i32>::new();
+  edit(&mut values);
+  print(values.at_copy(0));
+}

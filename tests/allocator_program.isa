@@ -1,0 +1,15 @@
+@import("std.vec", "std.box", "std.env")
+fn main() {
+  let values = Vec<String> {
+    "a",
+    "b"
+  };
+  values.push(String::from("c"));
+  for value in &values {
+    @println("{}", value);
+  }
+  let owned = Box<String>::new(String::from("box"));
+  print(owned.get());
+  let arguments = args();
+  @println("args={}", arguments.len());
+}

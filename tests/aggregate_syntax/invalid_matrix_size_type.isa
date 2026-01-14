@@ -1,0 +1,4 @@
+const N: bool = true;
+fn main() {
+  let a: i32[N][2];
+}

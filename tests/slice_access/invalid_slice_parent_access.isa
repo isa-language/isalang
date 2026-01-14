@@ -1,0 +1,9 @@
+fn edit(data: &mut i32[]) {
+  let a = data.first_mut();
+  data[1] = 20;
+  print(a.is_some());
+}
+fn main() {
+  let data = [1, 2];
+  edit(&mut data);
+}

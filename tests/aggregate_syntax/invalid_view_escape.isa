@@ -1,0 +1,7 @@
+fn bad() -> &i32 {
+  let a = [1, 2];
+  for value in a.view().elements() {
+    return &value;
+  }
+}
+fn main() {}

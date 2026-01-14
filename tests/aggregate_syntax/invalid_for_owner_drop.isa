@@ -1,0 +1,10 @@
+@import "std.vec" fn main() {
+  let v = Vec<i32> {
+    1,
+    2
+  };
+  for value in &v {
+    v.drop();
+    print(value);
+  }
+}

@@ -1,0 +1,5 @@
+@import "std.vec"
+fn bad(values: &Vec<i32>) {
+  let item = values.get_mut(0);
+}
+fn main() {}

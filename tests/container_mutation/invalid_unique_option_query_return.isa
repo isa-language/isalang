@@ -1,0 +1,12 @@
+@import "std.vec" impl<T> Option<T> {
+  fn leak(shared self) -> Option<T> {
+    return self.move();
+  }
+}
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let a = v.first_mut();
+  let b = a.leak();
+  b.drop();
+}

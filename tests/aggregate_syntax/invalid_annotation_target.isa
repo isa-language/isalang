@@ -1,0 +1,1 @@
+@initializer("new", "push") fn main() {}

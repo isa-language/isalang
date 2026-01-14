@@ -1,0 +1,14 @@
+@import "std.vec"
+fn leave(values: &mut Vec<i32>) {
+  let item = values.get_mut(0);
+  borrow shared item as view {
+    return;
+  }
+}
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(1);
+  leave(&mut values);
+  values.push(2);
+  print(values.len());
+}

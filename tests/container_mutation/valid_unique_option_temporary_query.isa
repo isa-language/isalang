@@ -1,0 +1,18 @@
+@import "std.vec"
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(10);
+  if values.first_mut().is_some() {
+    values.push(20);
+  }
+  while values.last_mut().is_some() {
+    match values.pop() {
+      Some(value) => {
+        print(value);
+      },
+      None => {}
+    }
+  }
+  values.push(30);
+  print(values.at_copy(0));
+}

@@ -1,0 +1,4 @@
+@import("std.vec", "std.buffer")
+fn main() {
+  let v = Vec<Buffer>::new();
+}

@@ -1,0 +1,6 @@
+@import "std.vec"
+fn bad(values: &mut Vec<i32>) {
+  let unused = values.get_mut(0);
+  values.clear();
+}
+fn main() {}

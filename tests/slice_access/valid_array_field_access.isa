@@ -1,0 +1,28 @@
+struct Inner {
+  before: i32,
+  data: i32[3],
+  after: i32,
+}
+struct Outer {
+  padding: i32,
+  inner: Inner,
+}
+fn main() {
+  let storage = Outer::new();
+  storage.inner.before = 7;
+  storage.inner.after = 9;
+  let edit: &mut i32[] = &mut storage.inner.data;
+  match edit.get_mut(1) {
+    Some(value) => {
+      value = 42;
+    },
+    None => {}
+  }
+  let view: &i32[] = &storage.inner.data;
+  match view.get(1) {
+    Some(value) => print(value),
+    None => {}
+  }
+  print(storage.inner.before);
+  print(storage.inner.after);
+}

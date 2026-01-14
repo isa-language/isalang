@@ -1,0 +1,27 @@
+@import "std.string"
+struct Data {
+  label: String,
+  grid: i32[2][2],
+}
+fn main() {
+  let data = Data {
+    label: "board",
+    grid: {
+      {
+        1,
+        2
+      },
+      {
+        3,
+        4
+      }
+    }
+  };
+  for value in data.grid.view_mut().transpose().elements_mut() {
+    *value = *value + 10;
+  }
+  for value in data.grid.view().elements() {
+    print(value);
+  }
+  print(data.label.as_str());
+}

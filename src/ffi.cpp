@@ -63,8 +63,9 @@ bool signature(const hir::Program &p, const hir::Function &f) {
       f.intrinsicId != IntrinsicId::None || f.resultOrigin != None || f.resultRegion != None ||
       !f.additionalResultOrigins.empty() || f.resultPayloadSource ||
       !f.additionalPayloadSources.empty() || f.resultBorrowedContainer ||
-      !f.payloadParameterRegions.empty() || (f.result != Unit && !p.cScalar(f.result)) ||
-      f.name == "main" || f.name.starts_with("isac_") || f.name.starts_with("__isac_"))
+      !f.payloadParameterRegions.empty() || !f.payloadInspectionParameters.empty() ||
+      (f.result != Unit && !p.cScalar(f.result)) || f.name == "main" ||
+      f.name.starts_with("isac_") || f.name.starts_with("__isac_"))
     return false;
   if (!f.cLinkName.empty() && (f.cLinkName == "main" || f.cLinkName.starts_with("isac_") ||
                                f.cLinkName.starts_with("__isac_")))

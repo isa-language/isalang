@@ -1,0 +1,11 @@
+@import "std.vec"
+fn main() {
+  let a = Vec<i32> {
+    1,
+    2
+  };
+  for v in a.view().elements() {
+    a.push(3);
+    print(v);
+  }
+}

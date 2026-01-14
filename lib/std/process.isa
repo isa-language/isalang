@@ -1,0 +1,16 @@
+@import("std.result", "core.runtime")
+
+pub fn run(program: str) -> Result<i32, i32> {
+  let status = isac_rt_process_run(program, "", false);
+  if status < 0 {
+    return Result::Err((-status) as i32);
+  }
+  return Result::Ok(status as i32);
+}
+pub fn run_with_arg(program: str, argument: str) -> Result<i32, i32> {
+  let status = isac_rt_process_run(program, argument, true);
+  if status < 0 {
+    return Result::Err((-status) as i32);
+  }
+  return Result::Ok(status as i32);
+}

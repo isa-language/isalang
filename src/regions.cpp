@@ -164,6 +164,129 @@ public:
       for (auto next : graph.blocks[id].successors)
         work.push_back(next);
     }
+
+    std::map<ValueId, std::set<SymbolId>> resultParents;
+    std::map<SymbolId, std::set<SymbolId>> carrierParents;
+    std::set<SymbolId> storedCarriers;
+    bool carriersChanged = true;
+    while (carriersChanged) {
+      carriersChanged = false;
+      auto merge = [&](auto &target, const auto &source) {
+        auto before = target.size();
+        target.insert(source.begin(), source.end());
+        carriersChanged |= before != target.size();
+      };
+      for (auto *i : instructions) {
+        if (!i)
+          continue;
+        if (i->kind == I::ContainerCall || i->kind == I::Call) {
+          const auto &target = program.semantics.functions[i->function];
+          if (target.resultBorrowedContainer && target.resultAccess == Access::Unique) {
+            auto index =
+                std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
+                target.params.begin();
+            SymbolId input = None;
+            if (i->slot != None && index == 0)
+              input = i->slot;
+            else {
+              auto argument = i->args.at(index - (i->slot != None));
+              if (referenceArguments.contains(argument))
+                input = referenceArguments.at(argument);
+            }
+            if (input != None && program.semantics.symbols[input].reference)
+              merge(resultParents[i->result], std::set<SymbolId>{input});
+          }
+        }
+        if (i->kind == I::Move && carrierParents.contains(i->slot))
+          merge(resultParents[i->result], carrierParents.at(i->slot));
+        if (i->kind == I::Bind && resultParents.contains(i->args.at(0))) {
+          merge(carrierParents[i->slot], resultParents.at(i->args[0]));
+          storedCarriers.insert(i->slot);
+          if (carrierParents[i->slot].size() == 1)
+            parents[i->slot] = *carrierParents[i->slot].begin();
+        }
+        if ((i->kind == I::BorrowShared || i->kind == I::BorrowUnique) &&
+            carrierParents.contains(i->slot))
+          merge(carrierParents[i->offset], carrierParents.at(i->slot));
+      }
+    }
+    if (!storedCarriers.empty()) {
+      for (auto carrier : storedCarriers)
+        graph.storedResultParents[carrier] = carrierParents.at(carrier);
+
+      std::vector<std::set<SymbolId>> activeIn(graph.blocks.size()), activeOut(graph.blocks.size());
+      std::map<uint32_t, std::set<SymbolId>> loopCarriers;
+      std::function<void(const std::vector<I> &, std::set<SymbolId> &)> localCarriers;
+      localCarriers = [&](const std::vector<I> &ops, std::set<SymbolId> &locals) {
+        for (const auto &op : ops) {
+          if (op.kind == I::Bind && storedCarriers.contains(op.slot))
+            locals.insert(op.slot);
+          localCarriers(op.body, locals);
+          localCarriers(op.otherwise, locals);
+          localCarriers(op.latch, locals);
+          localCarriers(op.condition, locals);
+        }
+      };
+      for (auto *i : instructions)
+        if (i && i->kind == I::Loop) {
+          localCarriers(i->body, loopCarriers[i->loop]);
+          localCarriers(i->latch, loopCarriers[i->loop]);
+          localCarriers(i->condition, loopCarriers[i->loop]);
+        }
+      std::vector<std::vector<BasicBlockId>> predecessors(graph.blocks.size());
+      for (const auto &b : graph.blocks)
+        for (auto successor : b.successors)
+          predecessors[successor].push_back(b.id);
+      bool activeChanged = true;
+      while (activeChanged) {
+        activeChanged = false;
+        for (const auto &b : graph.blocks) {
+          if (!b.reachable)
+            continue;
+          std::set<SymbolId> in;
+          for (auto predecessor : predecessors[b.id])
+            if (graph.blocks[predecessor].reachable)
+              in.insert(activeOut[predecessor].begin(), activeOut[predecessor].end());
+          auto out = in;
+          if (auto *i = instructions[b.id]) {
+            if (i->kind == I::Bind && storedCarriers.contains(i->slot))
+              out.insert(i->slot);
+            if (i->kind == I::Move || i->kind == I::Drop)
+              out.erase(i->slot);
+            if (i->kind == I::ScopeEnd)
+              for (auto local : i->locals)
+                out.erase(local);
+            if (i->kind == I::Break || i->kind == I::Continue)
+              for (auto local : loopCarriers[i->loop])
+                out.erase(local);
+            if (i->kind == I::Return)
+              out.clear();
+          }
+          activeChanged |= in != activeIn[b.id] || out != activeOut[b.id];
+          activeIn[b.id] = std::move(in);
+          activeOut[b.id] = std::move(out);
+        }
+      }
+      for (auto &b : graph.blocks) {
+        auto *i = instructions[b.id];
+        if (i && i->kind == I::ScopeEnd)
+          for (auto local : i->locals)
+            if (activeIn[b.id].contains(local))
+              b.uses.insert(carrierParents.at(local).begin(), carrierParents.at(local).end());
+        if (i && (i->kind == I::Return || i->kind == I::Break || i->kind == I::Continue))
+          for (auto carrier : activeIn[b.id])
+            b.uses.insert(carrierParents.at(carrier).begin(), carrierParents.at(carrier).end());
+        auto uses = b.uses;
+        for (auto symbol : uses)
+          if (carrierParents.contains(symbol))
+            b.uses.insert(carrierParents.at(symbol).begin(), carrierParents.at(symbol).end());
+      }
+    }
+
+    for (auto &b : graph.blocks)
+      for (auto value : b.valueUses)
+        if (resultParents.contains(value))
+          b.uses.insert(resultParents.at(value).begin(), resultParents.at(value).end());
     ValueId first = None, end = 0;
     for (const auto &b : graph.blocks) {
       for (auto value : b.valueUses) {
@@ -225,15 +348,18 @@ public:
                                        ConstraintReason::LiveCarrier,
                                        b.origin});
       auto parent = parents.at(loan.carrier);
+      if (carrierParents.contains(loan.carrier) && carrierParents.at(loan.carrier).size() == 1)
+        parent = *carrierParents.at(loan.carrier).begin();
       const auto &source = program.semantics.symbols.at(parent);
-      if (source.reference && source.region != None) {
-        graph.regions.emplace(source.region,
-                              Region{source.region,
+      if (auto reference = program.semantics.symbolReference(parent);
+          source.reference && reference && reference->region != None) {
+        graph.regions.emplace(reference->region,
+                              Region{reference->region,
                                      source.parameter ? RegionKind::Parameter : RegionKind::Local,
                                      {}});
         graph.constraints.push_back({ConstraintKind::Subregion,
                                      loan.region,
-                                     source.region,
+                                     reference->region,
                                      {},
                                      ConstraintReason::Reborrow,
                                      loan.origin});
@@ -285,6 +411,30 @@ public:
     std::map<SymbolId, std::vector<Projection>> paths;
     for (const auto &loan : graph.loans)
       paths[loan.carrier] = loan.place.projections;
+
+    std::map<SymbolId, Loc> lastUses;
+    for (const auto &b : graph.blocks) {
+      if (!b.reachable)
+        continue;
+      std::vector<SymbolId> pending(b.uses.begin(), b.uses.end());
+      std::set<SymbolId> seen;
+      while (!pending.empty()) {
+        auto carrier = pending.back();
+        pending.pop_back();
+        if (!seen.insert(carrier).second)
+          continue;
+        auto &last = lastUses[carrier];
+        if (b.origin.span.file != NoFile &&
+            (last.span.file == NoFile ||
+             (b.origin.span.file == last.span.file && b.origin.span.start >= last.span.start)))
+          last = b.origin;
+        if (parents.contains(carrier))
+          pending.push_back(parents.at(carrier));
+        if (carrierParents.contains(carrier))
+          pending.insert(pending.end(), carrierParents.at(carrier).begin(),
+                         carrierParents.at(carrier).end());
+      }
+    }
     for (auto &loan : graph.loans) {
       loan.points = graph.regions.at(loan.region).points;
 
@@ -294,11 +444,7 @@ public:
         loan.place.projections.insert(loan.place.projections.begin(), prefix.begin(), prefix.end());
         loan.place.root = parents.at(loan.place.root);
       }
-      Loc lastUse = loan.origin;
-      for (const auto &b : graph.blocks)
-        if (b.reachable && b.uses.contains(loan.carrier) &&
-            b.origin.span.file == lastUse.span.file && b.origin.span.start >= lastUse.span.start)
-          lastUse = b.origin;
+      Loc lastUse = lastUses.contains(loan.carrier) ? lastUses.at(loan.carrier) : loan.origin;
       if (loan.inferred)
         program.semantics.symbols[loan.carrier].lastUse = lastUse;
       for (const auto &b : graph.blocks) {
@@ -355,6 +501,13 @@ void print(const core::Program &p, std::ostream &out) {
       out << "    live points:";
       for (auto point : loan.points)
         out << " bb" << point << ":0";
+      out << "\n";
+    }
+    for (const auto &[carrier, parents] : graph.storedResultParents) {
+      out << "  stored result " << p.semantics.symbols[carrier].name << "#v" << carrier
+          << " keeps input alive:";
+      for (auto parent : parents)
+        out << " " << p.semantics.symbols[parent].name << "#v" << parent;
       out << "\n";
     }
   }

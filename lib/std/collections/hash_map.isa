@@ -1,0 +1,131 @@
+@import("std.vec", "std.cmp")
+
+@initializer("create", "insert")
+pub struct HashMap<K, V> {
+  keys: Vec<K>,
+  values: Vec<V>,
+  slots: Vec<usize>,
+}
+impl<K, V> HashMap<K, V> {
+  pub fn create() -> HashMap<K, V> {
+    let map = HashMap<K, V>::new();
+    map.keys = Vec<K>::new();
+    map.values = Vec<V>::new();
+    map.slots = Vec<usize>::with_capacity(16);
+    for i in 0usize..16usize {
+      map.slots.push(0);
+    }
+    return map.move();
+  }
+  pub fn len(shared self) -> usize {
+    return self.keys.len();
+  }
+  pub fn is_empty(shared self) -> bool {
+    return self.keys.is_empty();
+  }
+  fn slot(shared self, key: &K) -> usize {
+    let count = self.slots.len();
+    if count == 0 {
+      panic("uninitialized hash table");
+    }
+    let index = key.hash() % count;
+    for probe in 0usize..count {
+      let entry = self.slots.at_copy(index);
+      if entry == 0 {
+        return index;
+      }
+      match self.keys.get(entry - 1) {
+        Some(current) => {
+          if current.equals(key) {
+            return index;
+          }
+        },
+        None => {
+          panic("invalid hash table entry");
+        },
+      }
+      index =(index + 1) % count;
+    }
+    loop {
+      panic("hash table has no free slot");
+    }
+  }
+  fn rebuild(unique self, capacity: usize) {
+    let slots = Vec<usize>::with_capacity(capacity);
+    for i in 0usize..capacity {
+      slots.push(0);
+    }
+    self.slots = slots.move();
+    for i in 0usize..self.keys.len() {
+      let index = 0usize;
+      match self.keys.get(i) {
+        Some(key) => {
+          index = self.slot(key);
+        },
+        None => {
+          panic("invalid hash key index");
+        },
+      }
+      self.slots.replace(index, i + 1);
+    }
+  }
+  pub fn contains_key_ref(shared self, key: &K) -> bool {
+    return self.slots.at_copy(self.slot(key)) != 0;
+  }
+  pub fn contains_key(shared self, key: K) -> bool {
+    return self.contains_key_ref(&key);
+  }
+  pub fn get_ref(shared self, key: &K) -> Option<&V> {
+    let entry = self.slots.at_copy(self.slot(key));
+    if entry == 0 {
+      return Option::None;
+    }
+    return self.values.get(entry - 1);
+  }
+  pub fn get(shared self, key: K) -> Option<&V> {
+    let entry = self.slots.at_copy(self.slot(&key));
+    if entry == 0 {
+      return Option::None;
+    }
+    return self.values.get(entry - 1);
+  }
+  pub fn insert(unique self, key: K, value: V) -> Option<V> {
+    let index = self.slot(&key);
+    let entry = self.slots.at_copy(index);
+    if entry != 0 {
+      return Option::Some(self.values.replace(entry - 1, value.move()));
+    }
+    if self.keys.len() >= self.slots.len() / 2 {
+      if self.slots.len() >(0usize - 1) / 2 {
+        panic("hash table capacity overflow");
+      }
+      let capacity = self.slots.len() * 2;
+      self.rebuild(capacity);
+      index = self.slot(&key);
+    }
+    self.keys.push(key.move());
+    self.values.push(value.move());
+    let entry_index = self.keys.len();
+    self.slots.replace(index, entry_index);
+    return Option::None;
+  }
+  pub fn remove_ref(unique self, key: &K) -> Option<V> {
+    let entry = self.slots.at_copy(self.slot(key));
+    if entry == 0 {
+      return Option::None;
+    }
+    self.keys.remove(entry - 1);
+    let value = self.values.remove(entry - 1);
+    let capacity = self.slots.len();
+    self.rebuild(capacity);
+    return Option::Some(value.move());
+  }
+  pub fn remove(unique self, key: K) -> Option<V> {
+    return self.remove_ref(&key);
+  }
+  pub fn clear(unique self) {
+    self.keys.clear();
+    self.values.clear();
+    self.rebuild(16);
+  }
+}

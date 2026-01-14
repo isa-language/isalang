@@ -1,0 +1,12 @@
+@import "std.option"
+fn main() {
+  let value = Option::Some(String::from("owned"));
+  let view = value.as_ref();
+  value.drop();
+  match view {
+    Some(x) => {
+      print(x);
+    },
+    None => {}
+  }
+}

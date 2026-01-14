@@ -1,0 +1,25 @@
+@import "std.vec"
+fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let a = v.first_mut();
+  print(a.is_some());
+  print(a.is_none());
+  if a.is_some() {
+    match a {
+      Some(x) => {
+        x = 42;
+      },
+      None => {}
+    }
+  } else {
+    a.drop();
+  }
+  print(v.at_copy(0));
+  let b = v.get_mut(1);
+  print(b.is_some());
+  print(b.is_none());
+  b.drop();
+  v.push(2);
+  print(v.len());
+}

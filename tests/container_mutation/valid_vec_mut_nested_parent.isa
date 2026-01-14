@@ -1,0 +1,28 @@
+@import "std.vec"
+fn main() {
+  let inner = Vec<i32>::new();
+  inner.push(1);
+  let outer = Vec<Vec<i32 >>::new();
+  outer.push(inner.move());
+  match outer.get_mut(0) {
+    Some(values) => {
+      let item = values.get_mut(0);
+      match item {
+        Some(value) => {
+          value = 12;
+        },
+        None => {}
+      }
+      values.push(3);
+      match values.get(0) {
+        Some(value) => {
+          print(value);
+        },
+        None => {}
+      }
+    },
+    None => {},
+  }
+  outer.clear();
+  print(outer.len());
+}

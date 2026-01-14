@@ -1,0 +1,12 @@
+@import "std.box"
+fn edit(b: &mut Box<i32>) {
+  let r = b.get_mut();
+  r = 10;
+  print(r);
+  print(b.get());
+}
+fn main() {
+  let b = Box<i32>::new(1);
+  edit(&mut b);
+  print(b.get());
+}

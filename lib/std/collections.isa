@@ -1,0 +1,5 @@
+@import("std.collections.stack", "std.collections.queue", "std.collections.vec_deque")
+@import("std.collections.hash_map", "std.collections.hash_set", "std.collections.binary_heap")
+@import "std.collections.btree_map"
+@import "std.collections.btree_set"
+@import "std.collections.list"

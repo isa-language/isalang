@@ -1,0 +1,13 @@
+@import "std.collections"
+fn main() {
+  let map = HashMap<i32, String>::create();
+  map.insert(1, String::from("first"));
+  let value = map.get(1);
+  map.insert(2, String::from("second"));
+  match value {
+    Some(v) => {
+      print(v);
+    },
+    None => {}
+  }
+}

@@ -1,0 +1,8 @@
+@import "std.vec" fn main() {
+  let v = Vec<i32>::new();
+  v.push(1);
+  let a = v.first_mut();
+  print(a.is_some());
+  let x = a.unwrap();
+  print(x);
+}

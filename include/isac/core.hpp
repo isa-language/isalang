@@ -86,7 +86,8 @@ struct Inst {
     RawStore,
     ArrayRepeat,
     FunctionAddress,
-    IndirectForeignCall
+    IndirectForeignCall,
+    StructInit
   } kind;
   Loc loc;
   uint32_t semanticPoint = None;

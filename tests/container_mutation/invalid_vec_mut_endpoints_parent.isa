@@ -1,0 +1,6 @@
+@import "std.vec" fn edit(v: &mut Vec<i32>) {
+  let a = v.first_mut();
+  v.clear();
+  a.drop();
+}
+fn main() {}

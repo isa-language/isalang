@@ -1,0 +1,52 @@
+@import("std.collections", "std.algorithms")
+fn main() {
+  let hash = HashSet<i32>::create();
+  let tree = BTreeSet<i32>::create();
+  for i in 0..100 {
+    @assert(hash.insert(i));
+    @assert(tree.insert(i));
+  }
+  @assert(!hash.insert(10) && !tree.insert(10));
+  @assert(hash.remove(10) && tree.remove(10));
+  @assert(!hash.remove(10) && !tree.remove(10));
+  for i in 0..100 {
+    @assert(hash.contains(i) ==(i != 10));
+    @assert(tree.contains(i) ==(i != 10));
+  }
+  let heap = BinaryHeap<i32>::create();
+  for i in 0..100 {
+    heap.push((i * 17) % 101);
+  }
+  let previous = 102;
+  while !heap.is_empty() {
+    let value = heap.pop().unwrap();
+    @assert(value <= previous);
+    previous = value;
+  }
+  @assert(heap.pop().is_none());
+  let values = Vec<i32>::new();
+  for i in 0..100 {
+    values.push((i * 17) % 101);
+  }
+  Algorithms<i32>::heap_sort(&mut values);
+  for i in 1usize..values.len() {
+    @assert(values.at_copy(i - 1) <= values.at_copy(i));
+  }
+  @assert(Algorithms<i32>::linear_search(&values, 999).is_none());
+  @assert(Algorithms<i32>::binary_search(&values, 999).is_none());
+  for i in 0..100 {
+    let x =(i * 17) % 101;
+    @assert(values.at_copy(Algorithms<i32>::binary_search(&values, x).unwrap()) == x);
+  }
+  values.clear();
+  values.push(3);
+  values.push(1);
+  values.push(3);
+  values.push(2);
+  Algorithms<i32>::insertion_sort(&mut values);
+  @assert(values.at_copy(0) == 1 && values.at_copy(3) == 3);
+  let empty = Vec<u64>::new();
+  Algorithms<u64>::heap_sort(&mut empty);
+  Algorithms<u64>::insertion_sort(&mut empty);
+  print("ordering ok");
+}

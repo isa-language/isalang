@@ -1,0 +1,7 @@
+@import "std.vec" fn edit(v: &mut Vec<i32>) {
+  let a = v.last_mut();
+  print(a.is_none());
+  v.clear();
+  a.drop();
+}
+fn main() {}

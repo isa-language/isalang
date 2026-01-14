@@ -1,0 +1,113 @@
+@import("std.vec", "std.cmp")
+pub struct Algorithms<T> {}
+impl<T> Algorithms<T> {
+
+  pub fn compare_at(values: &Vec<T>, left: usize, right: usize) -> i32 {
+    match values.get(left) {
+      Some(a) => {
+        match values.get(right) {
+          Some(b) => {
+            return a.compare(b);
+          },
+          None => {
+            loop {
+              panic("comparison index out of bounds");
+            }
+          },
+        }
+      },
+      None => {
+        loop {
+          panic("comparison index out of bounds");
+        }
+      },
+    }
+  }
+  fn compare_key(values: &Vec<T>, index: usize, key: &T) -> i32 {
+    match values.get(index) {
+      Some(value) => {
+        return value.compare(key);
+      },
+      None => {
+        loop {
+          panic("comparison index out of bounds");
+        }
+      },
+    }
+  }
+  pub fn insertion_sort(values: &mut Vec<T>) {
+    for i in 1usize..values.len() {
+      let j = i;
+      while j > 0 {
+        if Algorithms<T>::compare_at(&values, j - 1, j) <= 0 {
+          break;
+        }
+        values.swap(j - 1, j);
+        j = j - 1;
+      }
+    }
+  }
+  fn sift_down(values: &mut Vec<T>, start: usize, end: usize) {
+    let parent = start;
+    while parent < end / 2 {
+      let child = parent * 2 + 1;
+      if child + 1 < end && Algorithms<T>::compare_at(&values, child, child + 1) < 0 {
+        child = child + 1;
+      }
+      if Algorithms<T>::compare_at(&values, parent, child) >= 0 {
+        return;
+      }
+      values.swap(parent, child);
+      parent = child;
+    }
+  }
+  pub fn heap_sort(values: &mut Vec<T>) {
+    let count = values.len();
+    for i in 0usize..count {
+      Algorithms<T>::compare_at(&values, i, i);
+    }
+    let parent = count / 2;
+    while parent > 0 {
+      parent = parent - 1;
+      Algorithms<T>::sift_down(values, parent, count);
+    }
+    let end = count;
+    while end > 1 {
+      end = end - 1;
+      values.swap(0, end);
+      Algorithms<T>::sift_down(values, 0, end);
+    }
+  }
+  pub fn linear_search_ref(values: &Vec<T>, needle: &T) -> Option<usize> {
+    for i in 0usize..values.len() {
+      if Algorithms<T>::compare_key(values, i, needle) == 0 {
+        return Option::Some(i);
+      }
+    }
+    return Option::None;
+  }
+  pub fn linear_search(values: &Vec<T>, needle: T) -> Option<usize> {
+    return Algorithms<T>::linear_search_ref(values, &needle);
+  }
+  pub fn binary_search_ref(values: &Vec<T>, needle: &T) -> Option<usize> {
+    needle.compare(needle);
+    let low = 0usize;
+    let high = values.len();
+    while low < high {
+      let middle = low +(high - low) / 2;
+      let order = Algorithms<T>::compare_key(values, middle, needle);
+      if order == 0 {
+        return Option::Some(middle);
+      }
+      if order < 0 {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return Option::None;
+  }
+  pub fn binary_search(values: &Vec<T>, needle: T) -> Option<usize> {
+    return Algorithms<T>::binary_search_ref(values, &needle);
+  }
+}

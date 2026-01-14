@@ -1,0 +1,7 @@
+fn main() {
+  let data = [1, 2];
+  let a = data.first_mut();
+  let b = data.last_mut();
+  print(a.is_some());
+  print(b.is_some());
+}

@@ -1,0 +1,14 @@
+@import "std.vec"
+impl<T> Option<T> {
+  fn leaked(shared self) -> &i32 {
+    let local = 0;
+    return &local;
+  }
+}
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(1);
+  let item = values.first_mut();
+  let reference = item.leaked();
+  print(reference);
+}

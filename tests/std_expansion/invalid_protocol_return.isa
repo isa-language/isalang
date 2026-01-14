@@ -1,0 +1,15 @@
+@import "std.buffer"
+struct Owner {
+  buffer: Buffer,
+}
+fn bad() -> Owner {
+  let o = Owner::new();
+  o.buffer = Buffer::new(1);
+  let b = o.buffer.move();
+  b.release();
+  o.buffer = b.move();
+  return o.move();
+}
+fn main() {
+  let o = bad();
+}

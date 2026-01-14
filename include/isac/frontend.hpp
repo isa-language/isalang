@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <utility>
 namespace isac {
 struct Token {
   std::string text;
@@ -29,6 +30,7 @@ struct TypeSyntax {
   std::vector<TypeSyntax> arguments = {};
   bool rawPointer = false, mutablePointer = false;
   bool functionPointer = false;
+  std::vector<std::pair<int, std::string>> dimensions = {};
 };
 enum class Access { Own, Shared, Unique };
 const char *accessName(Access);
@@ -57,13 +59,16 @@ struct Expr {
     Unsafe,
     Dereference,
     ArrayRepeat,
-    Invoke
+    Invoke,
+    BraceInit
   } kind;
   Loc loc;
   std::string text;
   std::vector<Expr> args;
   std::vector<Stmt> body;
   std::vector<TypeSyntax> typeArguments;
+
+  std::vector<std::string> initializerNames;
   Expr();
   Expr(Kind, Loc, std::string, std::vector<Expr>);
 };
@@ -94,10 +99,13 @@ struct Stmt {
   bool annotated = false;
   bool expressionMatch = false;
   bool conditionalPattern = false;
+  bool collectionIteration = false;
+  bool classicFor = false;
   Access access = Access::Own;
   Expr expr, limit;
   Pattern pattern;
   std::vector<Stmt> body, otherwise;
+  std::vector<Stmt> headerInit;
 };
 inline Expr::Expr() : kind(Int) {}
 inline Expr::Expr(Kind k, Loc l, std::string text, std::vector<Expr> args)
@@ -140,6 +148,9 @@ struct Struct {
   bool foreignC = false;
   std::string cName = {};
   bool foreignUnion = false;
+
+  std::vector<std::string> initializerMethods;
+  std::vector<std::string> iterationMethods;
 };
 struct ForeignType {
   std::string name;
