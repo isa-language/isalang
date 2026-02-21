@@ -1,0 +1,30 @@
+enum References<T> {
+  Pair(T, T),
+  Empty,
+}
+
+fn inspect(value: References<&i32>) {
+  match value {
+    References::Pair(first, second) => {
+      print(first);
+      print(second);
+    },
+    References::Empty => {},
+  }
+}
+
+fn main() {
+  let first = 10;
+  let second = 20;
+  let pair = References::Pair(&first, &second);
+  inspect(pair.move());
+  first = 30;
+  second = 40;
+  inspect(References::Pair(&second, &first));
+  let empty: References<&i32> = References::Empty;
+  inspect(empty.move());
+  first = 50;
+  second = 60;
+  print(first);
+  print(second);
+}

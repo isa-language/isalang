@@ -1,5 +1,6 @@
 #include "isac/regions.hpp"
 #include "isac/core.hpp"
+#include "region_inference.hpp"
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -7,8 +8,11 @@
 namespace isac::regions {
 namespace {
 using I = core::Inst;
+using detail::Contracts;
 class Builder {
   core::Program &program;
+  const Contracts &signatures;
+  RegionId &nextRegion;
   FunctionGraph graph;
   struct Loop {
     BasicBlockId again, exit;
@@ -53,8 +57,9 @@ class Builder {
           loan.place.projections.push_back({ProjectionKind::Field, field});
       else if (i.placeProjection == I::PlaceProjection::Index)
         loan.place.projections.push_back({ProjectionKind::Index, None});
-      if (i.projection)
-        loan.place.projections.push_back({ProjectionKind::VariantPayload, i.projection});
+      for (const auto &position : i.payloadPath)
+        loan.place.projections.push_back(
+            {ProjectionKind::VariantPayload, position.index, position.variant});
       loan.capability = i.kind == I::BorrowShared ? BorrowKind::Shared : BorrowKind::Unique;
       loan.created = {id, 0};
       loan.origin = i.loc;
@@ -117,7 +122,8 @@ class Builder {
   }
 
 public:
-  Builder(core::Program &p, core::Function &f) : program(p) {
+  Builder(core::Program &p, core::Function &f, const Contracts &contracts, RegionId &fresh)
+      : program(p), signatures(contracts), nextRegion(fresh) {
     graph.function = f.id;
     auto exit = node();
     graph.blocks[exit].terminator = Terminator::Unreachable;
@@ -164,6 +170,8 @@ public:
       for (auto next : graph.blocks[id].successors)
         work.push_back(next);
     }
+    detail::arguments(program, graph, instructions, parents, signatures, nextRegion);
+    detail::cleanupUses(program, graph, instructions, parents);
 
     std::map<ValueId, std::set<SymbolId>> resultParents;
     std::map<SymbolId, std::set<SymbolId>> carrierParents;
@@ -335,6 +343,28 @@ public:
     for (const auto &parameter :
          program.semantics.functions[graph.function].payloadParameterRegions)
       graph.regions.emplace(parameter.region, Region{parameter.region, RegionKind::Parameter, {}});
+    for (const auto &[parameter, arguments] : graph.contract.inputs)
+      for (const auto &[path, regions] : arguments)
+        for (auto region : regions)
+          graph.regions.emplace(region, Region{region, RegionKind::Parameter, {}});
+    for (const auto &[region, sources] : graph.contract.resultSources) {
+      graph.regions.emplace(region, Region{region, RegionKind::Return, {}});
+      for (auto source : sources)
+        graph.constraints.push_back({ConstraintKind::Subregion,
+                                     region,
+                                     source,
+                                     {},
+                                     ConstraintReason::FunctionResult,
+                                     program.semantics.functions[graph.function].loc});
+      for (const auto &b : graph.blocks)
+        if (b.reachable && b.terminator == Terminator::Return)
+          graph.constraints.push_back({ConstraintKind::ContainsPoint,
+                                       region,
+                                       None,
+                                       {b.id, 0},
+                                       ConstraintReason::FunctionResult,
+                                       b.origin});
+    }
     for (const auto &loan : graph.loans) {
       graph.regions.emplace(loan.region, Region{loan.region, RegionKind::Local, {}});
       graph.constraints.push_back({ConstraintKind::ContainsPoint, loan.region, None, loan.created,
@@ -391,6 +421,18 @@ public:
                                        ConstraintReason::FunctionResult,
                                        b.origin});
     }
+    std::map<SymbolId, std::vector<Projection>> paths;
+    for (const auto &loan : graph.loans)
+      paths[loan.carrier] = loan.place.projections;
+    for (auto &loan : graph.loans) {
+      std::set<SymbolId> seen;
+      while (parents.contains(loan.place.root) && seen.insert(loan.place.root).second) {
+        const auto &prefix = paths[loan.place.root];
+        loan.place.projections.insert(loan.place.projections.begin(), prefix.begin(), prefix.end());
+        loan.place.root = parents.at(loan.place.root);
+      }
+    }
+    detail::storageLimits(program, graph, instructions, nextRegion);
 
     for (const auto &constraint : graph.constraints)
       if (constraint.kind == ConstraintKind::ContainsPoint)
@@ -408,9 +450,6 @@ public:
         changed |= size != upper.size();
       }
     }
-    std::map<SymbolId, std::vector<Projection>> paths;
-    for (const auto &loan : graph.loans)
-      paths[loan.carrier] = loan.place.projections;
 
     std::map<SymbolId, Loc> lastUses;
     for (const auto &b : graph.blocks) {
@@ -437,13 +476,6 @@ public:
     }
     for (auto &loan : graph.loans) {
       loan.points = graph.regions.at(loan.region).points;
-
-      std::set<SymbolId> seen;
-      while (parents.contains(loan.place.root) && seen.insert(loan.place.root).second) {
-        const auto &prefix = paths[loan.place.root];
-        loan.place.projections.insert(loan.place.projections.begin(), prefix.begin(), prefix.end());
-        loan.place.root = parents.at(loan.place.root);
-      }
       Loc lastUse = lastUses.contains(loan.carrier) ? lastUses.at(loan.carrier) : loan.origin;
       if (loan.inferred)
         program.semantics.symbols[loan.carrier].lastUse = lastUse;
@@ -466,13 +498,124 @@ public:
 }
 void infer(core::Program &program) {
   program.regionGraphs.clear();
+  RegionId nextRegion = 0;
+  auto reserve = [&](RegionId region) {
+    if (region != None)
+      nextRegion = std::max(nextRegion, region + 1);
+  };
+  for (const auto &symbol : program.semantics.symbols)
+    reserve(symbol.region);
+  for (const auto &function : program.semantics.functions)
+    reserve(function.resultRegion);
+  const auto signatures = detail::contracts(program, nextRegion);
   for (auto &function : program.functions)
-    program.regionGraphs.push_back(Builder(program, function).run());
+    program.regionGraphs.push_back(Builder(program, function, signatures, nextRegion).run());
+}
+void validateBounds(const core::Program &program) {
+  detail::validateArguments(program);
+  for (const auto &graph : program.regionGraphs)
+    for (const auto &[region, owners] : graph.ownerBounds)
+      for (auto owner : owners) {
+        const auto &bound = graph.storageBounds.at(owner);
+        for (auto point : graph.regions.at(region).points)
+          if (!bound.points.contains(point)) {
+            const auto &block = graph.blocks.at(point);
+            DiagnosticEngine()
+                .error(DiagnosticCode::BorrowConflict, block.origin,
+                       "reference requires storage outside the lifetime of `" +
+                           program.semantics.symbols[owner].name + "`")
+                .label(block.origin, "reference must remain valid here")
+                .secondary(bound.origin, "owner storage is initialized here")
+                .note(
+                    "owner/storage bounds are computed from initialization and cleanup on the CFG")
+                .help("keep the owner alive until all references derived from it have ended")
+                .emit();
+          }
+      }
+}
+namespace {
+void printPath(const hir::ReferencePath &path, std::ostream &out) {
+  if (path.empty())
+    out << "self";
+  for (const auto &projection : path) {
+    if (projection.kind == hir::ReferenceProjectionKind::Field)
+      out << ".field[" << projection.index << "]";
+    else if (projection.kind == hir::ReferenceProjectionKind::Element)
+      out << ".element";
+    else
+      out << "#V" << projection.variant << ".payload[" << projection.index << "]";
+  }
+}
+void printArgs(const hir::RegionArgs &arguments, std::ostream &out) {
+  for (const auto &[path, regions] : arguments) {
+    out << " path=";
+    printPath(path, out);
+    out << " regions={";
+    for (auto region : regions)
+      out << " #R" << region;
+    out << " }";
+  }
+}
+const char *reasonName(ConstraintReason reason) {
+  switch (reason) {
+  case ConstraintReason::BorrowCreation:
+    return "BorrowCreation";
+  case ConstraintReason::LiveCarrier:
+    return "LiveCarrier";
+  case ConstraintReason::Reborrow:
+    return "Reborrow";
+  case ConstraintReason::FunctionResult:
+    return "FunctionResult";
+  case ConstraintReason::StoredReference:
+    return "StoredReference";
+  }
+  return "Invalid";
+}
 }
 void print(const core::Program &p, std::ostream &out) {
   out << "Semantic CFG regions (before erasure)\n";
   for (const auto &graph : p.regionGraphs) {
     out << "fn #F" << graph.function << " " << p.semantics.functions[graph.function].name << "\n";
+    for (const auto &[parameter, arguments] : graph.contract.inputs) {
+      out << "  RegionArgs input #v" << parameter;
+      printArgs(arguments, out);
+      out << "\n";
+    }
+    if (!graph.contract.result.empty()) {
+      out << "  RegionArgs return";
+      printArgs(graph.contract.result, out);
+      out << "\n";
+    }
+    for (const auto &[symbol, arguments] : graph.symbolRegions)
+      if (!arguments.empty()) {
+        out << "  RegionArgs symbol #v" << symbol;
+        printArgs(arguments, out);
+        out << "\n";
+      }
+    for (const auto &[value, arguments] : graph.valueRegions)
+      if (!arguments.empty()) {
+        out << "  RegionArgs value %" << value;
+        printArgs(arguments, out);
+        out << "\n";
+      }
+    for (const auto &call : graph.calls) {
+      out << "  region substitution bb" << call.point.block << ":0 call #F" << call.target;
+      for (const auto &[formal, actual] : call.substitution) {
+        out << " #R" << formal << "={";
+        for (auto region : actual)
+          out << " #R" << region;
+        out << " }";
+      }
+      printArgs(call.result, out);
+      out << "\n";
+    }
+    for (const auto &[owner, bound] : graph.storageBounds) {
+      out << "  storage bound owner=" << p.semantics.symbols.at(owner).name << "#v" << owner
+          << " must-initialized points:";
+      for (auto point : bound.points)
+        out << " bb" << point << ":0";
+      out << "\n";
+    }
     for (const auto &b : graph.blocks) {
       if (!b.reachable)
         continue;
@@ -497,7 +640,10 @@ void print(const core::Program &p, std::ostream &out) {
             << (projection.kind == ProjectionKind::Field   ? "Field"
                 : projection.kind == ProjectionKind::Index ? "Index"
                                                            : "VariantPayload")
-            << " #" << projection.index << "\n";
+            << " #" << projection.index
+            << (projection.variant == None ? ""
+                                           : " variant=#V" + std::to_string(projection.variant))
+            << "\n";
       out << "    live points:";
       for (auto point : loan.points)
         out << " bb" << point << ":0";
@@ -521,16 +667,15 @@ void printConstraints(const core::Program &p, std::ostream &out) {
     for (const auto &constraint : graph.constraints) {
       out << "  #R" << constraint.region;
       if (constraint.kind == ConstraintKind::Subregion)
-        out << " <= #R" << constraint.upper << " reason="
-            << (constraint.reason == ConstraintReason::FunctionResult ? "FunctionResult"
-                                                                      : "Reborrow");
+        out << " <= #R" << constraint.upper << " reason=" << reasonName(constraint.reason);
       else
-        out << " contains bb" << constraint.point.block << ":0 reason="
-            << (constraint.reason == ConstraintReason::BorrowCreation   ? "BorrowCreation"
-                : constraint.reason == ConstraintReason::FunctionResult ? "FunctionResult"
-                                                                        : "LiveCarrier");
+        out << " contains bb" << constraint.point.block
+            << ":0 reason=" << reasonName(constraint.reason);
       out << " at " << constraint.origin.line << ":" << constraint.origin.column << "\n";
     }
+    for (const auto &[region, owners] : graph.ownerBounds)
+      for (auto owner : owners)
+        out << "  #R" << region << " <= storage(#v" << owner << ") reason=OwnerStorage\n";
   }
 }
 }

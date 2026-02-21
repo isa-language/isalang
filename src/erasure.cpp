@@ -520,7 +520,7 @@ class Eraser {
     }
   }
   void destroy(std::vector<I> &out, TypeId tid, runtime::Value value,
-               const std::vector<uint32_t> &moved = {},
+               const std::vector<hir::ReferencePath> &moved = {},
                const std::vector<uint32_t> &absentFields = {}, const core::FieldDropPlan &plan = {},
                bool heapDescriptors = false) {
     if (plan.skip)
@@ -570,7 +570,8 @@ class Eraser {
           auto offset = core.semantics.payloadOffset(tid, variant.id, n);
           auto pt = variant.payload[n];
           if (!core.semantics.needsDrop(pt) ||
-              std::find(moved.begin(), moved.end(), offset) != moved.end())
+              std::find(moved.begin(), moved.end(), hir::payloadPosition(variant.id, n)) !=
+                  moved.end())
             continue;
           destroy(body, pt, project(body, value, offset, pt), {}, {}, {}, heapDescriptors);
         }
@@ -605,7 +606,7 @@ class Eraser {
         auto found = c.movedPayloads.find(sid);
         auto absent = c.absentFields.find(sid);
         destroy(out, core.semantics.symbols[sid].type, slots.at(sid),
-                found == c.movedPayloads.end() ? std::vector<uint32_t>{} : found->second,
+                found == c.movedPayloads.end() ? std::vector<hir::ReferencePath>{} : found->second,
                 absent == c.absentFields.end() ? std::vector<uint32_t>{} : absent->second,
                 c.fieldCleanup.contains(sid) ? c.fieldCleanup.at(sid) : core::FieldDropPlan{});
       }
@@ -991,7 +992,11 @@ class Eraser {
         break;
       }
       case C::PayloadTake:
-        values[c.result] = project(out, slots.at(c.slot), c.offset, c.type);
+        values[c.result] =
+            project(out, slots.at(c.slot),
+                    core.semantics.payloadOffset(core.semantics.symbols.at(c.slot).type,
+                                                 c.payloadPath[0].variant, c.payloadPath[0].index),
+                    c.type);
         break;
       case C::Move:
         values[c.result] = slots.at(c.slot);
@@ -1063,17 +1068,20 @@ class Eraser {
               projectedType == c.type ? projection : referenceView(out, projection, c.type);
         } else if (!c.args.empty())
           slots[c.offset] = values.at(c.args[0]);
-        else if (c.projection) {
+        else if (!c.payloadPath.empty()) {
+          const auto offset =
+              core.semantics.payloadOffset(core.semantics.symbols.at(c.slot).type,
+                                           c.payloadPath[0].variant, c.payloadPath[0].index);
 
           if (c.storedPayloadReference && !core.semantics.heap(c.type)) {
-            auto address = load(out, slots.at(c.slot), c.projection, {T::Pointer, 1});
+            auto address = load(out, slots.at(c.slot), offset, {T::Pointer, 1});
             i.kind = I::AddressView;
             i.type = referenceType(c.type);
             i.args = {address};
             slots[c.offset] = emit(out, i);
             break;
           }
-          auto value = project(out, slots.at(c.slot), c.projection, c.type);
+          auto value = project(out, slots.at(c.slot), offset, c.type);
           if (scalar(c.type)) {
             I alloc{};
             alloc.kind = I::Alloc;

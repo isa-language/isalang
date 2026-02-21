@@ -1,4 +1,14 @@
 {
+  "valid_semantic_payload_positions": {
+    "code": "",
+    "stdout": "10\n10\n40\n40\n50\n50\n60\n60\n70\n80\n",
+    "stdin": ""
+  },
+  "valid_semantic_owned_payload_positions": {
+    "code": "",
+    "stdout": "first\nsecond\n",
+    "stdin": ""
+  },
   "valid_shared_reference": {
     "stdout": "0\n",
     "code": null,
@@ -503,5 +513,10 @@
     "stdout": "",
     "code": "E6003",
     "stdin": ""
+  },
+  "valid_positional_region_arguments": {
+    "code": "",
+    "stdin": "",
+    "stdout": "10\n20\n40\n30\n50\n60\n"
   }
 }

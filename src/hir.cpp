@@ -2387,7 +2387,7 @@ class Resolver {
           }
           scopes.emplace_back();
           SymbolId alias = None;
-          std::vector<std::pair<SymbolId, uint32_t>> payloadBorrows;
+          std::vector<std::pair<SymbolId, hir::ReferencePath>> payloadBorrows;
           h.catchall = pat.kind == ast::Pattern::Wildcard || pat.kind == ast::Pattern::Binding;
           if (h.catchall) {
             all = true;
@@ -2442,7 +2442,7 @@ class Resolver {
                     auto id = add(pat.bindings[j], pt, pat.loc, capability);
                     p.symbols[id].reference = true;
                     p.symbols[id].region = nextRegion++;
-                    payloadBorrows.push_back({id, p.payloadOffset(tid, found->id, j)});
+                    payloadBorrows.push_back({id, hir::payloadPosition(found->id, j)});
                     continue;
                   }
                   if (matchAccess != Access::Own) {
@@ -2455,7 +2455,7 @@ class Resolver {
                     auto id = add(pat.bindings[j], pt, pat.loc, matchAccess);
                     p.symbols[id].reference = true;
                     p.symbols[id].region = nextRegion++;
-                    payloadBorrows.push_back({id, p.payloadOffset(tid, found->id, j)});
+                    payloadBorrows.push_back({id, hir::payloadPosition(found->id, j)});
                     continue;
                   }
                   H let{};
@@ -2466,7 +2466,9 @@ class Resolver {
                       p.linear(found->payload[j]) ? hir::Expr::PayloadTake : hir::Expr::Field;
                   let.expr.type = found->payload[j];
                   let.expr.loc = pat.loc;
-                  let.expr.ref = p.payloadOffset(tid, found->id, j);
+                  let.expr.ref =
+                      let.expr.kind == hir::Expr::Field ? p.payloadOffset(tid, found->id, j) : None;
+                  let.expr.payloadPath = hir::payloadPosition(found->id, j);
                   let.expr.args = {base};
                   h.body.push_back(let);
                 }
@@ -2550,7 +2552,7 @@ class Resolver {
             borrow.expr.kind = hir::Expr::Borrow;
             borrow.expr.loc = pat.loc;
             borrow.expr.type = p.symbols[it->first].type;
-            borrow.expr.ref = it->second;
+            borrow.expr.payloadPath = it->second;
             borrow.expr.region = p.symbols[it->first].region;
             borrow.expr.args = {base};
             borrow.body = std::move(body);
@@ -3526,6 +3528,8 @@ void printE(const hir::Expr &e, std::ostream &o) {
       << " access=" << (e.borrowKind == BorrowKind::Shared ? "Shared" : "Unique");
   if (e.ref != None)
     o << "#" << e.ref;
+  for (const auto &position : e.payloadPath)
+    o << " payload.variant=#V" << position.variant << " payload.field=" << position.index;
   if (e.kind == hir::Expr::StructInit)
     for (auto field : e.fieldPath)
       o << " field=#" << field;

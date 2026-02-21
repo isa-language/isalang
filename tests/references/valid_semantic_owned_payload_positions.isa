@@ -1,0 +1,16 @@
+enum Owned {
+  First(String),
+  Second(String),
+}
+
+fn inspect(value: Owned) {
+  match value {
+    Owned::First(text) => print(text),
+    Owned::Second(text) => print(text),
+  }
+}
+
+fn main() {
+  inspect(Owned::First(String::from("first")));
+  inspect(Owned::Second(String::from("second")));
+}

@@ -1,0 +1,46 @@
+enum Choice<T> {
+  Left(T),
+  Right(T),
+  Empty,
+}
+
+fn choose(a: &i32, b: &i32, right: bool) -> Choice<&i32> {
+  if right {
+    return Choice::Right(b);
+  }
+  return Choice::Left(a);
+}
+
+fn inspect(value: Choice<&i32>) {
+  match &value {
+    Choice::Left(r) => print(r),
+    Choice::Right(r) => print(r),
+    Choice::Empty => {},
+  }
+  match value {
+    Choice::Left(r) => print(r),
+    Choice::Right(r) => print(r),
+    Choice::Empty => {},
+  }
+}
+
+fn main() {
+  let a = 10;
+  let b = 20;
+  let first = choose(&a, &b, false);
+  inspect(first.move());
+  a = 30;
+  b = 40;
+  let second = choose(&a, &b, true);
+  inspect(second.move());
+  a = 50;
+  b = 60;
+  inspect(Choice::Left(&a));
+  inspect(Choice::Right(&b));
+  let absent: Choice<&i32> = Choice::Empty;
+  inspect(absent.move());
+  a = 70;
+  b = 80;
+  print(a);
+  print(b);
+}

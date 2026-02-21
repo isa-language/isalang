@@ -291,7 +291,7 @@ int main() {
   unsigned stored = 0, plain = 0;
   auto inspectProjection = [&](auto &&self, const std::vector<core::Inst> &body) -> void {
     for (const auto &i : body) {
-      if (i.kind == core::Inst::BorrowShared && i.projection) {
+      if (i.kind == core::Inst::BorrowShared && !i.payloadPath.empty()) {
         if (i.storedPayloadReference)
           ++stored;
         else
@@ -782,7 +782,7 @@ int main() {
     borrow.slot = input;
     borrow.offset = alias;
     borrow.type = I32;
-    borrow.projection = 1;
+    borrow.payloadPath = hir::payloadPosition(0, 0);
     borrow.quantity = Quantity::One;
     borrow.region = 100000;
     f.body.insert(f.body.begin(), borrow);

@@ -13,9 +13,15 @@ struct ProgramPoint {
   BasicBlockId block;
   uint32_t statementIndex = 0;
 };
-enum class RegionKind { Local, Parameter, Return, Static };
+enum class RegionKind { Local, Parameter, Return, Static, Storage };
 enum class ConstraintKind { ContainsPoint, Subregion };
-enum class ConstraintReason { BorrowCreation, LiveCarrier, Reborrow, FunctionResult };
+enum class ConstraintReason {
+  BorrowCreation,
+  LiveCarrier,
+  Reborrow,
+  FunctionResult,
+  StoredReference
+};
 struct Region {
   RegionId id;
   RegionKind kind;
@@ -34,6 +40,7 @@ enum class ProjectionKind { Field, Index, Deref, VariantPayload };
 struct Projection {
   ProjectionKind kind;
   uint32_t index;
+  VariantId variant = None;
 };
 struct Place {
   SymbolId root;
@@ -85,6 +92,24 @@ struct BasicBlock {
   ValueLivenessSet valuesIn, valuesOut;
   bool reachable = false;
 };
+struct FunctionRegionContract {
+  std::map<SymbolId, hir::RegionArgs> inputs;
+  hir::RegionArgs result;
+
+  hir::RegionSubstitution resultSources;
+};
+struct CallRegionInstantiation {
+  ProgramPoint point;
+  FunctionId target;
+  hir::RegionSubstitution substitution;
+  hir::RegionArgs result;
+};
+struct StorageBound {
+  SymbolId owner;
+  Loc origin;
+
+  std::set<BasicBlockId> points;
+};
 struct FunctionGraph {
   FunctionId function;
   BasicBlockId entry;
@@ -93,9 +118,18 @@ struct FunctionGraph {
   std::map<RegionId, Region> regions;
   std::vector<Constraint> constraints;
   std::map<SymbolId, std::set<SymbolId>> storedResultParents;
+  FunctionRegionContract contract;
+  std::map<SymbolId, hir::RegionArgs> symbolRegions;
+  std::map<ValueId, hir::RegionArgs> valueRegions;
+  std::vector<CallRegionInstantiation> calls;
+  std::map<SymbolId, StorageBound> storageBounds;
+  std::map<SymbolId, RegionId> storageRegions;
+  std::map<RegionId, std::set<SymbolId>> ownerBounds;
 };
 
 void infer(core::Program &);
+
+void validateBounds(const core::Program &);
 void print(const core::Program &, std::ostream &);
 void printConstraints(const core::Program &, std::ostream &);
 }

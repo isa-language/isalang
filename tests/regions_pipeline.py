@@ -48,18 +48,26 @@ with tempfile.TemporaryDirectory() as directory:
         ("valid_stack_payload_variant_layout", "42\n42\n7\n7\n43\n"),
         ("valid_stack_payload_multiple_origins", "20\n30\n40\n"),
         ("valid_stack_payload_scalar_types", "-7\n1\n2.5\n1.5\n225\n18446744073709551615\n"),
+        ("valid_semantic_payload_positions", "10\n10\n40\n40\n50\n50\n60\n60\n70\n80\n"),
+        ("valid_semantic_owned_payload_positions", "first\nsecond\n"),
+        ("valid_positional_region_arguments", "10\n20\n40\n30\n50\n60\n"),
     ]:
         source = root / "tests/references" / (fixture + ".isa")
         for opt in ["-O0", "-O2"]:
             binary = Path(directory) / "program"
+            counted = fixture == "valid_semantic_owned_payload_positions"
+            counters = ["--runtime-test-counters"] if counted else []
             built = subprocess.run(
-                [compiler, str(source), opt, *flags, "-o", str(binary)],
+                [compiler, str(source), opt, *flags, *counters, "-o", str(binary)],
                 capture_output=True,
                 text=True,
             )
             assert built.returncode == 0, built.stderr
             result = subprocess.run([str(binary)], capture_output=True, text=True, env=environment)
-            assert (result.returncode, result.stdout, result.stderr) == (0, expected, ""), result
+            stderr = "ISAC_RT allocations=2 frees=2\n" if counted else ""
+            assert (result.returncode, result.stdout, result.stderr) == (0, expected, stderr), (
+                result
+            )
     source = root / "tests/references/valid_cfg_branch_last_use.isa"
     for stage in ["regions", "core", "erased", "lir", "mlir", "llvm"]:
         result = subprocess.run(
@@ -68,8 +76,11 @@ with tempfile.TemporaryDirectory() as directory:
         assert result.returncode == 0, result.stderr
         if stage in ["regions", "core"]:
             assert "loan #L" in result.stdout and "liveIn={" in result.stdout
+            assert "RegionArgs" in result.stdout and "storage bound" in result.stdout
         else:
             assert "loan #L" not in result.stdout and "liveIn={" not in result.stdout
+            for metadata in ["RegionArgs", "region substitution", "storage bound", "OwnerStorage"]:
+                assert metadata not in result.stdout
         if stage == "core":
             assert "[CFG last-use]" in result.stdout
 
@@ -80,6 +91,33 @@ with tempfile.TemporaryDirectory() as directory:
     assert result.returncode == 0, result.stderr
     assert "reason=Reborrow" in result.stdout and " <= " in result.stdout
     assert "reason=BorrowCreation" in result.stdout and "reason=LiveCarrier" in result.stdout
+    assert "reason=OwnerStorage" in result.stdout
+
+    source = root / "tests/references/valid_positional_region_arguments.isa"
+    result = subprocess.run(
+        [compiler, str(source), "--emit-regions"], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RegionArgs input" in result.stdout and "region substitution" in result.stdout
+    assert "#V0.payload[0]" in result.stdout and "#V0.payload[1]" in result.stdout
+
+    source = root / "tests/references/valid_semantic_payload_positions.isa"
+    for stage in ["hir", "core", "regions", "erased", "lir", "mlir", "llvm"]:
+        result = subprocess.run(
+            [compiler, str(source), "--emit-" + stage], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        if stage in ["hir", "core"]:
+            assert "payload.variant=#V" in result.stdout and "payload.field=0" in result.stdout
+        if stage == "core":
+            assert "carrier.path=#V0.payload[0]" in result.stdout
+            assert "carrier.path=#V1.payload[0]" in result.stdout
+            assert "capability=Shared origins={" in result.stdout
+        if stage == "regions":
+            assert "place projection=VariantPayload #0 variant=#V" in result.stdout
+        if stage in ["erased", "lir", "mlir", "llvm"]:
+            for metadata in ["carrier.path", "payload.variant", "origins={", "parent=#v"]:
+                assert metadata not in result.stdout, (stage, metadata)
 
     source = root / "tests/references/valid_return_parameter_ref.isa"
     for stage in ["hir", "core", "region-constraints", "erased", "lir", "mlir", "llvm"]:

@@ -22,6 +22,7 @@ add_library(
   src/runtime.cpp
   src/liveness.cpp
   src/regions.cpp
+  src/region_arguments.cpp
   src/references.cpp
   src/consteval.cpp
   src/ffi.cpp)
@@ -530,6 +531,12 @@ if(BUILD_TESTING)
   add_executable(isac_reference_schema_test tests/reference_schema_test.cpp)
   target_link_libraries(isac_reference_schema_test PRIVATE isac_frontend)
   add_test(NAME reference_schema_invariants COMMAND isac_reference_schema_test)
+  add_executable(isac_semantic_carriers_test tests/semantic_carriers_test.cpp)
+  target_link_libraries(isac_semantic_carriers_test PRIVATE isac_frontend)
+  add_test(NAME semantic_carrier_invariants COMMAND isac_semantic_carriers_test)
+  add_executable(isac_region_arguments_test tests/region_arguments_test.cpp)
+  target_link_libraries(isac_region_arguments_test PRIVATE isac_frontend)
+  add_test(NAME region_argument_invariants COMMAND isac_region_arguments_test)
   if(ISAC_SANITIZER_STATUS EQUAL 0)
     add_test(NAME reborrow_sanitized_pipeline
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reborrow_pipeline.py

@@ -386,7 +386,7 @@ class Builder {
     case E::PayloadTake:
       i.kind = Inst::PayloadTake;
       i.slot = e.args.at(0).ref;
-      i.offset = e.ref;
+      i.payloadPath = e.payloadPath;
       return emit(i);
     case E::EnumConstruct:
       i.kind = Inst::EnumConstruct;
@@ -661,7 +661,7 @@ class Builder {
           locals.push_back(parent);
         }
         i.region = s.expr.region;
-        i.projection = s.expr.ref == None ? 0 : s.expr.ref;
+        i.payloadPath = s.expr.payloadPath;
         i.offset = s.symbol;
         i.type = s.expr.type;
         i.quantity = Quantity::One;
@@ -674,6 +674,7 @@ class Builder {
           out->insert(out->end(), b.begin(), b.end());
         }
         i.kind = Inst::EndBorrow;
+        i.payloadPath.clear();
         i.quantity = p.semantics.linear(i.type) ? Quantity::One : Quantity::Omega;
         i.slot = s.symbol;
         emit(i, false);
@@ -752,8 +753,8 @@ struct Resource {
   std::string consumedBy;
   SymbolId movedTo = None;
   Loc consumedAt = {}, borrowAt = {}, stateAt = {};
-  std::set<uint32_t> movedPayloads = {};
-  std::map<uint32_t, std::set<SymbolId>> loans = {};
+  std::set<hir::ReferencePath> movedPayloads = {};
+  CarrierMap carriers = {};
 
   std::set<SymbolId> extraRoots = {};
   std::set<uint32_t> absentFields = {};
@@ -761,11 +762,8 @@ struct Resource {
   std::vector<uint32_t> ownedProjection = {};
   SymbolId loanParent = None;
   VariantId knownVariant = None;
-  std::set<uint32_t> uniqueLoans = {};
   unsigned exclusiveLoans = 0;
   bool exclusiveCarrier = false;
-
-  std::map<uint32_t, SymbolId> uniqueLoanParents = {};
   bool opaquePayloads = false;
   MemoryState memory() const {
     return !live                      ? MemoryState::Dead
@@ -780,9 +778,8 @@ struct Resource {
            allocation == other.allocation && exclusiveLoans == other.exclusiveLoans &&
            exclusiveCarrier == other.exclusiveCarrier && opaquePayloads == other.opaquePayloads &&
            (!live || (fields == other.fields && absentFields == other.absentFields &&
-                      movedPayloads == other.movedPayloads && loans == other.loans &&
-                      knownVariant == other.knownVariant && uniqueLoans == other.uniqueLoans &&
-                      uniqueLoanParents == other.uniqueLoanParents));
+                      movedPayloads == other.movedPayloads && carriers == other.carriers &&
+                      knownVariant == other.knownVariant));
   }
 };
 struct Temporary {
@@ -791,12 +788,14 @@ struct Temporary {
   bool available = true;
   bool allocation = false;
   SymbolId movedFrom = None;
-  std::map<uint32_t, std::set<SymbolId>> loans = {};
+  CarrierMap carriers = {};
   std::set<uint32_t> absentFields = {};
   std::map<uint32_t, OwnedFieldState> fields = {};
-  std::set<uint32_t> uniqueLoans = {};
-  std::map<uint32_t, SymbolId> uniqueLoanParents = {};
 };
+template <class Carrier> bool hasExclusiveCarriers(const Carrier &carrier) {
+  return std::any_of(carrier.carriers.begin(), carrier.carriers.end(),
+                     [](const auto &entry) { return entry.second.capability == Access::Unique; });
+}
 struct VariantTest {
   SymbolId symbol;
   ValueId version;
@@ -976,10 +975,32 @@ class Checker {
     r.unique = false;
   }
   template <class Carrier>
-  void releaseCarriedLoan(Context &c, const Carrier &carrier, uint32_t offset, Loc loc) {
-    releaseLoan(c, carrier.loans.at(offset), carrier.uniqueLoans.contains(offset), loc);
-    if (carrier.uniqueLoanParents.contains(offset))
-      resumeParent(c, carrier.uniqueLoanParents.at(offset), loc);
+  void releaseCarriedLoan(Context &c, const Carrier &carrier, const hir::ReferencePath &offset,
+                          Loc loc) {
+    const auto &provenance = carrier.carriers.at(offset);
+    releaseLoan(c, provenance.origins, provenance.capability == Access::Unique, loc);
+    resumeParent(c, provenance.parent, loc);
+  }
+  void validateCarriers(Context &c, TypeId type, const CarrierMap &carriers, Loc loc) {
+    if (carriers.empty())
+      return;
+    const auto schema = p.semantics.borrowedReferences(type);
+    for (const auto &[path, provenance] : carriers) {
+      auto leaf = std::find_if(schema.begin(), schema.end(),
+                               [&](const auto &reference) { return reference.path == path; });
+      if (leaf == schema.end() || provenance.origins.empty() ||
+          leaf->reference.capability != provenance.capability ||
+          (provenance.capability == Access::Shared && provenance.parent != None))
+        fail(loc, DiagnosticCode::InvalidCore,
+             "carrier does not match its semantic reference position");
+      for (auto owner : provenance.origins)
+        (void)live(c, owner, loc);
+      if (provenance.parent != None) {
+        const auto &parent = live(c, provenance.parent, loc);
+        if (parent.access != Access::Unique || !parent.unique)
+          fail(loc, DiagnosticCode::InvalidCore, "exclusive carrier has no suspended parent");
+      }
+    }
   }
   void setAliasOrigins(Resource &alias, const std::set<SymbolId> &owners) {
     alias.root = *owners.begin();
@@ -1099,9 +1120,9 @@ class Checker {
         }
         for (const auto &[carrier, resource] : c.vars)
           if (resource.live)
-            for (const auto &[offset, parent] : resource.uniqueLoanParents) {
+            for (const auto &[offset, provenance] : resource.carriers) {
               (void)offset;
-              if (parent == id)
+              if (provenance.parent == id)
                 diagnostic.secondary(symbol(carrier).loc,
                                      "this container retains the exclusive reborrow");
             }
@@ -1153,12 +1174,12 @@ class Checker {
                 .help("end the active borrow before moving, dropping or mutating this resource");
         for (const auto &[container, state] : c.vars)
           if (state.live && state.root == None)
-            for (const auto &[offset, owner] : state.loans) {
+            for (const auto &[offset, owner] : state.carriers) {
               (void)offset;
-              if (owner.contains(id))
+              if (owner.origins.contains(id))
                 diagnostic.secondary(
                     symbol(container).loc,
-                    state.uniqueLoans.contains(offset)
+                    owner.capability == Access::Unique
                         ? "this container retains a unique reference to the resource"
                         : "this container retains a shared reference to the resource");
             }
@@ -1290,11 +1311,9 @@ class Checker {
       site.movedPayloads[id] = {r.movedPayloads.begin(), r.movedPayloads.end()};
       site.absentFields[id] = {r.absentFields.begin(), r.absentFields.end()};
     }
-    for (const auto &[offset, owner] : r.loans)
+    for (const auto &[offset, owner] : r.carriers)
       releaseCarriedLoan(c, r, offset, l);
-    r.loans.clear();
-    r.uniqueLoans.clear();
-    r.uniqueLoanParents.clear();
+    r.carriers.clear();
     r.allocation = false;
     c.vars[id].live = false;
     c.vars[id].consumedBy = "drop";
@@ -1318,14 +1337,14 @@ class Checker {
         endBorrow(c, child);
     for (const auto &[carrier, resource] : c.vars)
       if (resource.live)
-        for (const auto &[offset, parent] : resource.uniqueLoanParents)
-          if (parent == id)
+        for (const auto &[offset, provenance] : resource.carriers)
+          if (provenance.parent == id)
             fail(r.borrowAt, DiagnosticCode::InvalidReborrow,
                  "cannot end a parent borrow while an exclusive result is retained");
     for (const auto &[value, temporary] : c.values)
       if (temporary.available)
-        for (const auto &[offset, parent] : temporary.uniqueLoanParents)
-          if (parent == id)
+        for (const auto &[offset, provenance] : temporary.carriers)
+          if (provenance.parent == id)
             fail(r.borrowAt, DiagnosticCode::InvalidReborrow,
                  "cannot end a parent borrow while an exclusive temporary is retained");
     auto &root = c.vars.at(r.root);
@@ -1360,11 +1379,11 @@ class Checker {
   void finish(Context &c, Loc l, Inst &site) {
     endViews(c);
     for (auto &[id, r] : c.vars)
-      if (r.live && r.root != None && !c.vars.at(r.root).uniqueLoans.empty())
+      if (r.live && r.root != None && hasExclusiveCarriers(c.vars.at(r.root)))
         endBorrow(c, id);
 
     for (auto &[id, r] : c.vars)
-      if (r.live && r.root == None && !r.uniqueLoans.empty())
+      if (r.live && r.root == None && hasExclusiveCarriers(r))
         drop(c, id, l, true, site);
     for (auto &[id, r] : c.vars)
       if (r.live && r.root != None)
@@ -1511,19 +1530,17 @@ class Checker {
           if (source.parameter != parameter.id)
             continue;
           const auto &path = source.path;
-          auto offset = p.semantics.payloadOffset(parameter.type, path.variant, path.field);
-          if (value.loans.contains(offset)) {
-            const auto &owners = value.loans.at(offset);
+          auto offset = hir::payloadPosition(path.variant, path.field);
+          if (value.carriers.contains(offset)) {
+            const auto &owners = value.carriers.at(offset).origins;
             payloadResultOrigin.insert(owners.begin(), owners.end());
-          } else if (!value.loans.empty())
+          } else if (!value.carriers.empty())
             fail(i.loc, DiagnosticCode::InvalidCore,
                  "argument loans do not match result source path");
         }
-        for (const auto &[offset, owner] : value.loans)
+        for (const auto &[offset, owner] : value.carriers)
           releaseCarriedLoan(c, value, offset, i.loc);
-        value.loans.clear();
-        value.uniqueLoans.clear();
-        value.uniqueLoanParents.clear();
+        value.carriers.clear();
       }
     }
     if (f.consumesSelf && i.slot != None) {
@@ -1531,7 +1548,7 @@ class Checker {
       if (!owner.movedPayloads.empty())
         fail(i.loc, DiagnosticCode::ConsumedResource,
              "cannot consume an enum with extracted payloads");
-      if (!owner.loans.empty())
+      if (!owner.carriers.empty())
         fail(i.loc, DiagnosticCode::EscapingView,
              "consuming reference payloads requires a return-region contract");
       owner.live = false;
@@ -1573,6 +1590,7 @@ class Checker {
       i.storedPayloadReference = false;
       i.cleanup.clear();
       i.movedPayloads.clear();
+      i.carriers.clear();
       i.freeTemporary = false;
       i.replaceField = false;
       i.absentFields.clear();
@@ -1625,7 +1643,7 @@ class Checker {
         access(c, i.slot, Access::Shared, i.loc);
         auto owner = origins(c, i.slot, i.loc);
         retainOrigins(c, owner, i.loc);
-        c.values[i.result] = {i.type, None, true, false, None, {{0, owner}}};
+        c.values[i.result] = {i.type, None, true, false, None, {{hir::ReferencePath{}, {owner}}}};
         break;
       }
       case Inst::ReferenceArgument:
@@ -1694,12 +1712,11 @@ class Checker {
         if (!c.variants.contains(i.slot))
           fail(i.loc, DiagnosticCode::InvalidCore, "payload transfer requires a proven variant");
         auto variant = c.variants.at(i.slot);
-        bool found = false;
-        const auto &payloads = p.semantics.types[tid].variants.at(variant).payload;
-        for (size_t n = 0; n < payloads.size(); ++n)
-          if (p.semantics.payloadOffset(tid, variant, n) == i.offset && payloads[n] == i.type)
-            found = true;
-        if (!found || !owner.movedPayloads.insert(i.offset).second)
+        auto payload = p.semantics.payloadType(tid, i.payloadPath);
+        if (!payload || i.payloadPath[0].variant != variant || *payload != i.type)
+          fail(i.loc, DiagnosticCode::InvalidCore,
+               "payload transfer contradicts the proven variant");
+        if (!owner.movedPayloads.insert(i.payloadPath).second)
           fail(i.loc, DiagnosticCode::ConsumedResource, "enum payload has already been consumed");
         c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
         c.values[i.result].fields = initialFields(i.type);
@@ -1707,7 +1724,7 @@ class Checker {
       }
       case Inst::EnumConstruct: {
         const auto &payloads = p.semantics.types[i.type].variants.at(i.offset).payload;
-        std::map<uint32_t, std::set<SymbolId>> loans;
+        CarrierMap carriers;
         if (p.semantics.containsReferences(i.type))
           c.constructedVariants[i.result] = i.offset;
         for (size_t n = 0; n < i.args.size(); ++n) {
@@ -1718,7 +1735,7 @@ class Checker {
             fail(i.loc, DiagnosticCode::AllocationContract,
                  "enum payloads with protocolled fields require a payload state contract");
           auto &payload = take(c, i.args[n], i.loc);
-          if (!payload.uniqueLoans.empty())
+          if (hasExclusiveCarriers(payload))
             fail(
                 i.loc, DiagnosticCode::InvalidReborrow,
                 "storing an exclusive reference in another container requires a transfer contract");
@@ -1729,9 +1746,9 @@ class Checker {
             if (p.semantics.types[tid].referenceAccess != Access::Shared)
               fail(i.loc, DiagnosticCode::InvalidCore,
                    "exclusive stored references require a storage transfer contract");
-            if (payload.loans.size() != 1 || !payload.loans.contains(0))
+            if (payload.carriers.size() != 1 || !payload.carriers.contains(hir::ReferencePath{}))
               fail(i.loc, DiagnosticCode::InvalidCore, "stored reference has no origin");
-            loans[p.semantics.payloadOffset(i.type, i.offset, n)] = payload.loans.at(0);
+            carriers[hir::payloadPosition(i.offset, n)] = payload.carriers.at(hir::ReferencePath{});
           }
           final(tid, payload.state, "enum payload", i.loc);
           if (payload.state != initial(tid) || (p.semantics.heap(tid) && !payload.allocation))
@@ -1739,8 +1756,8 @@ class Checker {
                  "enum payload must retain its allocation and be in its initial final protocol "
                  "state");
         }
-        c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type),
-                              None,   std::move(loans)};
+        c.values[i.result] = {i.type, initial(i.type),    true, p.semantics.needsDrop(i.type),
+                              None,   std::move(carriers)};
         break;
       }
       case Inst::StructInit: {
@@ -1751,7 +1768,7 @@ class Checker {
           if (!p.semantics.linear(type))
             continue;
           auto &value = take(c, i.args[n], i.loc);
-          if (!value.loans.empty() || !value.uniqueLoans.empty() || !value.absentFields.empty())
+          if (!value.carriers.empty() || !value.absentFields.empty())
             fail(i.loc, DiagnosticCode::AllocationContract,
                  "struct initializer requires fully initialized, non-borrowed field owners");
           if (p.semantics.ownedFieldType(type))
@@ -1793,7 +1810,7 @@ class Checker {
         };
         if (i.kind == Inst::FieldStore) {
           auto &value = take(c, i.args.at(0), i.loc);
-          if (!value.loans.empty() || !value.absentFields.empty() ||
+          if (!value.carriers.empty() || !value.absentFields.empty() ||
               (!value.allocation && !p.semantics.containsProtocolFields(i.type)))
             fail(i.loc, DiagnosticCode::AllocationContract,
                  "owned field requires a fully initialized, non-borrowed owner");
@@ -1841,14 +1858,10 @@ class Checker {
           c.valueVariantSets[i.result] = c.variantSets.at(i.slot);
           c.variantSets.erase(i.slot);
         }
-        c.values[i.result] = {i.type, r.state, true, r.allocation, i.slot, std::move(r.loans)};
-        c.values[i.result].uniqueLoans = std::move(r.uniqueLoans);
-        c.values[i.result].uniqueLoanParents = std::move(r.uniqueLoanParents);
+        c.values[i.result] = {i.type, r.state, true, r.allocation, i.slot, std::move(r.carriers)};
         c.values[i.result].fields = std::move(r.fields);
         r.fields.clear();
-        r.loans.clear();
-        r.uniqueLoans.clear();
-        r.uniqueLoanParents.clear();
+        r.carriers.clear();
         c.vars[i.slot].allocation = false;
         c.vars[i.slot].live = false;
         c.vars[i.slot].consumedBy = "move";
@@ -1909,9 +1922,7 @@ class Checker {
           c.variantSets[i.slot] = {c.constructedVariants.at(i.args[0])};
         }
         if (p.semantics.linear(i.type)) {
-          c.vars[i.slot].loans = c.values.at(i.args[0]).loans;
-          c.vars[i.slot].uniqueLoans = c.values.at(i.args[0]).uniqueLoans;
-          c.vars[i.slot].uniqueLoanParents = c.values.at(i.args[0]).uniqueLoanParents;
+          c.vars[i.slot].carriers = c.values.at(i.args[0]).carriers;
           c.vars[i.slot].absentFields = c.values.at(i.args[0]).absentFields;
           c.vars[i.slot].fields = c.values.at(i.args[0]).fields;
         }
@@ -1936,11 +1947,9 @@ class Checker {
               fieldDropPlan(t.type, t.fields, t.absentFields, "temporary", i.loc);
           i.freeTemporary = t.allocation;
           i.temporaryAbsentFields = {t.absentFields.begin(), t.absentFields.end()};
-          for (const auto &[offset, owner] : t.loans)
+          for (const auto &[offset, owner] : t.carriers)
             releaseCarriedLoan(c, t, offset, i.loc);
-          t.loans.clear();
-          t.uniqueLoans.clear();
-          t.uniqueLoanParents.clear();
+          t.carriers.clear();
         }
         break;
       case Inst::BorrowShared:
@@ -1949,7 +1958,7 @@ class Checker {
             (!c.references.contains(i.args[0]) || c.references.at(i.args[0]) != i.slot))
           fail(i.loc, DiagnosticCode::InvalidCore,
                "returned borrow origin does not match call contract");
-        if (i.projection) {
+        if (!i.payloadPath.empty()) {
           const auto &carrier =
               c.vars.at(c.vars.at(i.slot).root == None ? i.slot : c.vars.at(i.slot).root);
           if (carrier.opaquePayloads)
@@ -1959,24 +1968,27 @@ class Checker {
             fail(i.loc, DiagnosticCode::InvalidCore, "payload borrow requires a proven variant");
           auto tid = symbol(i.slot).type;
           auto variant = c.variants.at(i.slot);
-          const auto &payloads = p.semantics.types[tid].variants.at(variant).payload;
-          bool found = false, stored = false;
-          for (size_t n = 0; n < payloads.size(); ++n)
-            if (p.semantics.payloadOffset(tid, variant, n) == i.projection) {
-              stored = p.semantics.reference(payloads[n]) &&
-                       p.semantics.types[payloads[n]].element == i.type;
-              found = stored || payloads[n] == i.type;
-            }
+          auto payload = p.semantics.payloadType(tid, i.payloadPath);
+          if (!payload || i.payloadPath[0].variant != variant)
+            fail(i.loc, DiagnosticCode::InvalidCore,
+                 "payload borrow contradicts the proven variant");
+          bool selected = payload && i.payloadPath[0].variant == variant;
+          bool stored = selected && p.semantics.reference(*payload) &&
+                        p.semantics.types[*payload].element == i.type;
+          bool found = selected && (stored || *payload == i.type);
           if (stored) {
             i.storedPayloadReference = true;
             access(c, i.slot, Access::Shared, i.loc);
             auto &container = c.vars.at(i.slot);
-            const auto &loans =
-                container.root == None ? container.loans : c.vars.at(container.root).loans;
-            bool unique = container.uniqueLoans.contains(i.projection);
-            if ((i.kind == Inst::BorrowUnique) != unique || !loans.contains(i.projection))
+            const auto &carriers =
+                container.root == None ? container.carriers : c.vars.at(container.root).carriers;
+            if (!carriers.contains(i.payloadPath))
               fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
-            auto owners = loans.at(i.projection);
+            const auto provenance = carriers.at(i.payloadPath);
+            bool unique = provenance.capability == Access::Unique;
+            if ((i.kind == Inst::BorrowUnique) != unique)
+              fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
+            auto owners = provenance.origins;
             if (owners.empty())
               fail(i.loc, DiagnosticCode::InvalidCore, "empty stored-reference origins");
             auto owner = *owners.begin();
@@ -1984,15 +1996,11 @@ class Checker {
             SymbolId parent = None;
             if (unique) {
               access(c, i.slot, Access::Own, i.loc);
-              if (container.root != None || !container.movedPayloads.insert(i.projection).second)
+              if (container.root != None || !container.movedPayloads.insert(i.payloadPath).second)
                 fail(i.loc, DiagnosticCode::InvalidCore,
                      "exclusive payload must be transferred once");
-              container.loans.erase(i.projection);
-              container.uniqueLoans.erase(i.projection);
-              if (container.uniqueLoanParents.contains(i.projection)) {
-                parent = container.uniqueLoanParents.at(i.projection);
-                container.uniqueLoanParents.erase(i.projection);
-              }
+              container.carriers.erase(i.payloadPath);
+              parent = provenance.parent;
             } else
               retainOrigins(c, owners, i.loc);
             c.vars[i.offset] = {true,         root.state, unique ? Access::Unique : Access::Shared,
@@ -2005,7 +2013,7 @@ class Checker {
             c.vars[i.offset].borrowAt = i.loc;
             break;
           }
-          if (!found || c.vars.at(i.slot).movedPayloads.contains(i.projection))
+          if (!found || c.vars.at(i.slot).movedPayloads.contains(i.payloadPath))
             fail(i.loc, DiagnosticCode::ConsumedResource, "cannot borrow a consumed enum payload");
         }
         auto &source = live(c, i.slot, i.loc);
@@ -2122,8 +2130,10 @@ class Checker {
               c.valueVariantSets[i.result] = std::move(possible);
               break;
             }
-            for (auto offset : p.semantics.borrowedPayloadOffsets(i.type)) {
-              c.values[i.result].loans[offset] = resultOrigins;
+            for (auto offset : p.semantics.borrowedPayloadPaths(i.type)) {
+              auto &provenance = c.values[i.result].carriers[offset];
+              provenance.origins = resultOrigins;
+              provenance.capability = target.resultAccess;
               if (target.resultAccess == Access::Unique) {
                 if (resultOrigins.size() != 1)
                   fail(i.loc, DiagnosticCode::InvalidReborrow,
@@ -2136,12 +2146,11 @@ class Checker {
                     fail(i.loc, DiagnosticCode::InvalidReborrow,
                          "exclusive result requires an available unique input borrow");
                   receiver.unique = true;
-                  c.values[i.result].uniqueLoanParents[offset] = resultInput;
+                  provenance.parent = resultInput;
                 } else if (owner.exclusiveLoans || owner.unique || owner.shared)
                   fail(i.loc, DiagnosticCode::InvalidReborrow, "conflicting exclusive result loan");
                 ++owner.exclusiveLoans;
                 owner.borrowAt = i.loc;
-                c.values[i.result].uniqueLoans.insert(offset);
               } else
                 retainOrigins(c, resultOrigins, i.loc);
             }
@@ -2151,7 +2160,7 @@ class Checker {
       }
       case Inst::ScopeEnd:
         for (auto id : i.locals)
-          if (c.vars.contains(id) && c.vars.at(id).live && !c.vars.at(id).uniqueLoans.empty())
+          if (c.vars.contains(id) && c.vars.at(id).live && hasExclusiveCarriers(c.vars.at(id)))
             drop(c, id, i.loc, true, i);
         for (auto &[id, r] : c.vars)
           if (r.live && r.root != None && !symbol(r.root).temporary &&
@@ -2191,10 +2200,11 @@ class Checker {
             initialFieldContract(function->result, result.fields, i.loc);
           }
           if (function->resultBorrowedContainer) {
-            const auto allowed = p.semantics.borrowedPayloadOffsets(function->result);
-            for (const auto &[offset, owners] : result.loans) {
+            const auto allowed = p.semantics.borrowedPayloadPaths(function->result);
+            for (const auto &[offset, provenance] : result.carriers) {
+              const auto &owners = provenance.origins;
               if (function->resultAccess == Access::Unique &&
-                  (!result.uniqueLoans.contains(offset) || owners.size() != 1))
+                  (provenance.capability != Access::Unique || owners.size() != 1))
                 fail(i.loc, DiagnosticCode::InvalidCore,
                      "exclusive payload return is missing its unique provenance obligation");
               for (auto origin : owners) {
@@ -2221,7 +2231,7 @@ class Checker {
               }
             }
           }
-          if ((!function->resultBorrowedContainer && !result.loans.empty()) ||
+          if ((!function->resultBorrowedContainer && !result.carriers.empty()) ||
               result.state != None ||
               (!aggregate && result.allocation != p.semantics.needsDrop(function->result)))
             fail(i.loc, DiagnosticCode::InvalidCore, "unsupported resource return contract");
@@ -2237,10 +2247,10 @@ class Checker {
         auto &entry = loops.back().entry;
         for (auto &[id, r] : c.vars)
           if (!entry.vars.contains(id) && r.live && r.root != None &&
-              !c.vars.at(r.root).uniqueLoans.empty())
+              hasExclusiveCarriers(c.vars.at(r.root)))
             endBorrow(c, id);
         for (auto &[id, r] : c.vars)
-          if (!entry.vars.contains(id) && r.live && r.root == None && !r.uniqueLoans.empty())
+          if (!entry.vars.contains(id) && r.live && r.root == None && hasExclusiveCarriers(r))
             drop(c, id, i.loc, true, i);
         for (auto &[id, r] : c.vars)
           if (!entry.vars.contains(id) && r.live && r.root != None)
@@ -2347,6 +2357,11 @@ class Checker {
       default:
         break;
       }
+      if (i.result != None && c.values.contains(i.result))
+        i.carriers = c.values.at(i.result).carriers;
+      else if (i.kind == Inst::Bind && c.vars.contains(i.slot))
+        i.carriers = c.vars.at(i.slot).carriers;
+      validateCarriers(c, i.type, i.carriers, i.loc);
     }
   }
 
@@ -2395,8 +2410,8 @@ class Checker {
         origin.state = initial(symbol(contract.origin).type);
         origin.allocation = p.semantics.heap(symbol(contract.origin).type);
         origin.borrowAt = symbol(contract.parameter).loc;
-        for (auto offset : p.semantics.borrowedPayloadOffsets(symbol(contract.parameter).type)) {
-          c.vars[contract.parameter].loans[offset] = {contract.origin};
+        for (auto offset : p.semantics.borrowedPayloadPaths(symbol(contract.parameter).type)) {
+          c.vars[contract.parameter].carriers[offset] = {{contract.origin}};
           ++origin.shared;
         }
       }
@@ -2418,7 +2433,19 @@ class Checker {
 public:
   explicit Checker(Program x) : p(std::move(x)) {}
   Program run() {
+
+    std::function<void(std::vector<Inst> &)> clearSnapshots;
+    clearSnapshots = [&](auto &body) {
+      for (auto &instruction : body) {
+        instruction.carriers.clear();
+        clearSnapshots(instruction.body);
+        clearSnapshots(instruction.otherwise);
+        clearSnapshots(instruction.condition);
+        clearSnapshots(instruction.latch);
+      }
+    };
     for (auto &cf : p.functions) {
+      clearSnapshots(cf.body);
       cf.fieldPostStates.clear();
       definitions[cf.id] = &cf;
     }
@@ -2525,8 +2552,22 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
       o << " protocol=" << p.protocols[i.protocol].name
         << " state=" << p.protocols[i.protocol].states[state];
     }
-    if (i.projection)
-      o << " payload.offset=" << i.projection;
+    if (!i.payloadPath.empty())
+      o << " payload.variant=#V" << i.payloadPath[0].variant
+        << " payload.field=" << i.payloadPath[0].index;
+    for (const auto &[path, provenance] : i.carriers) {
+      o << " carrier.path=";
+      if (path.empty())
+        o << "self";
+      for (const auto &position : path)
+        o << "#V" << position.variant << ".payload[" << position.index << "]";
+      o << " capability=" << accessName(provenance.capability) << " origins={";
+      for (auto owner : provenance.origins)
+        o << " #v" << owner;
+      o << " }";
+      if (provenance.parent != None)
+        o << " parent=#v" << provenance.parent;
+    }
     if (i.storedPayloadReference)
       o << " stored-reference";
     if (!i.possibleVariants.empty()) {
@@ -2611,7 +2652,9 @@ void checkTypes(const Program &);
 Verified verify(Program p) {
   checkTypes(p);
   regions::infer(p);
-  return Verified(Checker(std::move(p)).run());
+  auto checked = Checker(std::move(p)).run();
+  regions::validateBounds(checked);
+  return Verified(std::move(checked));
 }
 void print(const Program &p, std::ostream &o) {
   o << "Verified Core (0 / 1 / omega; MemoryState independent of ProtocolState)\n";

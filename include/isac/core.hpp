@@ -29,6 +29,14 @@ struct FieldPostState {
   std::map<uint32_t, OwnedFieldState> fields;
   Loc origin;
 };
+
+struct BorrowProvenance {
+  std::set<SymbolId> origins;
+  Access capability = Access::Shared;
+  SymbolId parent = None;
+  bool operator==(const BorrowProvenance &) const = default;
+};
+using CarrierMap = std::map<hir::ReferencePath, BorrowProvenance>;
 struct Inst {
   enum Kind {
     Constant,
@@ -99,7 +107,7 @@ struct Inst {
   TypeId type = Unit;
   SymbolId slot = None;
   uint32_t offset = 0;
-  uint32_t projection = 0;
+  hir::ReferencePath payloadPath;
   bool storedPayloadReference = false;
   enum class PlaceProjection { None, Field, Index } placeProjection = PlaceProjection::None;
   uint32_t fieldIndex = None;
@@ -116,7 +124,8 @@ struct Inst {
   ValueId resourceInput = None;
   std::vector<Merge> merges;
   std::vector<SymbolId> cleanup;
-  std::map<SymbolId, std::vector<uint32_t>> movedPayloads;
+  std::map<SymbolId, std::vector<hir::ReferencePath>> movedPayloads;
+  CarrierMap carriers;
   bool freeTemporary = false;
   bool replaceField = false;
   std::map<SymbolId, std::vector<uint32_t>> absentFields;

@@ -3,7 +3,9 @@
 #include "isac/intrinsics.hpp"
 #include "isac/target.hpp"
 #include <algorithm>
+#include <compare>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 namespace isac {
@@ -36,6 +38,21 @@ bool signedType(TypeId);
 unsigned bitWidth(TypeId, unsigned pointerBits = 64);
 void validateLiteral(TypeId, const std::string &, Loc, unsigned pointerBits = 64);
 namespace hir {
+enum class ReferenceProjectionKind { Field, VariantPayload, Element };
+struct ReferenceProjection {
+  ReferenceProjectionKind kind;
+  uint32_t index = None;
+  VariantId variant = None;
+  auto operator<=>(const ReferenceProjection &) const = default;
+};
+using ReferencePath = std::vector<ReferenceProjection>;
+
+using RegionArgs = std::map<ReferencePath, std::set<RegionId>>;
+using RegionSubstitution = std::map<RegionId, std::set<RegionId>>;
+RegionArgs substituteRegions(const RegionArgs &, const RegionSubstitution &);
+inline ReferencePath payloadPosition(VariantId variant, uint32_t field) {
+  return {{ReferenceProjectionKind::VariantPayload, field, variant}};
+}
 struct Field {
   std::string name;
   TypeId type;
@@ -177,6 +194,7 @@ struct Expr {
   std::vector<Expr> args;
   std::vector<Stmt> body;
   std::vector<uint32_t> fieldPath;
+  ReferencePath payloadPath;
 };
 struct Stmt {
   enum Kind {
@@ -228,13 +246,6 @@ struct ReferenceInfo {
   Access capability;
   RegionId region = None;
   bool operator==(const ReferenceInfo &) const = default;
-};
-enum class ReferenceProjectionKind { Field, VariantPayload, Element };
-struct ReferenceProjection {
-  ReferenceProjectionKind kind;
-  uint32_t index = None;
-  VariantId variant = None;
-  bool operator==(const ReferenceProjection &) const = default;
 };
 struct BorrowedReference {
   ReferenceInfo reference;
@@ -442,7 +453,7 @@ struct Program {
         !function.payloadInspectionParameters.empty() ||
         types.at(function.result).kind != Type::Enum ||
         !referenceCapability(function.result, Access::Unique) ||
-        borrowedPayloadOffsets(function.result).size() != 1 ||
+        borrowedPayloadPaths(function.result).size() != 1 ||
         std::find(function.params.begin(), function.params.end(), function.resultOrigin) ==
             function.params.end())
       return false;
@@ -485,13 +496,23 @@ struct Program {
     }
     return result;
   }
-  std::set<uint32_t> borrowedPayloadOffsets(TypeId result) const {
-    std::set<uint32_t> offsets;
+
+  std::set<ReferencePath> borrowedPayloadPaths(TypeId result) const {
+    std::set<ReferencePath> paths;
     for (const auto &variant : types.at(result).variants)
-      for (size_t n = 0; n < variant.payload.size(); ++n)
+      for (uint32_t n = 0; n < variant.payload.size(); ++n)
         if (reference(variant.payload[n]))
-          offsets.insert(payloadOffset(result, variant.id, n));
-    return offsets;
+          paths.insert(payloadPosition(variant.id, n));
+    return paths;
+  }
+  std::optional<TypeId> payloadType(TypeId container, const ReferencePath &path) const {
+    if (container >= types.size() || types[container].kind != Type::Enum || path.size() != 1 ||
+        path[0].kind != ReferenceProjectionKind::VariantPayload)
+      return {};
+    for (const auto &variant : types[container].variants)
+      if (variant.id == path[0].variant && path[0].index < variant.payload.size())
+        return variant.payload[path[0].index];
+    return {};
   }
   bool reference(TypeId t) const {
     return types[t].kind == Type::Reference;

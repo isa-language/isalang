@@ -1,6 +1,18 @@
 #include "isac/hir.hpp"
 
 namespace isac::hir {
+RegionArgs substituteRegions(const RegionArgs &arguments, const RegionSubstitution &substitution) {
+  RegionArgs result;
+  for (const auto &[path, regions] : arguments)
+    for (auto region : regions) {
+      auto found = substitution.find(region);
+      if (found == substitution.end())
+        fail({}, DiagnosticCode::InvalidCore, "missing argument for a semantic region parameter");
+      if (!found->second.empty())
+        result[path].insert(found->second.begin(), found->second.end());
+    }
+  return result;
+}
 namespace {
 
 template <class Visitor>

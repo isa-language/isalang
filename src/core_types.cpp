@@ -145,15 +145,17 @@ void checkTypes(const Program &p) {
         if (p.semantics.containsReferences(field.type))
           fail({}, DiagnosticCode::InvalidCore,
                "stored-reference field requires a recursive region contract");
-    if (type.kind == hir::Type::Enum)
+    if (type.kind == hir::Type::Enum) {
       for (const auto &variant : type.variants)
-        for (auto payload : variant.payload)
+        for (auto payload : variant.payload) {
           if (!p.semantics.reference(payload) && p.semantics.containsReferences(payload))
             fail({}, DiagnosticCode::InvalidCore,
                  "nested reference payload requires a recursive region contract");
           else if (p.semantics.containsProtocolOwnedFields(payload))
             fail({}, DiagnosticCode::InvalidCore,
                  "missing protocolled enum payload field contract");
+        }
+    }
   }
   for (const auto &type : p.semantics.types)
     if (type.kind == hir::Type::Reference &&
@@ -339,6 +341,9 @@ void checkTypes(const Program &p) {
         auto bad = [&]() {
           fail(i.loc, DiagnosticCode::InvalidCore, "invalid typed Core instruction");
         };
+        if (!i.payloadPath.empty() && i.kind != Inst::BorrowShared &&
+            i.kind != Inst::BorrowUnique && i.kind != Inst::PayloadTake)
+          bad();
         for (auto value : i.args)
           if (references.contains(value) && i.kind != Inst::Call && i.kind != Inst::ForeignCall &&
               i.kind != Inst::ProtocolTransition && i.kind != Inst::Return &&
@@ -454,7 +459,7 @@ void checkTypes(const Program &p) {
         case Inst::BorrowUnique: {
           if (i.placeProjection != Inst::PlaceProjection::None) {
             const auto &source = p.semantics.types[slot()];
-            if (i.projection)
+            if (!i.payloadPath.empty())
               bad();
             if (i.placeProjection == Inst::PlaceProjection::Field) {
               if (i.fieldPath.empty() || i.fieldIndex != i.fieldPath.back() || !i.args.empty())
@@ -489,7 +494,7 @@ void checkTypes(const Program &p) {
           } else if (!i.args.empty()) {
             auto access = i.kind == Inst::BorrowShared ? Access::Shared : Access::Unique;
             if (i.args.size() != 1 || !references.contains(i.args[0]) ||
-                references.at(i.args[0]) != access || i.projection)
+                references.at(i.args[0]) != access || !i.payloadPath.empty())
               bad();
             expect(arg(0), i.type);
           }
@@ -505,7 +510,7 @@ void checkTypes(const Program &p) {
           expect(p.semantics.symbols.at(i.offset).type, i.type);
           if (i.placeProjection != Inst::PlaceProjection::None || !i.args.empty()) {
 
-          } else if (!i.projection) {
+          } else if (i.payloadPath.empty()) {
             const auto &from = p.semantics.types[slot()];
             const auto &to = p.semantics.types[i.type];
             if (!(from.kind == hir::Type::Array && to.kind == hir::Type::Slice &&
@@ -515,24 +520,17 @@ void checkTypes(const Program &p) {
             const auto &t = p.semantics.types[slot()];
             if (t.kind != hir::Type::Enum)
               bad();
-            bool found = false;
-            for (const auto &variant : t.variants)
-              for (size_t n = 0; n < variant.payload.size(); ++n)
-                if (p.semantics.payloadOffset(slot(), variant.id, n) == i.projection &&
-                    (variant.payload[n] == i.type ||
-                     (p.semantics.reference(variant.payload[n]) &&
-                      p.semantics.types[variant.payload[n]].referenceAccess ==
-                          (i.kind == Inst::BorrowShared ? Access::Shared : Access::Unique) &&
-                      p.semantics.types[variant.payload[n]].element == i.type)))
-                  found = true;
+            auto payload = p.semantics.payloadType(slot(), i.payloadPath);
+            bool stored = payload && p.semantics.reference(*payload);
+            bool found =
+                payload && (*payload == i.type ||
+                            (stored &&
+                             p.semantics.types[*payload].referenceAccess ==
+                                 (i.kind == Inst::BorrowShared ? Access::Shared : Access::Unique) &&
+                             p.semantics.types[*payload].element == i.type));
             if (!found || p.semantics.types[i.type].protocol != None ||
                 (i.kind == Inst::BorrowUnique && !p.semantics.heap(i.type) &&
-                 !std::any_of(t.variants.begin(), t.variants.end(), [&](const auto &variant) {
-                   return std::any_of(variant.payload.begin(), variant.payload.end(), [&](auto pt) {
-                     return p.semantics.reference(pt) && p.semantics.types[pt].element == i.type &&
-                            p.semantics.types[pt].referenceAccess == Access::Unique;
-                   });
-                 })))
+                 !(stored && p.semantics.types[*payload].referenceAccess == Access::Unique)))
               bad();
           }
           break;
@@ -597,15 +595,10 @@ void checkTypes(const Program &p) {
         case Inst::PayloadTake: {
           const auto &t = p.semantics.types[slot()];
           if (t.kind != hir::Type::Enum || !p.semantics.linear(i.type) ||
-              p.semantics.reference(i.type))
+              p.semantics.reference(i.type) || i.offset != 0)
             bad();
-          bool found = false;
-          for (const auto &variant : t.variants)
-            for (size_t n = 0; n < variant.payload.size(); ++n)
-              if (p.semantics.payloadOffset(slot(), variant.id, n) == i.offset &&
-                  variant.payload[n] == i.type)
-                found = true;
-          if (!found)
+          auto payload = p.semantics.payloadType(slot(), i.payloadPath);
+          if (!payload || *payload != i.type)
             bad();
           break;
         }
