@@ -1,0 +1,99 @@
+@import "std.vec"
+
+fn checksum(values: &u8[], repetitions: usize) -> u64 {
+  let total: u64 = 0;
+  for i in 0usize..repetitions {
+    total = total + values[0usize] as u64;
+  }
+  return total;
+}
+
+fn lengths(values: &u8[], repetitions: usize) -> usize {
+  let total: usize = 0;
+  for i in 0usize..repetitions {
+    total = total + values.len();
+  }
+  return total;
+}
+
+fn gets(values: &u8[], repetitions: usize) -> u64 {
+  let total: u64 = 0;
+  for i in 0usize..repetitions {
+    match values.get(0usize) {
+      Some(value) => {
+        let byte = *value;
+        total = total + byte as u64;
+      },
+      None => {
+        @panic("missing element");
+      }
+    }
+  }
+  @assert(values.get(values.len()).is_none());
+  return total;
+}
+
+fn writes(values: &mut u8[], repetitions: usize) {
+  for i in 0usize..repetitions {
+    values[0usize] = 1u8;
+  }
+}
+
+fn mutable_gets(values: &mut u8[], repetitions: usize) {
+  for i in 0usize..repetitions {
+    match values.get_mut(0usize) {
+      Some(value) => {
+        value = 2u8;
+      },
+      None => {
+        @panic("missing mutable element");
+      }
+    }
+  }
+}
+
+fn nested(values: &u8[]) -> u64 {
+  let total: u64 = 0;
+  for row in 0usize..2000usize {
+    for column in 0usize..1000usize {
+      if column == 17usize {
+        continue;
+      }
+      total = total + values[column % values.len()] as u64;
+      if column == 999usize {
+        break;
+      }
+    }
+  }
+  return total;
+}
+
+fn early(values: &u8[], repetitions: usize) -> u64 {
+  let total: u64 = 0;
+  for i in 0usize..repetitions {
+    total = total + values[0usize] as u64;
+    if i + 1usize == repetitions {
+      return total;
+    }
+  }
+  return total;
+}
+
+fn main() {
+  let values: u8[1] = [1u8];
+  @assert(checksum(&values, 2000000usize) == 2000000u64);
+  @assert(lengths(&values, 2000000usize) == 2000000usize);
+  @assert(gets(&values, 2000000usize) == 2000000u64);
+  @assert(nested(&values) == 1998000u64);
+  @assert(early(&values, 2000000usize) == 2000000u64);
+  writes(&mut values, 2000000usize);
+  mutable_gets(&mut values, 2000000usize);
+  @assert(values[0usize] == 2u8);
+
+  let heap = Vec<u8>::new();
+  heap.push(1u8);
+  @assert(checksum(heap.as_slice(), 2000000usize) == 2000000u64);
+  writes(heap.as_mut_slice(), 2000000usize);
+  @assert(heap.at_copy(0usize) == 1u8);
+  @println("stack-ok");
+}

@@ -537,7 +537,19 @@ if(BUILD_TESTING)
   add_executable(isac_region_arguments_test tests/region_arguments_test.cpp)
   target_link_libraries(isac_region_arguments_test PRIVATE isac_frontend)
   add_test(NAME region_argument_invariants COMMAND isac_region_arguments_test)
+  add_test(
+    NAME stack_lowering_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/stack_lowering_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_backend_stack_test tests/backend_stack_boundary.cpp)
+  target_link_libraries(isac_backend_stack_test PRIVATE isac_backend isac_frontend)
+  add_test(NAME backend_stack_boundary COMMAND isac_backend_stack_test)
   if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME stack_lowering_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/stack_lowering_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(stack_lowering_sanitized_pipeline PROPERTIES LABELS "sanitizers")
     add_test(NAME reborrow_sanitized_pipeline
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/reborrow_pipeline.py
                      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)

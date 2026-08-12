@@ -842,12 +842,13 @@ public:
       PassManager pm(&context);
       pm.addPass(memref::createExpandStridedMetadataPass());
       pm.addPass(createLowerAffinePass());
-      ArithToLLVMConversionPassOptions arithmeticOptions;
-      arithmeticOptions.indexBitwidth = input.target.pointerWidth;
-      pm.addPass(createArithToLLVMConversionPass(arithmeticOptions));
+
       FinalizeMemRefToLLVMConversionPassOptions memoryOptions;
       memoryOptions.indexBitwidth = input.target.pointerWidth;
       pm.addPass(createFinalizeMemRefToLLVMConversionPass(memoryOptions));
+      ArithToLLVMConversionPassOptions arithmeticOptions;
+      arithmeticOptions.indexBitwidth = input.target.pointerWidth;
+      pm.addPass(createArithToLLVMConversionPass(arithmeticOptions));
       ConvertControlFlowToLLVMPassOptions flowOptions;
       flowOptions.indexBitwidth = input.target.pointerWidth;
       pm.addPass(createConvertControlFlowToLLVMPass(flowOptions));
@@ -857,6 +858,13 @@ public:
       pm.addPass(createReconcileUnrealizedCastsPass());
       if (failed(pm.run(*module)))
         throw std::runtime_error("LLVM dialect lowering failed");
+
+      module->walk([&](LLVM::AllocaOp allocation) {
+        auto function = allocation->getParentOfType<LLVM::LLVMFuncOp>();
+        if (!function || allocation->getBlock() != &function.getBody().front())
+          throw std::runtime_error("LLVM lowering introduced a stack allocation outside the "
+                                   "function entry; scoped stack allocation is unsupported");
+      });
     }
     std::string output;
     llvm::raw_string_ostream stream(output);
