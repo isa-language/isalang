@@ -23,6 +23,11 @@ add_library(
   src/liveness.cpp
   src/regions.cpp
   src/region_arguments.cpp
+  src/projection_bounds.cpp
+  src/storage.cpp
+  src/storage_paths.cpp
+  src/element_bounds.cpp
+  src/storage_slots.cpp
   src/references.cpp
   src/consteval.cpp
   src/ffi.cpp)
@@ -537,6 +542,50 @@ if(BUILD_TESTING)
   add_executable(isac_region_arguments_test tests/region_arguments_test.cpp)
   target_link_libraries(isac_region_arguments_test PRIVATE isac_frontend)
   add_test(NAME region_argument_invariants COMMAND isac_region_arguments_test)
+  add_executable(isac_projection_bounds_test tests/projection_bounds_test.cpp)
+  target_link_libraries(isac_projection_bounds_test PRIVATE isac_frontend)
+  add_test(NAME projection_storage_invariants
+           COMMAND isac_projection_bounds_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/projection_storage/valid_nested.isa)
+  add_executable(isac_storage_epochs_test tests/storage_epochs_test.cpp)
+  target_link_libraries(isac_storage_epochs_test PRIVATE isac_frontend)
+  add_test(NAME storage_epoch_invariants
+           COMMAND isac_storage_epochs_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_epochs/valid_transfers.isa)
+  add_executable(isac_storage_paths_test tests/storage_paths_test.cpp)
+  target_link_libraries(isac_storage_paths_test PRIVATE isac_frontend)
+  add_test(NAME storage_path_invariants
+           COMMAND isac_storage_paths_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_paths/valid_fields.isa)
+  add_executable(isac_element_bounds_test tests/element_bounds_test.cpp)
+  target_link_libraries(isac_element_bounds_test PRIVATE isac_frontend)
+  add_test(NAME element_bound_invariants
+           COMMAND isac_element_bounds_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_paths/valid_elements.isa)
+  add_executable(isac_storage_slots_test tests/storage_slots_test.cpp)
+  target_link_libraries(isac_storage_slots_test PRIVATE isac_frontend)
+  add_test(NAME storage_slot_invariants
+           COMMAND isac_storage_slots_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_slots/valid_slots.isa)
+  add_test(
+    NAME storage_slots_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_slots_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME storage_slot_scaling
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_slot_scaling.py
+                   $<TARGET_FILE:isac>)
+  add_test(
+    NAME recursive_storage_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_paths_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME storage_epochs_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_epochs_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME projection_storage_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/projection_storage_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(
     NAME stack_lowering_pipeline
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/stack_lowering_pipeline.py
@@ -545,6 +594,27 @@ if(BUILD_TESTING)
   target_link_libraries(isac_backend_stack_test PRIVATE isac_backend isac_frontend)
   add_test(NAME backend_stack_boundary COMMAND isac_backend_stack_test)
   if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME storage_slots_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_slots_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(storage_slots_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME recursive_storage_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_paths_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(recursive_storage_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME storage_epochs_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_epochs_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(storage_epochs_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME projection_storage_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/projection_storage_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(projection_storage_sanitized_pipeline PROPERTIES LABELS "sanitizers")
     add_test(
       NAME stack_lowering_sanitized_pipeline
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/stack_lowering_pipeline.py

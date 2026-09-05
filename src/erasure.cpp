@@ -202,6 +202,71 @@ class Eraser {
       store(out, result, load(out, buffer, offset + n, {T::Scalar, 1, 64}), n);
     return result;
   }
+  runtime::Value copyRecord(std::vector<I> &out, runtime::Value source, unsigned words,
+                            runtime::Value destination = runtime::NoValue) {
+    if (destination == runtime::NoValue) {
+      I alloc{};
+      alloc.kind = I::RecordAlloc;
+      alloc.type = {T::Pointer, 1};
+      alloc.literal = words;
+      destination = emit(out, alloc);
+    }
+    I copy{};
+    copy.kind = I::MemMove;
+    copy.type = {T::Pointer, 1};
+    copy.args = {destination, source,
+                 constant(out, words * (core.semantics.target.pointerWidth / 8), true)};
+    emit(out, copy);
+    return destination;
+  }
+
+  void prepareFieldRecords(std::vector<I> &out, runtime::Value buffer, TypeId tid,
+                           uint32_t offset = 0) {
+    if (auto words = recordWords(tid)) {
+      I alloc{};
+      alloc.kind = I::RecordAlloc;
+      alloc.type = {T::Pointer, 1};
+      alloc.literal = words;
+      store(out, buffer, emit(out, alloc), offset);
+    } else if (!core.semantics.heap(tid)) {
+      for (const auto &field : core.semantics.types[tid].fields)
+        prepareFieldRecords(out, buffer, field.type, offset + field.offset);
+    }
+  }
+  void storeFieldValue(std::vector<I> &out, runtime::Value destination, uint32_t offset, TypeId tid,
+                       runtime::Value source) {
+    if (auto words = recordWords(tid)) {
+      auto record = load(out, destination, offset, {T::Pointer, 1});
+      copyRecord(out, source, words, record);
+    } else if (type(tid).kind == T::Buffer &&
+               core.semantics.types[tid].kind == hir::Type::Structure) {
+      for (const auto &field : core.semantics.types[tid].fields)
+        storeFieldValue(out, destination, offset + field.offset, field.type,
+                        project(out, source, field.offset, field.type));
+    } else
+      writeElement(out, destination, source, tid, offset);
+  }
+  runtime::Value takeFieldValue(std::vector<I> &out, runtime::Value source, uint32_t offset,
+                                TypeId tid) {
+    auto value = project(out, source, offset, tid);
+    if (auto words = recordWords(tid))
+      return copyRecord(out, value, words);
+    if (type(tid).kind == T::Buffer && resultRecordCells(tid)) {
+      I alloc{};
+      alloc.kind = I::Alloc;
+      alloc.type = resultStorageType(tid);
+      auto result = emit(out, alloc);
+      writeElement(out, result, value, tid);
+      auto tail = type(tid).width;
+      copyResultRecords(out, value, result, tid, 0, tail);
+      I address{};
+      address.kind = I::Address;
+      address.type = {T::Pointer, 1};
+      address.args = {result};
+      return storageView(out, emit(out, address), tid);
+    }
+    return value;
+  }
   runtime::Value abi(std::vector<I> &out, const std::string &callee, T result,
                      std::vector<runtime::Value> args) {
     I call{};
@@ -880,15 +945,11 @@ class Eraser {
         values[c.result] = buffer;
         if (c.args.empty())
           store(out, buffer, constant(out, 0));
+        prepareFieldRecords(out, buffer, c.type);
         for (size_t n = 0; n < c.args.size(); ++n) {
           const auto &field = core.semantics.types[c.type].fields[c.fieldPath[n]];
           auto value = values.at(c.args[n]);
-          auto shape = type(field.type);
-          if (shape.kind == T::Buffer)
-            for (uint32_t cell = 0; cell < shape.width; ++cell)
-              store(out, buffer, load(out, value, cell, {T::Scalar, 1, 64}), field.offset + cell);
-          else
-            store(out, buffer, value, field.offset);
+          storeFieldValue(out, buffer, field.offset, field.type, value);
         }
         break;
       }
@@ -941,6 +1002,8 @@ class Eraser {
             writeElement(out, v, values.at(c.args[n]), element,
                          n * core.semantics.storageWidth(element));
         }
+        if (c.kind == C::Create)
+          prepareFieldRecords(out, v, c.type);
         break;
       }
       case C::Bind:
@@ -981,14 +1044,9 @@ class Eraser {
           destroy(out, field.type, project(out, slots.at(c.slot), field.offset, field.type), {}, {},
                   c.replacedFieldPlan);
         if (c.kind == C::FieldStore) {
-          if (type(field.type).kind == T::Buffer) {
-            for (uint32_t n = 0; n < type(field.type).width; ++n)
-              store(out, slots.at(c.slot), load(out, i.args.at(0), n, {T::Scalar, 1, 64}),
-                    field.offset + n);
-          } else
-            store(out, slots.at(c.slot), i.args.at(0), field.offset);
+          storeFieldValue(out, slots.at(c.slot), field.offset, field.type, i.args.at(0));
         } else if (c.kind == C::FieldTake)
-          values[c.result] = project(out, slots.at(c.slot), field.offset, field.type);
+          values[c.result] = takeFieldValue(out, slots.at(c.slot), field.offset, field.type);
         break;
       }
       case C::PayloadTake:

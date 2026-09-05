@@ -1,0 +1,18 @@
+@import "std.buffer"
+struct Holder<T> {
+  value: T,
+}
+fn refresh(owner: &mut Holder<Buffer>) {
+  let buffer = owner.value.move();
+  buffer.release();
+  owner.value = Buffer::new(4);
+  let view = &owner.value;
+  print(view.len());
+}
+fn main() {
+  let owner = Holder<Buffer>::new();
+  owner.value = Buffer::new(2);
+  refresh(&mut owner);
+  let buffer = owner.value.move();
+  buffer.release();
+}

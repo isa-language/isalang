@@ -1,0 +1,20 @@
+struct Holder<T> {
+  prefix: i32,
+  value: T,
+}
+fn refresh(owner: &mut Holder<String>) {
+  let view = &owner.value;
+  print(view.len());
+  let old = owner.value.move();
+  owner.value = String::from("new");
+  old.drop();
+  let next = &owner.value;
+  print(next.len());
+}
+fn main() {
+  let owner = Holder<String>::new();
+  owner.value = String::from("before");
+  refresh(&mut owner);
+  let view = &owner.value;
+  print(view.len());
+}

@@ -1,0 +1,64 @@
+@import("std.vec", "std.box")
+
+fn exercise(flag: bool) {
+  let values = Vec<i32>::new();
+  values.get(0);
+  values.push(10);
+  values.push(20);
+  values.get(1);
+  values.get(2);
+  values.get_mut(1);
+  let slice = values.as_slice();
+  slice.get(0);
+  values.pop();
+  values.get(1);
+  values.insert(1, 30);
+  values.swap(0, 1);
+  print(values.replace(0, 40));
+  print(values.remove(1));
+  if flag {
+    values.push(1);
+  }
+  else {
+    values.push(1);
+    values.push(2);
+  }
+  values.get(2);
+  for i in 0..2 {
+    values.push(i);
+  }
+  values.get(0);
+  values.clear();
+  values.get(0);
+}
+
+fn nested() {
+  let words = Vec<String>::new();
+  let text = String::from("deep");
+  words.push(text.move());
+  let packed = Box<Vec<String >>::new(words.move());
+  let view = packed.get();
+  print(view.len());
+  let outer = Vec<Box<Vec<String >> >::new();
+  outer.push(packed.move());
+  let taken = outer.pop();
+  match taken.move() {
+    Some(boxed) => {
+      let strings = boxed.into_inner();
+      let item = strings.pop();
+      match item.move() {
+        Some(value) => {
+          print(value);
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+}
+
+fn main() {
+  exercise(true);
+  exercise(false);
+  nested();
+}

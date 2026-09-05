@@ -433,6 +433,7 @@ public:
       }
     }
     detail::storageLimits(program, graph, instructions, nextRegion);
+    detail::projectionLimits(program, graph);
 
     for (const auto &constraint : graph.constraints)
       if (constraint.kind == ConstraintKind::ContainsPoint)
@@ -513,6 +514,8 @@ void infer(core::Program &program) {
 }
 void validateBounds(const core::Program &program) {
   detail::validateArguments(program);
+  detail::validateProjections(program);
+  storage::validate(program);
   for (const auto &graph : program.regionGraphs)
     for (const auto &[region, owners] : graph.ownerBounds)
       for (auto owner : owners) {
@@ -576,6 +579,7 @@ void print(const core::Program &p, std::ostream &out) {
   out << "Semantic CFG regions (before erasure)\n";
   for (const auto &graph : p.regionGraphs) {
     out << "fn #F" << graph.function << " " << p.semantics.functions[graph.function].name << "\n";
+    storage::print(graph.storage, out);
     for (const auto &[parameter, arguments] : graph.contract.inputs) {
       out << "  RegionArgs input #v" << parameter;
       printArgs(arguments, out);
@@ -612,6 +616,18 @@ void print(const core::Program &p, std::ostream &out) {
     for (const auto &[owner, bound] : graph.storageBounds) {
       out << "  storage bound owner=" << p.semantics.symbols.at(owner).name << "#v" << owner
           << " must-initialized points:";
+      for (auto point : bound.points)
+        out << " bb" << point << ":0";
+      out << "\n";
+    }
+    for (const auto &[id, bound] : graph.projectionBounds) {
+      out << "  projection storage bound #P" << id << " loans={";
+      for (auto loan : bound.loans)
+        out << " #L" << loan;
+      out << " } owner=" << p.semantics.symbols.at(bound.owner).name << "#v" << bound.owner;
+      for (auto field : bound.fields)
+        out << ".field[" << field << "]";
+      out << " initialized resource points:";
       for (auto point : bound.points)
         out << " bb" << point << ":0";
       out << "\n";
@@ -676,6 +692,13 @@ void printConstraints(const core::Program &p, std::ostream &out) {
     for (const auto &[region, owners] : graph.ownerBounds)
       for (auto owner : owners)
         out << "  #R" << region << " <= storage(#v" << owner << ") reason=OwnerStorage\n";
+    for (const auto &[id, bound] : graph.projectionBounds)
+      for (auto loan : bound.loans) {
+        out << "  #R" << graph.loans.at(loan).region << " <= initialized(#v" << bound.owner;
+        for (auto field : bound.fields)
+          out << ".field[" << field << "]";
+        out << ") reason=ProjectionStorage\n";
+      }
   }
 }
 }

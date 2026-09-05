@@ -1,0 +1,58 @@
+@import "std.vec"
+@import "std.box"
+@import "std.buffer"
+
+fn append(values: &mut Vec<i32>) {
+  values.push(9);
+}
+
+fn unknown_result() -> Vec<i32> {
+  return Vec<i32>::new();
+}
+
+fn exercise(flag: bool) {
+  let original = Vec<i32>::new();
+  original.push(1);
+  let moved = original.move();
+  if flag {
+    moved.push(2);
+  } else {
+    moved.push(3);
+  }
+  print(moved.len());
+  for i in 0..3 {
+    moved.push(i);
+  }
+  let view = moved.as_slice();
+  print(view[0]);
+  append(&mut moved);
+  print(moved.len());
+  moved.clear();
+  print(moved.len());
+
+  let first = Box<i32>::new(42);
+  let second = first.move();
+  print(second.get());
+
+  let text = String::from("abc");
+  let message = text.move();
+  print(message.len());
+  message.push_str("!");
+  print(message);
+
+  let opaque = unknown_result();
+  print(opaque.len());
+
+  let protocol = Buffer::new(2);
+  if flag {
+    protocol.release();
+  } else {
+    protocol.release();
+  }
+  let closed = protocol.move();
+}
+
+fn main() {
+  exercise(true);
+  exercise(false);
+}

@@ -830,7 +830,39 @@ class Checker {
   };
   std::vector<LoopCheck> loops;
   std::map<FunctionId, core::Function *> definitions;
+  std::map<FunctionId, regions::FunctionGraph *> regionDefinitions;
   std::set<FunctionId> checked, checking;
+  void recordProjectionStorage(const Context &c, const Inst &i) {
+    auto &graph = *regionDefinitions.at(function->id);
+    if (graph.projectionBounds.empty())
+      return;
+    if (i.semanticPoint == None || i.semanticPoint >= graph.blocks.size())
+      fail(i.loc, DiagnosticCode::InvalidCore,
+           "field initialization has no semantic program point");
+    graph.resourcePoints.insert(i.semanticPoint);
+    for (auto &[loan, bound] : graph.projectionBounds) {
+      auto owner = c.vars.find(bound.owner);
+      if (owner == c.vars.end() || !owner->second.live)
+        continue;
+      auto type = symbol(bound.owner).type;
+      const auto *fields = &owner->second.fields;
+      bool initialized = true;
+      for (auto index : bound.fields) {
+        const auto &member = p.semantics.types.at(type).fields.at(index);
+        if (p.semantics.ownedFieldType(member.type)) {
+          auto field = fields->find(index);
+          if (field == fields->end()) {
+            initialized = false;
+            break;
+          }
+          fields = &field->second.fields;
+        }
+        type = member.type;
+      }
+      if (initialized)
+        bound.points.insert(i.semanticPoint);
+    }
+  }
   bool hasFieldContract(const hir::Function &f) {
     for (auto id : f.params) {
       const auto &s = symbol(id);
@@ -1586,6 +1618,8 @@ class Checker {
           i.inferredEnds.push_back(alias);
         }
       }
+
+      recordProjectionStorage(c, i);
       i.possibleVariants.clear();
       i.storedPayloadReference = false;
       i.cleanup.clear();
@@ -2444,6 +2478,12 @@ public:
         clearSnapshots(instruction.latch);
       }
     };
+    for (auto &graph : p.regionGraphs) {
+      graph.resourcePoints.clear();
+      for (auto &[loan, bound] : graph.projectionBounds)
+        bound.points.clear();
+      regionDefinitions[graph.function] = &graph;
+    }
     for (auto &cf : p.functions) {
       clearSnapshots(cf.body);
       cf.fieldPostStates.clear();
@@ -2653,6 +2693,7 @@ Verified verify(Program p) {
   checkTypes(p);
   regions::infer(p);
   auto checked = Checker(std::move(p)).run();
+  storage::infer(checked);
   regions::validateBounds(checked);
   return Verified(std::move(checked));
 }

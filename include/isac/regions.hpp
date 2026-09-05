@@ -1,5 +1,6 @@
 #pragma once
 #include "isac/hir.hpp"
+#include "isac/storage.hpp"
 #include <map>
 #include <set>
 
@@ -110,6 +111,15 @@ struct StorageBound {
 
   std::set<BasicBlockId> points;
 };
+
+struct ProjectionStorageBound {
+  SymbolId owner;
+  std::vector<uint32_t> fields;
+  TypeId type;
+  Loc origin;
+  std::set<LoanId> loans;
+  std::set<BasicBlockId> points;
+};
 struct FunctionGraph {
   FunctionId function;
   BasicBlockId entry;
@@ -125,6 +135,11 @@ struct FunctionGraph {
   std::map<SymbolId, StorageBound> storageBounds;
   std::map<SymbolId, RegionId> storageRegions;
   std::map<RegionId, std::set<SymbolId>> ownerBounds;
+
+  std::map<uint32_t, ProjectionStorageBound> projectionBounds;
+
+  std::set<BasicBlockId> resourcePoints;
+  storage::Facts storage;
 };
 
 void infer(core::Program &);

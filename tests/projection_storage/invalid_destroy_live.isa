@@ -1,0 +1,10 @@
+struct Owner {
+  text: String,
+}
+fn main() {
+  let owner = Owner::new();
+  owner.text = String::from("live");
+  let view = &owner.text;
+  owner.text.drop();
+  print(view.len());
+}

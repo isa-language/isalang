@@ -1,0 +1,9 @@
+struct Owner {
+  text: String,
+}
+fn bad() -> &String {
+  let owner = Owner::new();
+  owner.text = String::from("local");
+  return &owner.text;
+}
+fn main() {}

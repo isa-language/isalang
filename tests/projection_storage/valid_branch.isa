@@ -1,0 +1,20 @@
+struct Owner {
+  text: String,
+}
+fn inspect(stop: bool) {
+  let owner = Owner::new();
+  owner.text = String::from("live");
+  let view = &owner.text;
+  if stop {
+    print(view.len());
+    return;
+  }
+  print(view.len());
+  return;
+
+  owner.text.drop();
+}
+fn main() {
+  inspect(false);
+  inspect(true);
+}

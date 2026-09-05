@@ -1,0 +1,52 @@
+@import "std.buffer"
+struct Inner {
+  text: String,
+  other: String,
+}
+struct Owner {
+  inner: Inner,
+}
+struct Held {
+  buffer: Buffer,
+}
+
+fn finish(held: &mut Held) {
+  let buffer = held.buffer.move();
+  buffer.release();
+  held.buffer = buffer.move();
+}
+
+fn refresh(owner: &mut Owner) {
+  let inner = &mut owner.inner;
+  let old = inner.text.move();
+  inner.text = String::from("callee");
+  old.drop();
+}
+
+fn main() {
+  let inner = Inner {
+    text: String::from("old"),
+    other: String::from("safe")
+  };
+  let owner = Owner {
+    inner: inner.move()
+  };
+  let edit = &mut owner.inner;
+  let removed = edit.text.move();
+  edit.text = String::from("new");
+  let leaf = &mut edit.text;
+  leaf.push_str("!");
+  print(removed);
+  print(leaf);
+  let other = &owner.inner.other;
+  print(other);
+  refresh(&mut owner);
+  let view = &owner.inner.text;
+  print(view);
+  let held = Held {
+    buffer: Buffer::new(2)
+  };
+  finish(&mut held);
+  let closed = held.buffer.move();
+  closed.drop();
+}

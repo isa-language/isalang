@@ -1,0 +1,8 @@
+struct Owner {
+  text: String,
+}
+fn main() {
+  let owner = Owner::new();
+  let view = &owner.text;
+  print(view.len());
+}

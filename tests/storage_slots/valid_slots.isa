@@ -1,0 +1,160 @@
+@import("std.vec", "std.box")
+
+fn known() {
+  let values = Vec<i32>::new();
+  values.push(10);
+  values.push(20);
+  values.get(0);
+  values.get(1);
+  values.insert(1, 30);
+  values.get(2);
+  values.swap(0, 2);
+  values.swap(1, 1);
+  print(values.replace(1, 40));
+  print(values.remove(0));
+  values.get(0);
+  values.pop();
+  values.get(1);
+  values.clear();
+  values.get(0);
+  values.push(50);
+  match values.pop() {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+}
+
+fn branches(flag: bool) {
+  let values = Vec<i32>::new();
+  if flag {
+    values.push(1);
+  } else {
+    values.push(2);
+  }
+  values.get(0);
+  if flag {
+    values.push(3);
+  }
+  values.get(1);
+  for i in 0..4 {
+    values.push(i);
+  }
+  values.get(0);
+  values.clear();
+}
+
+fn cyclic() {
+  let values = Vec<i32>::new();
+  values.push(0);
+  for i in 0..1000 {
+    values.replace(0, i);
+  }
+  values.get(0);
+}
+
+fn unknown(values: &mut Vec<i32>) {
+  values.push(8);
+}
+fn parameter(boxed: &Box<i32>) {
+  let item = boxed.get();
+  print(item);
+}
+
+fn opaque() {
+  let values = Vec<i32>::new();
+  values.push(7);
+  unknown(&mut values);
+  values.get(0);
+  let boxed = Box<i32>::new(9);
+  parameter(&boxed);
+}
+
+struct Holder {
+  values: Vec<i32>,
+  spare: Box<i32>,
+}
+
+fn fields() {
+  let values = Vec<i32>::new();
+  values.push(70);
+  let holder = Holder {
+    values: values.move(),
+    spare: Box<i32>::new(80)
+  };
+  let edit = &mut holder.values;
+  edit.get(0);
+  edit.push(71);
+  let removed = holder.values.move();
+  holder.values = Vec<i32>::new();
+  removed.get(1);
+  let spare = &holder.spare;
+  let item = spare.get();
+  print(item);
+}
+
+fn nested() {
+  let inner = Vec<i32>::new();
+  inner.push(90);
+  let boxed = Box<Vec<i32 >>::new(inner.move());
+  let outer = Vec<Box<Vec<i32 >> >::new();
+  outer.push(boxed.move());
+  let other = Vec<i32>::new();
+  other.push(91);
+  outer.insert(0, Box<Vec<i32 >>::new(other.move()));
+  outer.swap(0, 1);
+  let removed = outer.remove(0);
+  let unpacked = removed.into_inner();
+  match unpacked.pop() {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+  match outer.pop() {
+    Some(last) => {
+      let contents = last.into_inner();
+      match contents.pop() {
+        Some(value) => {
+          print(value);
+        },
+        None => {}
+      }
+    },
+    None => {},
+  }
+}
+
+fn mutate_child() {
+  let inner = Vec<i32>::new();
+  let boxed = Box<Vec<i32 >>::new(inner.move());
+  let edit = boxed.get_mut();
+  edit.push(100);
+  edit.replace(0, 101);
+  print(edit.len());
+}
+
+fn dynamic(index: usize) {
+  let values = Vec<Box<i32 >>::new();
+  values.push(Box<i32>::new(200));
+  values.push(Box<i32>::new(201));
+  values.insert(index, Box<i32>::new(202));
+  values.get(0);
+  let removed = values.remove(index);
+  let item = removed.get();
+  print(item);
+  removed.into_inner();
+}
+
+fn main() {
+  known();
+  branches(true);
+  branches(false);
+  cyclic();
+  opaque();
+  fields();
+  nested();
+  mutate_child();
+  dynamic(1);
+}

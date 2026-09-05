@@ -10,4 +10,6 @@ void storageLimits(core::Program &, FunctionGraph &, const std::vector<core::Ins
 void cleanupUses(core::Program &, FunctionGraph &, const std::vector<core::Inst *> &,
                  const std::map<SymbolId, SymbolId> &parents);
 void validateArguments(const core::Program &);
+void projectionLimits(const core::Program &, FunctionGraph &);
+void validateProjections(const core::Program &);
 }

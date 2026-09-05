@@ -1,0 +1,21 @@
+struct Inner {
+  text: String,
+}
+struct Outer {
+  inner: Inner,
+}
+fn replace(owner: &mut Outer) {
+  let inner = Inner::new();
+  inner.text = String::from("new");
+  owner.inner = inner.move();
+}
+fn main() {
+  let inner = Inner::new();
+  inner.text = String::from("old");
+  let owner = Outer::new();
+  owner.inner = inner.move();
+  replace(&mut owner);
+  let view = &owner.inner.text;
+  print(view.len());
+  print(view);
+}
