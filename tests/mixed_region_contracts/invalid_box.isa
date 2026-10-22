@@ -1,0 +1,12 @@
+@import "std.box"
+struct Mixed {
+  value: &i32,
+  owner: String,
+}
+fn main() {
+  let number = 1;
+    let value = Box<Mixed>::new(Mixed {
+      value: &number,
+      owner: String::from("owned")
+  });
+}

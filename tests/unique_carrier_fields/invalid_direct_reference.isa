@@ -1,0 +1,10 @@
+struct Holder {
+  value: &mut i32,
+}
+fn main() {
+  let data = 1;
+  let holder = Holder {
+    value: &mut data
+  };
+  print(holder.value);
+}

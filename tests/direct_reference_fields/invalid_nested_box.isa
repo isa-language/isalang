@@ -1,0 +1,11 @@
+@import "std.box"
+struct View {
+  value: &i32,
+}
+fn main() {
+  let data = 1;
+  let v = View {
+    value: &data
+  };
+  let item = Box<View>::new(v.move());
+}

@@ -1,0 +1,11 @@
+struct View {
+  value: Option<&i32>,
+}
+fn main() {
+  let number = 10;
+  let holder = View {
+    value: Option::Some(&number)
+  };
+  number = 20;
+  holder.value.drop();
+}

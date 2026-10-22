@@ -87,6 +87,6 @@
     "error": "cannot write through shared borrow"
   },
   "invalid_field_receiver_result": {
-    "error": "cannot end a parent borrow"
+    "error": "active unique borrow"
   }
 }

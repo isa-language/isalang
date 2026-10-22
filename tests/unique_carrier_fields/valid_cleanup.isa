@@ -1,0 +1,28 @@
+struct Holder {
+  value: Option<&mut i32>,
+  owner: String,
+}
+fn early(data: &mut i32[1], yes: bool) -> i32 {
+  let holder = Holder {
+    value: data.first_mut(),
+    owner: String::from("early")
+  };
+  if yes {
+    return 1;
+  }
+  let value = holder.value.move();
+  match value {
+    Some(item) => {
+      item = 42;
+    },
+    None => {}
+  }
+  return 2;
+}
+fn main() {
+  let data = [1];
+  print(early(&mut data, true));
+  data[0] = 2;
+  print(early(&mut data, false));
+  print(data[0]);
+}

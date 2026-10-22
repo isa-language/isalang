@@ -1,0 +1,15 @@
+struct Mixed {
+  value: &i32,
+  owner: String,
+}
+fn consume(input: Mixed) {}
+fn main() {
+  let number = 1;
+  let input = Mixed {
+    value: &number,
+    owner: String::from("owned")
+  };
+  let borrowed = &input.owner;
+  consume(input.move());
+  print(borrowed);
+}

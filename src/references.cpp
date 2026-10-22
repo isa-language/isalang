@@ -1,4 +1,6 @@
 #include "isac/hir.hpp"
+#include <algorithm>
+#include <ostream>
 
 namespace isac::hir {
 RegionArgs substituteRegions(const RegionArgs &arguments, const RegionSubstitution &substitution) {
@@ -94,5 +96,115 @@ bool Program::referenceCapability(TypeId id, Access capability) const {
   return visit(*this, id, [&](ReferenceInfo reference, const auto &) {
     return reference.capability == capability;
   });
+}
+bool Program::borrowedPayloadLayoutSupported(TypeId id, Access capability) const {
+
+  if (types.at(id).kind == Type::Structure)
+    return capability == Access::Shared && referenceCapability(id, Access::Shared) &&
+           localCarrierType(id);
+
+  if (needsDrop(id))
+    return false;
+  if (types.at(id).kind != Type::Enum)
+    return false;
+  auto references = borrowedReferences(id);
+  if (references.empty())
+    return false;
+  for (const auto &leaf : references)
+    if (leaf.path.size() != 1 || leaf.path[0].kind != ReferenceProjectionKind::VariantPayload ||
+        leaf.reference.capability != capability ||
+        !supportsStoredReferenceReferent(leaf.reference.referent))
+      return false;
+  return true;
+}
+bool Program::borrowedInputSupported(TypeId id) const {
+  return borrowedPayloadLayoutSupported(id, Access::Shared);
+}
+bool Program::referenceFreeValuePossible(TypeId id) const {
+  if (!containsReferences(id))
+    return true;
+  const auto &type = types.at(id);
+  if (type.kind == Type::Structure)
+    return std::all_of(type.fields.begin(), type.fields.end(),
+                       [&](const auto &f) { return referenceFreeValuePossible(f.type); });
+  if (type.kind == Type::Enum)
+    return std::any_of(type.variants.begin(), type.variants.end(), [&](const auto &v) {
+      return std::all_of(v.payload.begin(), v.payload.end(),
+                         [&](auto t) { return referenceFreeValuePossible(t); });
+    });
+  return false;
+}
+bool Program::conditionalReferencePosition(TypeId id, const ReferencePath &path) const {
+  for (const auto &part : path) {
+    if (part.kind == ReferenceProjectionKind::VariantPayload)
+      return true;
+    if (part.kind != ReferenceProjectionKind::Field || types.at(id).kind != Type::Structure ||
+        part.index >= types[id].fields.size())
+      fail({}, DiagnosticCode::InvalidCore, "invalid reference contract position");
+    id = types[id].fields[part.index].type;
+  }
+  return false;
+}
+ReferenceTransfers Program::referenceTransfers(const Function &function) const {
+  ReferenceTransfers result;
+  std::vector<BorrowedReference> outputs;
+  if (function.resultBorrowedContainer)
+    outputs = borrowedReferences(function.result);
+  else if (function.returnsReference())
+    outputs.push_back({{function.result, function.resultAccess, function.resultRegion}, {}});
+  for (const auto &output : outputs) {
+    auto &sources = result[output.path];
+    auto add = [&](SymbolId parameter, const ReferencePath &path, SymbolId origin) {
+      if (origin >= symbols.size() || std::find(function.params.begin(), function.params.end(),
+                                                parameter) == function.params.end())
+        fail(function.loc, DiagnosticCode::InvalidCore,
+             "reference source has no parameter position");
+      const auto &input = symbols.at(origin);
+      if (input.access == output.reference.capability &&
+          borrowResultCompatible(input.type, output.reference.referent))
+        sources.insert({parameter, path, origin});
+    };
+    for (const auto &input : function.parameterRegions)
+      add(input.parameter, {}, input.parameter);
+    for (const auto &input : function.payloadParameterRegions)
+      add(input.parameter, input.path, input.origin);
+  }
+  return result;
+}
+void printReferenceContracts(const Program &program, const Function &function, std::ostream &out) {
+  auto printPath = [&](const ReferencePath &path) {
+    if (path.empty())
+      out << "self";
+    for (const auto &part : path) {
+      if (part.kind == ReferenceProjectionKind::VariantPayload)
+        out << "#V" << part.variant << ".payload[" << part.index << "]";
+      else if (part.kind == ReferenceProjectionKind::Field)
+        out << ".field[" << part.index << "]";
+      else {
+        out << ".element[";
+        if (part.index == None)
+          out << "*";
+        else
+          out << part.index;
+        out << "]";
+      }
+    }
+  };
+  for (const auto &input : function.payloadParameterRegions) {
+    out << "  reference.input #v" << input.parameter << " path=";
+    printPath(input.path);
+    out << " region=#R" << input.region << " origin=#v" << input.origin << "\n";
+  }
+  for (const auto &[path, sources] : program.referenceTransfers(function)) {
+    out << "  reference.transfer result=";
+    printPath(path);
+    out << " <- {";
+    for (const auto &source : sources) {
+      out << " #v" << source.parameter << ":";
+      printPath(source.path);
+      out << "(origin=#v" << source.origin << ")";
+    }
+    out << " }\n";
+  }
 }
 }

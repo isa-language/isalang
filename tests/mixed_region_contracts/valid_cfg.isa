@@ -1,0 +1,36 @@
+struct View {
+  value: &i32,
+  owner: String,
+}
+fn branch(input: View, early: bool) -> View {
+  if early {
+    return input.move();
+  }
+  let count = 0;
+  while count < 2 {
+    print(input.value);
+    count = count + 1;
+  }
+  let owner = input.owner.move();
+  owner.drop();
+  input.owner = String::from("replacement");
+  return input.move();
+}
+fn main() {
+  let value = 10;
+    let first = branch(View {
+      value: &value,
+      owner: String::from("first")
+  }, true);
+  print(first.value);
+  first.drop();
+  value = 11;
+    let second = branch(View {
+      value: &value,
+      owner: String::from("second")
+  }, false);
+  print(second.value);
+  second.drop();
+  value = 12;
+  print(value);
+}

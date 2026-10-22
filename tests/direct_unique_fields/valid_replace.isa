@@ -1,0 +1,19 @@
+struct View {
+  value: &mut i32,
+}
+fn main() {
+  let old = 1;
+  let fresh = 2;
+  let first = &mut old;
+  let second = &mut fresh;
+  let view = View {
+    value: first
+  };
+  view.value = second;
+  old = 3;
+  print(old);
+  let edit = view.value.move();
+  edit = 4;
+  view.drop();
+  print(fresh);
+}

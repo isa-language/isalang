@@ -84,7 +84,7 @@
     "error": ""
   },
   "invalid_mut_return_local": {
-    "error": "storing unique references"
+    "error": "escapes its local owner"
   },
   "valid_vec_mut_parameter": {
     "stdout": "42\n2\n"

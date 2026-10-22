@@ -1,0 +1,15 @@
+struct View {
+  value: &i32,
+}
+fn make(value: &i32) -> View {
+  return View {
+    value: value
+  };
+}
+fn consume(v: View) {
+  print(v.value);
+}
+fn main() {
+  let v = View::new();
+  consume(v.move());
+}

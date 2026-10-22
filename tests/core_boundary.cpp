@@ -217,9 +217,9 @@ int main() {
     if (mode == 0)
       signature.resultPayloadSource.reset();
     else if (mode == 1)
-      signature.resultPayloadSource->path.variant = UINT32_MAX;
+      signature.resultPayloadSource->path[0].variant = UINT32_MAX;
     else if (mode == 2)
-      signature.resultPayloadSource->path.field = UINT32_MAX;
+      signature.resultPayloadSource->path[0].index = UINT32_MAX;
     else if (mode == 3)
       signature.resultPayloadSource->parameter = UINT32_MAX;
     else
@@ -254,7 +254,7 @@ int main() {
     else if (mode == 2)
       signature.additionalPayloadSources.clear();
     else if (mode == 3)
-      signature.additionalPayloadSources[0].path.field = UINT32_MAX;
+      signature.additionalPayloadSources[0].path[0].index = UINT32_MAX;
     else if (mode == 4)
       signature.additionalPayloadSources[0].parameter = UINT32_MAX;
     else if (mode == 5)
@@ -646,7 +646,7 @@ int main() {
     if (mode == 7)
       f.foreignC = true;
     if (mode == 8)
-      f.resultPayloadSource = hir::PayloadResultSource{f.params[0], {0, 0}};
+      f.resultPayloadSource = hir::PayloadResultSource{f.params[0], hir::payloadPosition(0, 0)};
     try {
       (void)core::verify(std::move(forged));
       return 1;
@@ -1121,7 +1121,16 @@ int main() {
     if (reference == None || holder == None || record == None)
       return 1;
     if (mode == 0) {
-      forged.semantics.types[record].fields[0].type = reference;
+      auto unique = forged.semantics.types[reference];
+      unique.referenceAccess = Access::Unique;
+      unique.name = "&mut i32";
+      forged.semantics.types[record].fields[0].type = forged.semantics.types.size();
+      forged.semantics.types.push_back(std::move(unique));
+      (void)core::verify(forged);
+      for (auto &function : forged.functions)
+        for (auto &instruction : function.body)
+          if (instruction.kind == core::Inst::StoreReference)
+            instruction.access = Access::Unique;
     } else if (mode == 1) {
       hir::Type nested{hir::Type::Enum, "ForgedNested"};
       nested.variants = {{0, "Nested", {holder}}};

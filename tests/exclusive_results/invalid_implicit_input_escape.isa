@@ -1,8 +1,15 @@
 fn first(values: &mut i32[]) -> Option<&mut i32> {
   return values.first_mut();
 }
+struct Holder {
+  value: Option<&mut i32>,
+}
 fn main() {
   let data = [1, 2];
-  let item = first(&mut data);
-  print(item.is_some());
+  let item = Holder::new();
+  borrow unique data as source {
+    item.value = first(&mut source);
+  }
+  let value = item.value.move();
+  print(value.is_some());
 }

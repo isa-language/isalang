@@ -1,0 +1,10 @@
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let data = [1];
+  let holder = Holder {
+    value: data.first_mut()
+  };
+  let second = holder;
+}

@@ -1,0 +1,7 @@
+struct Storage {
+  data: i32[2],
+}
+fn main() {
+  let value = Storage::new().data.get_mut(0);
+  print(value.is_some());
+}

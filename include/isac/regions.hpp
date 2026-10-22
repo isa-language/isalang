@@ -1,6 +1,7 @@
 #pragma once
 #include "isac/hir.hpp"
 #include "isac/storage.hpp"
+#include "isac/carriers.hpp"
 #include <map>
 #include <set>
 
@@ -120,6 +121,47 @@ struct ProjectionStorageBound {
   std::set<LoanId> loans;
   std::set<BasicBlockId> points;
 };
+struct SemanticValueDefinition {
+  TypeId type;
+  bool reference;
+  ProgramPoint point;
+};
+
+struct FieldRegionOperation {
+  enum Kind { Bind, Move, Take, Store, Drop, Scope, Return } kind;
+  storage::Location place{storage::Location::Symbol, None};
+  TypeId type = Unit;
+  ValueId source = None, result = None;
+  std::vector<SymbolId> locals;
+  bool operator==(const FieldRegionOperation &) const = default;
+};
+
+using ParentSet = std::set<SymbolId>;
+using ParentState = std::map<storage::Location, ParentSet>;
+struct ParentOperation {
+  enum Kind {
+    Seed,
+    Bind,
+    Move,
+    Take,
+    Store,
+    Drop,
+    Construct,
+    Alias,
+    EndAlias,
+    Scope,
+    Return,
+    Consume
+  } kind;
+  storage::Location place{storage::Location::Symbol, None};
+  storage::Location destination{storage::Location::Value, None};
+  std::vector<ValueId> inputs;
+  std::vector<hir::ReferencePath> paths;
+  std::map<hir::ReferencePath, ParentSet> seeds;
+  std::set<storage::Location> reads;
+  std::vector<SymbolId> locals;
+  bool operator==(const ParentOperation &) const = default;
+};
 struct FunctionGraph {
   FunctionId function;
   BasicBlockId entry;
@@ -128,9 +170,17 @@ struct FunctionGraph {
   std::map<RegionId, Region> regions;
   std::vector<Constraint> constraints;
   std::map<SymbolId, std::set<SymbolId>> storedResultParents;
+  std::map<uint32_t, ParentOperation> parentOperations;
+  std::map<uint32_t, ParentState> parentStates;
+  std::map<uint32_t, ParentSet> parentUses;
+  std::map<SymbolId, ParentSet> loanParents;
   FunctionRegionContract contract;
   std::map<SymbolId, hir::RegionArgs> symbolRegions;
   std::map<ValueId, hir::RegionArgs> valueRegions;
+
+  std::map<ValueId, SemanticValueDefinition> valueDefinitions;
+  std::map<uint32_t, FieldRegionOperation> fieldRegionOperations;
+  std::map<uint32_t, std::map<SymbolId, hir::RegionArgs>> fieldRegions;
   std::vector<CallRegionInstantiation> calls;
   std::map<SymbolId, StorageBound> storageBounds;
   std::map<SymbolId, RegionId> storageRegions;
@@ -140,6 +190,7 @@ struct FunctionGraph {
 
   std::set<BasicBlockId> resourcePoints;
   storage::Facts storage;
+  carriers::Facts carriers;
 };
 
 void infer(core::Program &);

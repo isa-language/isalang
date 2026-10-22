@@ -1,0 +1,7 @@
+struct View {
+  value: Option<&i32>,
+}
+fn main() {
+  let holder = View::new();
+  let item = holder.value.move();
+}

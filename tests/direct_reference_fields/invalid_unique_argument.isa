@@ -1,0 +1,13 @@
+struct View {
+  value: &String,
+}
+fn mutate(value: &mut String) {
+  value.clear();
+}
+fn main() {
+  let text = String::from("x");
+  let view = View {
+    value: &text
+  };
+  mutate(view.value);
+}

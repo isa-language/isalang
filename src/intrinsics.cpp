@@ -106,7 +106,7 @@ bool validContainerIntrinsic(const hir::Program &p, const hir::Function &f) {
            f.access == access && f.consumesSelf == (f.intrinsicId == IntrinsicId::Box_into_inner);
   };
   if (containerBorrowIntrinsic(f.intrinsicId)) {
-    if ((!containerSliceIntrinsic(f.intrinsicId) && !p.supportsStoredSharedReference(element)) ||
+    if ((!containerSliceIntrinsic(f.intrinsicId) && !p.supportsStoredReferenceReferent(element)) ||
         f.params.empty() || f.resultAccess != borrowAccess || f.resultOrigin != f.params[0] ||
         f.resultRegion == None || !f.additionalResultOrigins.empty() ||
         !f.payloadResultSources().empty() || f.parameterRegions.size() != 1 ||

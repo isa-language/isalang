@@ -1,0 +1,31 @@
+@import "std.vec"
+@import "std.box"
+struct Packet<T> {
+  value: &i32,
+  owner: T,
+}
+impl<T> Packet<T> {
+  pub fn make(value: &i32, owner: T) -> Packet<T> {
+    return Packet<T> {
+      value: value,
+      owner: owner.move()
+    };
+  }
+}
+fn forward(input: Packet<Vec<Box<String >> >) -> Packet<Vec<Box<String >> > {
+  return input.move();
+}
+fn consume(input: Packet<Vec<Box<String >> >) {
+  print(input.value);
+  print(input.owner.len());
+}
+fn main() {
+  let number = 42;
+  let values = Vec<Box<String >>::new();
+  values.push(Box<String>::new(String::from("first")));
+  values.push(Box<String>::new(String::from("second")));
+  let packet = Packet<Vec<Box<String >> >::make(&number, values.move());
+  consume(forward(packet.move()));
+  number = 43;
+  print(number);
+}

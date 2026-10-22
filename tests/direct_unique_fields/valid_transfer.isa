@@ -1,0 +1,20 @@
+struct View {
+  value: &mut i32,
+  owner: String,
+}
+fn main() {
+  let data = 1;
+  let first = View {
+    value: &mut data,
+    owner: String::from("first")
+  };
+  let second = View {
+    value: first.value.move(),
+    owner: String::from("second")
+  };
+  first.drop();
+  let edit = second.value.move();
+  second.drop();
+  edit = 42;
+  print(data);
+}

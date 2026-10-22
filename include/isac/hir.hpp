@@ -233,12 +233,7 @@ struct PayloadParameterRegion {
   SymbolId parameter;
   SymbolId origin;
   RegionId region;
-};
-
-struct PayloadPath {
-  VariantId variant;
-  uint32_t field;
-  bool operator==(const PayloadPath &) const = default;
+  ReferencePath path = {};
 };
 
 struct ReferenceInfo {
@@ -255,8 +250,16 @@ struct BorrowedReference {
 };
 struct PayloadResultSource {
   SymbolId parameter;
-  PayloadPath path;
+  ReferencePath path;
 };
+
+struct ReferenceSource {
+  SymbolId parameter;
+  ReferencePath path;
+  SymbolId origin;
+  auto operator<=>(const ReferenceSource &) const = default;
+};
+using ReferenceTransfers = std::map<ReferencePath, std::set<ReferenceSource>>;
 struct Function {
   FunctionKind kind = FunctionKind::Normal;
   FunctionEffects effects;
@@ -319,6 +322,7 @@ struct GenericPayload {
   bool parameter;
   uint32_t id;
   std::vector<GenericPayload> arguments = {};
+  std::optional<Access> referenceAccess = {};
 };
 struct GenericVariant {
   std::string name;
@@ -372,6 +376,11 @@ struct Program {
   std::optional<ReferenceInfo> symbolReference(SymbolId) const;
   std::optional<ReferenceInfo> functionReferenceResult(FunctionId) const;
   std::vector<BorrowedReference> borrowedReferences(TypeId) const;
+  bool borrowedInputSupported(TypeId) const;
+  bool borrowedPayloadLayoutSupported(TypeId, Access) const;
+  bool referenceFreeValuePossible(TypeId) const;
+  bool conditionalReferencePosition(TypeId, const ReferencePath &) const;
+  ReferenceTransfers referenceTransfers(const Function &) const;
   bool rawPointer(TypeId t) const {
     return types.at(t).kind == Type::RawPointer;
   }
@@ -391,7 +400,7 @@ struct Program {
       offset += storageWidth(payload.at(n));
     return offset;
   }
-  bool supportsStoredSharedReference(TypeId t) const {
+  bool supportsStoredReferenceReferent(TypeId t) const {
     if (t >= types.size() || types[t].protocol != None || containsReferences(t))
       return false;
     if (heap(t) || scalar(t))
@@ -416,7 +425,7 @@ struct Program {
       return true;
     const auto &from = types.at(input);
     if (dynamicContainer(input))
-      return (from.element == result && supportsStoredSharedReference(result)) ||
+      return (from.element == result && supportsStoredReferenceReferent(result)) ||
              (types[result].kind == Type::Slice && scalar(from.element) &&
               types[result].element == from.element);
     if (from.kind == Type::Array || from.kind == Type::Slice)
@@ -462,28 +471,6 @@ struct Program {
     return input.reference && reference && reference->capability == Access::Unique &&
            borrowedPayloadResultCompatible(reference->referent, function.result);
   }
-  TypeId borrowedPayloadInputType(TypeId container) const {
-    if (types.at(container).kind != Type::Enum)
-      return None;
-    const auto references = borrowedReferences(container);
-    if (references.empty())
-      return None;
-    for (const auto &stored : references)
-      if (stored.reference.capability != Access::Shared)
-        return None;
-    auto element = references.front().reference.referent;
-    return borrowedPayloadResultCompatible(element, container) ? element : None;
-  }
-  std::optional<PayloadPath> singleBorrowedPayloadPath(TypeId container) const {
-    if (types.at(container).kind != Type::Enum)
-      return {};
-    const auto references = borrowedReferences(container);
-    if (references.size() != 1 || references[0].path.size() != 1 ||
-        references[0].path[0].kind != ReferenceProjectionKind::VariantPayload)
-      return {};
-    const auto &position = references[0].path[0];
-    return PayloadPath{position.variant, position.index};
-  }
 
   std::set<VariantId> unborrowedVariants(TypeId container) const {
     std::set<VariantId> result;
@@ -499,10 +486,8 @@ struct Program {
 
   std::set<ReferencePath> borrowedPayloadPaths(TypeId result) const {
     std::set<ReferencePath> paths;
-    for (const auto &variant : types.at(result).variants)
-      for (uint32_t n = 0; n < variant.payload.size(); ++n)
-        if (reference(variant.payload[n]))
-          paths.insert(payloadPosition(variant.id, n));
+    for (const auto &leaf : borrowedReferences(result))
+      paths.insert(leaf.path);
     return paths;
   }
   std::optional<TypeId> payloadType(TypeId container, const ReferencePath &path) const {
@@ -513,6 +498,25 @@ struct Program {
       if (variant.id == path[0].variant && path[0].index < variant.payload.size())
         return variant.payload[path[0].index];
     return {};
+  }
+
+  std::optional<TypeId> referencePositionType(TypeId type, const ReferencePath &path) const {
+    for (const auto &part : path) {
+      if (type >= types.size())
+        return {};
+      const auto &shape = types[type];
+      if (part.kind == ReferenceProjectionKind::Field && shape.kind == Type::Structure &&
+          part.index < shape.fields.size())
+        type = shape.fields[part.index].type;
+      else if (part.kind == ReferenceProjectionKind::VariantPayload) {
+        auto child = payloadType(type, {part});
+        if (!child)
+          return {};
+        type = *child;
+      } else
+        return {};
+    }
+    return type < types.size() ? std::optional<TypeId>(type) : std::nullopt;
   }
   bool reference(TypeId t) const {
     return types[t].kind == Type::Reference;
@@ -525,7 +529,7 @@ struct Program {
       return false;
     for (const auto &variant : types[t].variants)
       for (auto payload : variant.payload)
-        if ((reference(payload) && !supportsStoredSharedReference(types[payload].element)) ||
+        if ((reference(payload) && !supportsStoredReferenceReferent(types[payload].element)) ||
             (!reference(payload) && containsReferences(payload)))
           return false;
     return true;
@@ -568,6 +572,28 @@ struct Program {
       return false;
     return types[t].kind == Type::Structure && needsDrop(t);
   }
+
+  bool localCarrierType(TypeId t) const {
+    if (!containsReferences(t))
+      return false;
+    if (reference(t))
+      return (types[t].referenceAccess == Access::Shared ||
+              types[t].referenceAccess == Access::Unique) &&
+             supportsStoredReferenceReferent(types[t].element);
+    if (types[t].kind == Type::Enum)
+      return borrowedPayloadLayoutSupported(t, Access::Shared) ||
+             borrowedPayloadLayoutSupported(t, Access::Unique);
+    if (types[t].kind != Type::Structure || heap(t) || types[t].protocol != None)
+      return false;
+    for (const auto &field : types[t].fields)
+      if (containsReferences(field.type) && !localCarrierType(field.type))
+        return false;
+    return true;
+  }
+
+  bool managedFieldType(TypeId t) const {
+    return ownedFieldType(t) || localCarrierType(t);
+  }
   bool containsProtocolFields(TypeId t) const {
     if (types[t].protocol != None)
       return true;
@@ -598,6 +624,14 @@ struct Program {
           result.insert(n);
     return result;
   }
+  std::set<uint32_t> managedFields(TypeId t) const {
+    std::set<uint32_t> result;
+    if (types[t].kind == Type::Structure && !heap(t))
+      for (uint32_t n = 0; n < types[t].fields.size(); ++n)
+        if (managedFieldType(types[t].fields[n].type))
+          result.insert(n);
+    return result;
+  }
   bool needsDrop(TypeId t) const {
     if (heap(t))
       return true;
@@ -618,6 +652,7 @@ struct Program {
            types[t].kind == Type::Enum || reference(t) || types[t].kind == Type::Slice;
   }
 };
+void printReferenceContracts(const Program &, const Function &, std::ostream &);
 }
 hir::Program resolve(const ast::Program &, TargetInfo target = {});
 void printHIR(const hir::Program &, std::ostream &);

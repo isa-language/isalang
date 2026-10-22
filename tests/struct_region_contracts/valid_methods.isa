@@ -1,0 +1,36 @@
+struct View<T> {
+  value: &T,
+}
+impl<T> View<T> {
+  pub fn make(value: &T) -> View<T> {
+    return View<T> {
+      value: value
+    };
+  }
+  pub fn rewrap(shared self) -> View<T> {
+    return View<T> {
+      value: self.value
+    };
+  }
+}
+fn main() -> i32 {
+  let old = 1;
+  let fresh = 2;
+  let view = View<i32>::make(&old);
+  let previous = view.rewrap();
+  view.value = &fresh;
+  let current = view.rewrap();
+  previous.drop();
+  old = 3;
+  print(old);
+  borrow shared view as alias {
+    let through_alias = alias.rewrap();
+    print(through_alias.value);
+  }
+  view.drop();
+  print(current.value);
+  current.drop();
+  fresh = 4;
+  print(fresh);
+  return 0;
+}

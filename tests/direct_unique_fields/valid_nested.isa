@@ -1,0 +1,22 @@
+struct View {
+  value: &mut i32,
+}
+struct Outer {
+  inner: View,
+  owner: String,
+}
+fn main() {
+  let data = 1;
+  let outer = Outer {
+    inner: View {
+      value: &mut data
+    },
+    owner: String::from("owned")
+  };
+  let inner = outer.inner.move();
+  outer.drop();
+  let edit = inner.value.move();
+  inner.drop();
+  edit = 42;
+  print(data);
+}

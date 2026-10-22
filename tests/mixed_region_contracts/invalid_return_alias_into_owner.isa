@@ -1,0 +1,9 @@
+struct Mixed {
+  value: &String,
+  owner: String,
+}
+fn bad(input: Mixed) -> Option<&String> {
+  let alias = &input.owner;
+  return Option::Some(alias);
+}
+fn main() {}

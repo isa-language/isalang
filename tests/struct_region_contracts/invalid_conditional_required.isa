@@ -1,0 +1,12 @@
+struct View {
+  value: &i32,
+}
+fn make(value: &i32) -> View {
+  return View {
+    value: value
+  };
+}
+fn bad(v: Option<&i32>) -> View {
+  loop {}
+}
+fn main() {}

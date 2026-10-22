@@ -355,7 +355,7 @@
     "stdout": ""
   },
   "invalid_stored_reference_unique": {
-    "code": "E6003",
+    "code": "E0312",
     "stdin": "",
     "stdout": ""
   },

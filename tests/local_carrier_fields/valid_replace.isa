@@ -1,0 +1,32 @@
+struct View {
+  value: Option<&i32>,
+}
+
+fn main() -> i32 {
+  let old = 1;
+  let fresh = 2;
+  let holder = View::new();
+  holder.value = Option::Some(&old);
+  holder.value = Option::Some(&fresh);
+  holder.value = holder.value.move();
+  old = 3;
+  print(old);
+  let item = holder.value.move();
+  holder.value = Option<&i32>::None;
+  match item {
+    Some(value) => print(value),
+    None => {}
+  }
+  fresh = 4;
+  let edit = &mut holder;
+  edit.value = Option::Some(&fresh);
+  let item2 = edit.value.move();
+  edit.value = Option<&i32>::None;
+  match item2 {
+    Some(value) => print(value),
+    None => {}
+  }
+  fresh = 5;
+  print(fresh);
+  return 0;
+}

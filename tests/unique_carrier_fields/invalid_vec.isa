@@ -1,0 +1,7 @@
+@import "std.vec"
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let values = Vec<Holder>::new();
+}

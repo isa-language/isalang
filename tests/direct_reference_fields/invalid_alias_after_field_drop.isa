@@ -1,0 +1,13 @@
+struct View {
+  value: &i32,
+}
+fn main() {
+  let data = 1;
+  let v = View {
+    value: &data
+  };
+  let r = v.value;
+  v.value.drop();
+  data = 2;
+  print(r);
+}

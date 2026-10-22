@@ -1,0 +1,12 @@
+struct View {
+  value: &i32,
+}
+fn main() {
+  let data = 1;
+  let v = View {
+    value: &data
+  };
+  borrow unique v as r {
+    r.value.drop();
+  }
+}

@@ -1,0 +1,13 @@
+struct View {
+  value: &i32,
+}
+fn main() {
+  let data = 1;
+  let other = 2;
+  let v = View {
+    value: &data
+  };
+  borrow shared v as r {
+    r.value = &other;
+  }
+}

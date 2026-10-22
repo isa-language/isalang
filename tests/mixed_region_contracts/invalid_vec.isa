@@ -1,0 +1,8 @@
+@import "std.vec"
+struct Mixed {
+  value: &i32,
+  owner: String,
+}
+fn main() {
+  let values = Vec<Mixed>::new();
+}

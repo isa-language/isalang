@@ -1,0 +1,11 @@
+struct Mixed {
+  value: &String,
+  owner: String,
+}
+fn bad(input: Mixed) -> Mixed {
+  return Mixed {
+    value: &input.owner,
+    owner: String::from("replacement")
+  };
+}
+fn main() {}

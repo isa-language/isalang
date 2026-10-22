@@ -1,0 +1,17 @@
+struct Mixed {
+  value: &String,
+  owner: String,
+}
+fn forward(input: Mixed) -> Mixed {
+  return input.move();
+}
+fn main() {
+  let text = String::from("external");
+  let input = Mixed {
+    value: &text,
+    owner: String::from("owned")
+  };
+  let output = forward(input.move());
+  text.drop();
+  print(output.value);
+}

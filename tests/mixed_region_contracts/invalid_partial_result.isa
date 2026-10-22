@@ -1,0 +1,9 @@
+struct Mixed {
+  value: &i32,
+  owner: String,
+}
+fn bad(input: Mixed) -> Mixed {
+  input.owner.drop();
+  return input.move();
+}
+fn main() {}

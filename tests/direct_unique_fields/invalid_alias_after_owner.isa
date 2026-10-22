@@ -1,0 +1,13 @@
+struct View {
+  value: &mut String,
+}
+fn main() {
+  let data = String::from("hello");
+  let view = View {
+    value: &mut data
+  };
+  let edit = view.value.move();
+  view.drop();
+  data.drop();
+  print(edit);
+}

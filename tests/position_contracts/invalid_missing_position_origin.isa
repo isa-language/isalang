@@ -1,0 +1,9 @@
+enum Choice<A, B> {
+  First(A),
+  Second(B),
+  Empty,
+}
+fn missing(input: &i32) -> Choice<&i32, &String> {
+  return Choice::First(input);
+}
+fn main() {}

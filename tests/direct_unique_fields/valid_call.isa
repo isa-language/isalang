@@ -1,0 +1,14 @@
+fn first(values: &mut i32[]) -> Option<&mut i32> {
+  return values.first_mut();
+}
+fn main() {
+  let data = [1, 2];
+  let item = first(&mut data);
+  match item {
+    Some(edit) => {
+      edit = 42;
+    },
+    None => {}
+  }
+  print(data[0]);
+}

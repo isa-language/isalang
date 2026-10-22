@@ -1,0 +1,5 @@
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn consume(input: Holder) {}
+fn main() {}

@@ -1,0 +1,22 @@
+struct Holder<T> {
+  value: T,
+  owner: String,
+}
+fn main() {
+  let data = [1, 2];
+  let edit = &mut data;
+  let holder = Holder<Option<&mut i32 >> {
+    owner: String::from("owned"),
+    value: edit.get_mut(0)
+  };
+  let value = holder.value.move();
+  holder.drop();
+  match value {
+    Some(item) => {
+      item = 42;
+    },
+    None => {}
+  }
+  print(edit[0]);
+  print(data[1]);
+}

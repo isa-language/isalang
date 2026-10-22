@@ -1,0 +1,32 @@
+struct Optional {
+  value: Option<&i32>,
+  owner: String,
+}
+fn wrap(value: Option<&i32>) -> Optional {
+  return Optional {
+    value: value.move(),
+    owner: String::from("owned")
+  };
+}
+fn forward(input: Optional) -> Optional {
+  return input.move();
+}
+fn main() {
+  let number = 1;
+  let empty = forward(wrap(Option<&i32>::None));
+  let none = empty.value.move();
+  match none {
+    Some(v) => print(v),
+    None => print(0)
+  }
+  empty.drop();
+  let full = forward(wrap(Option::Some(&number)));
+  let some = full.value.move();
+  full.drop();
+  match some {
+    Some(v) => print(v),
+    None => print(0)
+  }
+  number = 2;
+  print(number);
+}

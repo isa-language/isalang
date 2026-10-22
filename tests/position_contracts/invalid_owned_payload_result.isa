@@ -1,0 +1,8 @@
+enum Mixed<T> {
+  Both(T, String),
+  Empty,
+}
+fn bad(value: &i32) -> Mixed<&i32> {
+  return Mixed::Both(value, String::from("owned"));
+}
+fn main() {}

@@ -1,0 +1,10 @@
+@import "std.box"
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let data = [1];
+    let box = Box<Holder>::new(Holder {
+      value: data.first_mut()
+  });
+}

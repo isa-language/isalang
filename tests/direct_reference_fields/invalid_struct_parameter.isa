@@ -1,0 +1,6 @@
+struct View {
+  value: &i32,
+  owner: String,
+}
+fn bad(input: &View) {}
+fn main() {}

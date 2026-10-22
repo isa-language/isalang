@@ -1,0 +1,18 @@
+@import "std.buffer"
+struct Mixed {
+  value: &i32,
+  owner: Buffer,
+}
+fn consume(input: Mixed) {
+  let owner = input.owner.move();
+  owner.release();
+}
+fn main() {
+  let number = 1;
+  let owner = Buffer::new(2);
+  owner.release();
+    consume(Mixed {
+      value: &number,
+      owner: owner.move()
+  });
+}

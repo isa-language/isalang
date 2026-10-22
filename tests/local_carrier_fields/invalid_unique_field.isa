@@ -1,0 +1,16 @@
+struct View {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let data = [1];
+  let edit = &mut data;
+  let view = View {
+    value: edit.first_mut()
+  };
+  data[0] = 2;
+  let value = view.value.move();
+  match value {
+    Some(item) => print(item),
+    None => {}
+  }
+}

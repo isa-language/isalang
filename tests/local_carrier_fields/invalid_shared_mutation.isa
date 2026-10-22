@@ -1,0 +1,14 @@
+struct View {
+  value: Option<&i32>,
+  marker: i32,
+}
+fn main() {
+  let number = 10;
+  let holder = View {
+    value: Option::Some(&number),
+    marker: 1
+  };
+  let r = &holder;
+  holder.value.drop();
+  print(r.marker);
+}

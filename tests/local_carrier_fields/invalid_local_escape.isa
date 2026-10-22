@@ -1,0 +1,11 @@
+struct View {
+  value: Option<&i32>,
+}
+fn main() {
+  let holder = View::new();
+  {
+    let local = 10;
+    holder.value = Option::Some(&local);
+  };
+  holder.value.drop();
+}

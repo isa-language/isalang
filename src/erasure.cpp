@@ -1126,20 +1126,33 @@ class Eraser {
               projectedType == c.type ? projection : referenceView(out, projection, c.type);
         } else if (!c.args.empty())
           slots[c.offset] = values.at(c.args[0]);
-        else if (!c.payloadPath.empty()) {
-          const auto offset =
-              core.semantics.payloadOffset(core.semantics.symbols.at(c.slot).type,
-                                           c.payloadPath[0].variant, c.payloadPath[0].index);
+        else if (!c.payloadPath.empty() || c.storedPayloadReference) {
+          uint32_t offset = 0;
+          auto positionType = core.semantics.symbols.at(c.slot).type;
+          for (const auto &part : c.payloadPath) {
+            if (part.kind == hir::ReferenceProjectionKind::Field) {
+              const auto &field = core.semantics.types[positionType].fields.at(part.index);
+              offset += field.offset;
+              positionType = field.type;
+            } else {
+              offset += core.semantics.payloadOffset(positionType, part.variant, part.index);
+              positionType = *core.semantics.payloadType(positionType, {part});
+            }
+          }
 
           if (c.storedPayloadReference && !core.semantics.heap(c.type)) {
-            auto address = load(out, slots.at(c.slot), offset, {T::Pointer, 1});
+            auto address = c.payloadPath.empty()
+                               ? slots.at(c.slot)
+                               : load(out, slots.at(c.slot), offset, {T::Pointer, 1});
             i.kind = I::AddressView;
             i.type = referenceType(c.type);
             i.args = {address};
             slots[c.offset] = emit(out, i);
             break;
           }
-          auto value = project(out, slots.at(c.slot), offset, c.type);
+          auto value = c.payloadPath.empty() && c.storedPayloadReference
+                           ? slots.at(c.slot)
+                           : project(out, slots.at(c.slot), offset, c.type);
           if (scalar(c.type)) {
             I alloc{};
             alloc.kind = I::Alloc;

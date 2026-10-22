@@ -1,0 +1,14 @@
+struct Storage {
+  data: i32[2],
+}
+fn main() {
+  let storage = Storage::new();
+  let value = storage.data.get_mut(0);
+  match value {
+    Some(edit) => {
+      edit = 42;
+    },
+    None => {}
+  }
+  print(storage.data[0]);
+}

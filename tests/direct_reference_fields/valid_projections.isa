@@ -1,0 +1,56 @@
+struct Data {
+  value: i32,
+  other: i32,
+}
+struct View {
+  data: &Data,
+  array: &i32[3],
+}
+struct OwnedView {
+  value: &i32,
+  owner: String,
+}
+struct Outer {
+  inner: OwnedView,
+}
+fn main() -> i32 {
+  let data = Data {
+    value: 7,
+    other: 8
+  };
+  let array = [1, 2, 3];
+  let view = View {
+    data: &data,
+    array: &array
+  };
+  print(view.data.value);
+  print(view.array.len());
+  print(view.array[2]);
+  borrow shared view as alias {
+    print(alias.data.other);
+  }
+  view.drop();
+  let outer = Outer {
+    inner: OwnedView {
+      value: &data.value,
+      owner: String::from("owned")
+    }
+  };
+  let projected = outer.inner.value;
+  outer.drop();
+  print(projected);
+  data.value = 9;
+  let other = 10;
+  let holder = OwnedView {
+    value: &data.value,
+    owner: String::from("second")
+  };
+  borrow unique holder as edit {
+    let previous = edit.value;
+    edit.value = &other;
+    print(previous);
+    print(edit.value);
+  }
+  holder.drop();
+  return 0;
+}

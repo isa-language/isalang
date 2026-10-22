@@ -1,0 +1,8 @@
+enum Mixed<T> {
+  Both(T, String),
+  Empty,
+}
+struct View {
+  value: Mixed<&i32>,
+}
+fn main() {}

@@ -1,0 +1,14 @@
+@import "std.buffer"
+struct Mixed {
+  value: &i32,
+  owner: Buffer,
+}
+fn bad(value: &i32) -> Mixed {
+  let owner = Buffer::new(2);
+  owner.release();
+  return Mixed {
+    value: value,
+    owner: owner.move()
+  };
+}
+fn main() {}

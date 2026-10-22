@@ -1,0 +1,16 @@
+struct Mixed {
+  value: &i32,
+  owner: String,
+}
+fn forward(input: Mixed) -> Mixed {
+  return input.move();
+}
+fn main() {
+  let number = 1;
+    let result = forward(Mixed {
+      value: &number,
+      owner: String::from("owned")
+  });
+  number = 2;
+  print(result.value);
+}

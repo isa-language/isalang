@@ -1,5 +1,7 @@
 fn main() -> i32 {
   let text = String::from("x");
   let value = Option::Some(&mut text);
+  text.clear();
+  value.drop();
   return 0;
 }

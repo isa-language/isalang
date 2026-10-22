@@ -1,0 +1,35 @@
+struct View {
+  number: &i32,
+  text: &String,
+}
+struct Outer {
+  inner: View,
+  other: Option<&i32>,
+}
+fn make(number: &i32, text: &String) -> Outer {
+  return Outer {
+    other: Option::Some(number),
+    inner: View {
+      text: text,
+      number: number
+    }
+  };
+}
+fn number(view: Outer) -> Option<&i32> {
+  let inner = view.inner.move();
+  return Option::Some(inner.number);
+}
+fn main() -> i32 {
+  let data = 7;
+  let text = String::from("text");
+  let view = make(&data, &text);
+  let item = number(view.move());
+  text.clear();
+  match item {
+    Some(value) => print(value),
+    None => {}
+  }
+  data = 8;
+  print(data);
+  return 0;
+}

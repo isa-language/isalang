@@ -55,7 +55,7 @@ int main() {
       refs[1].path != std::vector<ReferenceProjection>{{ReferenceProjectionKind::Field, 1}} ||
       !program.containsReferences(pairId) || program.referenceCapability(pairId, Access::Shared) ||
       program.referenceCapability(pairId, Access::Unique) ||
-      program.supportsStoredSharedReference(pairId))
+      program.supportsStoredReferenceReferent(pairId))
     return 6;
   Type variants{Type::Enum, "Nested"};
   variants.variants = {{41, "First", {pairId}}, {73, "Second", {sharedId, sharedId}}};
@@ -82,7 +82,7 @@ int main() {
   if (refs.size() != 4 || refs[0].path.size() != 4 ||
       refs[0].path[0].kind != ReferenceProjectionKind::Element ||
       refs[0].path[1].kind != ReferenceProjectionKind::Element ||
-      program.containerElement(vectorId) || program.supportsStoredSharedReference(vectorId))
+      program.containerElement(vectorId) || program.supportsStoredReferenceReferent(vectorId))
     return 8;
   Type array{Type::Array, "ReferenceArraySchema"};
   array.element = sharedId;

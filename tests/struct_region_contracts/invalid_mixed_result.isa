@@ -1,0 +1,12 @@
+struct Mixed {
+  value: &i32,
+  owner: String,
+}
+fn bad(v: &i32) -> Mixed {
+  let local = 1;
+  return Mixed {
+    value: &local,
+    owner: String::from("owned")
+  };
+}
+fn main() {}

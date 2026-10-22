@@ -1,0 +1,12 @@
+struct View {
+  value: Option<&i32>,
+  owner: String,
+}
+fn bad(value: &i32) -> View {
+  let local = 1;
+  return View {
+    value: Option::Some(&local),
+    owner: String::from("owned")
+  };
+}
+fn main() {}

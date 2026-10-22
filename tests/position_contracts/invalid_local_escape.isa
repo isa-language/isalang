@@ -1,0 +1,9 @@
+enum Pair<A, B> {
+  Values(A, B),
+  Empty,
+}
+fn bad(input: Pair<&i32, &String>) -> Option<&i32> {
+  let local = 99;
+  return Option::Some(&local);
+}
+fn main() {}

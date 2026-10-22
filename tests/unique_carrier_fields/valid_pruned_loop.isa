@@ -1,0 +1,32 @@
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let data = [1];
+  let source = &mut data;
+  let choose = Option::Some(1);
+  loop {
+    match choose {
+      Some(selected) => {
+        let holder = Holder {
+          value: source.first_mut()
+        };
+        let value = holder.value.move();
+        match value {
+          Some(item) => {
+            item = 42;
+          },
+          None => {}
+        }
+        break;
+      },
+      None => {
+        let omitted = Holder {
+          value: source.first_mut()
+        };
+        break;
+      }
+    }
+  }
+  print(data[0]);
+}

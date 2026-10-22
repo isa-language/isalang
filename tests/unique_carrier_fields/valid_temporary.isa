@@ -1,0 +1,14 @@
+struct Holder {
+  value: Option<&mut i32>,
+  owner: String,
+}
+fn main() {
+  let data = [1];
+  let edit = &mut data;
+  Holder {
+    value: edit.first_mut(),
+    owner: String::from("temporary")
+  };
+  edit[0] = 42;
+  print(data[0]);
+}

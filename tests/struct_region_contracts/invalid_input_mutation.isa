@@ -1,0 +1,13 @@
+struct View {
+  value: &i32,
+}
+fn make(value: &i32) -> View {
+  return View {
+    value: value
+  };
+}
+fn mutate(v: View) {
+  let alias = v.value;
+  alias = 2;
+}
+fn main() {}

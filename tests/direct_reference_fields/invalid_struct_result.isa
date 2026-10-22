@@ -1,0 +1,12 @@
+struct View {
+  value: &i32,
+  owner: String,
+}
+fn bad(input: &i32) -> View {
+  let local = 1;
+  return View {
+    value: &local,
+    owner: String::from("owned")
+  };
+}
+fn main() {}

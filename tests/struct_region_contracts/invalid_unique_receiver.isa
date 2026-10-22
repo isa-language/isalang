@@ -1,0 +1,12 @@
+struct View {
+  value: &i32,
+}
+fn make(value: &i32) -> View {
+  return View {
+    value: value
+  };
+}
+impl View {
+  fn mutate(unique self) {}
+}
+fn main() {}

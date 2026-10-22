@@ -1,0 +1,27 @@
+struct Pair {
+  first: &i32,
+  second: &i32,
+}
+struct View {
+  value: &i32,
+}
+fn make(value: &i32) -> View {
+  return View {
+    value: value
+  };
+}
+fn first(v: Pair) -> View {
+  return View {
+    value: v.first
+  };
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let v = first(Pair {
+      first: &a,
+      second: &b
+  });
+  b = 3;
+  print(v.value);
+}

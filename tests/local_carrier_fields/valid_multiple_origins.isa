@@ -1,0 +1,23 @@
+enum Duo<A, B> {
+  Both(A, B),
+  Empty,
+}
+struct View {
+  value: Duo<&i32, &i32>,
+}
+
+fn main() -> i32 {
+  let a = 10;
+  let b = 20;
+  let holder = View::new();
+  holder.value = Duo::Both(&a, &b);
+  let first = holder.value.move();
+  holder.value = Duo::Both(&a, &a);
+  first.drop();
+  b = 21;
+  print(b);
+  holder.value.drop();
+  a = 11;
+  print(a);
+  return 0;
+}

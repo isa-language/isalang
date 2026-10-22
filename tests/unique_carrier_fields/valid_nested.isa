@@ -1,0 +1,28 @@
+struct Holder<T> {
+  value: T,
+}
+struct Outer<T> {
+  inner: T,
+  owner: String,
+}
+fn main() {
+  let data = [1];
+  let edit = &mut data;
+  let outer = Outer<Holder<Option<&mut i32 >> > {
+    inner: Holder<Option<&mut i32 >> {
+      value: edit.first_mut()
+    },
+    owner: String::from("outer")
+  };
+  let inner = outer.inner.move();
+  outer.drop();
+  let value = inner.value.move();
+  inner.drop();
+  match value {
+    Some(item) => {
+      item = 42;
+    },
+    None => {}
+  }
+  print(data[0]);
+}

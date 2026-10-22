@@ -1,0 +1,15 @@
+struct View {
+  value: &i32,
+}
+fn make(value: &i32) -> View {
+  return View {
+    value: value
+  };
+}
+fn bad(input: &i32) -> View {
+  let local = 1;
+  return View {
+    value: &local
+  };
+}
+fn main() {}

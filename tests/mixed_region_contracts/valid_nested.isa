@@ -1,0 +1,35 @@
+struct View {
+  value: &i32,
+  owner: String,
+}
+struct Outer<T> {
+  inner: T,
+  other: Option<&String>,
+  owner: String,
+}
+fn make(value: &i32, text: &String) -> Outer<View> {
+  return Outer<View> {
+    owner: String::from("outer"),
+    other: Option::Some(text),
+    inner: View {
+      owner: String::from("inner"),
+      value: value
+    }
+  };
+}
+fn extract(input: Outer<View>) -> Option<&i32> {
+  let inner = input.inner.move();
+  return Option::Some(inner.value);
+}
+fn main() {
+  let number = 7;
+  let text = String::from("source");
+  let item = extract(make(&number, &text));
+  text.clear();
+  match item {
+    Some(value) => print(value),
+    None => {}
+  }
+  number = 8;
+  print(number);
+}

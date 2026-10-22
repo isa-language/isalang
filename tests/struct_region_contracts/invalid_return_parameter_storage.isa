@@ -1,0 +1,18 @@
+struct Input {
+  value: &i32,
+  local: i32,
+}
+struct View {
+  value: &i32,
+}
+fn make(value: &i32) -> View {
+  return View {
+    value: value
+  };
+}
+fn bad(v: Input) -> View {
+  return View {
+    value: &v.local
+  };
+}
+fn main() {}

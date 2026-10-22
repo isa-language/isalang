@@ -1,0 +1,28 @@
+struct View {
+  pointer: &i32,
+}
+fn forward(value: &i32) -> &i32 {
+  let view = View {
+    pointer: value
+  };
+  return view.pointer;
+}
+fn wrap(value: &i32) -> Option<&i32> {
+  let view = View {
+    pointer: value
+  };
+  return Option::Some(view.pointer);
+}
+fn main() -> i32 {
+  let number = 9;
+  let r = forward(&number);
+  print(r);
+  let result = wrap(&number);
+  match result {
+    Some(item) => print(item),
+    None => {}
+  }
+  number = 10;
+  print(number);
+  return 0;
+}

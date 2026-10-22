@@ -1,0 +1,26 @@
+enum Pair<A, B> {
+  Values(A, B),
+  Empty,
+}
+fn first(input: Pair<&i32, &String>) -> Option<&i32> {
+  match input {
+    Pair::Values(a, b) => {
+      return Option::Some(a);
+    },
+    Pair::Empty => {
+      return Option::None;
+    },
+  }
+}
+fn main() {
+  let number = 1;
+  let text = String::from("text");
+  let view = first(Pair::Values(&number, &text));
+  number = 2;
+  match view.move() {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+}

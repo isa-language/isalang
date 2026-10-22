@@ -1,0 +1,80 @@
+@import("std.box", "std.vec")
+
+fn inspect(value: Option<&i32>) -> i32 {
+  return match value {
+    Option::Some(view) => view,
+    Option::None => 0,
+  };
+}
+
+fn forward(value: Option<&i32>, count: i32) -> Option<&i32> {
+  if count == 0 {
+    return value.move();
+  }
+  return forward(value.move(), count - 1);
+}
+
+fn early(condition: bool, data: &i32) -> i32 {
+  let wrapped = Option::Some(data);
+  if condition {
+    return inspect(wrapped.move());
+  }
+  wrapped.drop();
+  return 0;
+}
+
+fn cleanup_on_return(data: &i32) {
+  let scoped = Option::Some(data);
+  return;
+}
+
+fn unique_payload() {
+  let values = Vec<String>::new();
+  values.push(String::from("u"));
+  match values.get_mut(0) {
+    Some(view) => view.push_str("!"),
+    None => {},
+  }
+  match values.get(0) {
+    Some(view) => print(view.len()),
+    None => {},
+  }
+}
+
+fn main() -> i32 {
+  let data = 10;
+  let first = Option::Some(&data);
+  let second = Option::Some(&data);
+  first.drop();
+  print(inspect(second.move()));
+  data = 20;
+  print(early(true, &data));
+  print(early(false, &data));
+  cleanup_on_return(&data);
+  let text = String::from("carrier");
+  let before = Option::Some(&text);
+  let after = before.move();
+  match after {
+    Option::Some(view) => print(view),
+    Option::None => {},
+  }
+  {
+    let scoped = Option::Some(&text);
+  };
+  text.clear();
+  print(text.len());
+  let box = Box<i32>::new(30);
+  let reference = box.get();
+  let wrapped = Option::Some(reference);
+  let moved = forward(wrapped.move(), 2);
+  print(inspect(moved.move()));
+  let i = 0;
+  while i < 2 {
+    let value = Option::Some(&data);
+    print(inspect(value.move()));
+    data = data + 1;
+    i = i + 1;
+  }
+  unique_payload();
+  return 0;
+}

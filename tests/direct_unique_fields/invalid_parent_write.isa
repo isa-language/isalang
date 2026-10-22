@@ -1,0 +1,12 @@
+struct View {
+  value: &mut i32,
+}
+fn main() {
+  let data = 1;
+  let parent = &mut data;
+  let view = View {
+    value: parent
+  };
+  parent = 2;
+  view.drop();
+}

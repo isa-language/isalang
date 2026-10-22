@@ -1,0 +1,30 @@
+struct Optional {
+  item: Option<&i32>,
+}
+fn wrap(value: Option<&i32>) -> Optional {
+  return Optional {
+    item: value.move()
+  };
+}
+fn forward(value: Optional) -> Optional {
+  return value.move();
+}
+fn main() -> i32 {
+  let none: Option<&i32> = Option::None;
+  let empty = forward(wrap(none.move()));
+  let item = empty.item.move();
+  match item {
+    Some(value) => print(value),
+    None => print(0)
+  }
+  let number = 1;
+  let full = forward(wrap(Option::Some(&number)));
+  let item2 = full.item.move();
+  match item2 {
+    Some(value) => print(value),
+    None => print(0)
+  }
+  number = 2;
+  print(number);
+  return 0;
+}

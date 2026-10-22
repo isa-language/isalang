@@ -48,6 +48,13 @@ class Builder {
         }
         binding.slot = receiver(*part);
         binding.fieldIndex = binding.fieldPath.back();
+        if (p.semantics.reference(source.type)) {
+          for (auto index : binding.fieldPath)
+            binding.payloadPath.push_back({hir::ReferenceProjectionKind::Field, index});
+          binding.fieldPath.clear();
+          binding.fieldIndex = None;
+          binding.placeProjection = Inst::PlaceProjection::None;
+        }
       } else {
         binding.placeProjection = Inst::PlaceProjection::Index;
         binding.slot =
@@ -61,7 +68,7 @@ class Builder {
           binding.args = {expr(source.args.at(1))};
       }
     } else
-      binding.slot = source.ref;
+      binding.slot = p.semantics.reference(source.type) ? receiver(source) : source.ref;
   }
   SymbolId receiver(const hir::Expr &e, Access access = Access::Shared) {
     if ((e.kind == hir::Expr::Field || e.kind == hir::Expr::Index) &&
@@ -96,6 +103,7 @@ class Builder {
       binding.placeProjection = source.placeProjection;
       binding.fieldIndex = source.fieldIndex;
       binding.fieldPath = std::move(source.fieldPath);
+      binding.payloadPath = std::move(source.payloadPath);
       symbol.region = e.region;
       binding.offset = id;
       binding.region = e.region;
@@ -119,6 +127,16 @@ class Builder {
       emit(end, false);
       temporaries.erase(temporaries.begin() + n - 1);
     }
+  }
+  std::vector<SymbolId> retainTemporaryParents(SymbolId parent) {
+    std::vector<SymbolId> result;
+    for (; temporaryParents.contains(parent); parent = temporaryParents.at(parent)) {
+      p.semantics.symbols[parent].inferredRegion = true;
+      temporaries.erase(std::remove(temporaries.begin(), temporaries.end(), parent),
+                        temporaries.end());
+      result.push_back(parent);
+    }
+    return result;
   }
   void endTemporaries(Loc loc) {
     for (auto it = temporaries.rbegin(); it != temporaries.rend(); ++it) {
@@ -211,7 +229,10 @@ class Builder {
     case E::StoreReference:
       i.kind = Inst::StoreReference;
       i.slot = receiver(e.args.at(0));
-      i.access = Access::Shared;
+      i.access = p.semantics.types[e.type].referenceAccess;
+
+      if (i.access == Access::Unique)
+        retainTemporaryParents(i.slot);
       return emit(i);
     case E::Borrow:
       if (scalar(e.type)) {
@@ -307,7 +328,7 @@ class Builder {
         return None;
       }
       const auto &target = e.args.at(0);
-      if (target.kind == E::Field && p.semantics.ownedFieldType(target.type)) {
+      if (target.kind == E::Field && p.semantics.managedFieldType(target.type)) {
         i.kind = Inst::FieldStore;
         i.slot = target.args.at(0).ref;
         i.type = target.type;
@@ -411,7 +432,7 @@ class Builder {
       return emit(i);
     case E::Move:
     case E::Drop:
-      if (e.args[0].kind == E::Field && p.semantics.ownedFieldType(e.args[0].type)) {
+      if (e.args[0].kind == E::Field && p.semantics.managedFieldType(e.args[0].type)) {
         const auto &field = e.args[0];
         i.kind = e.kind == E::Move ? Inst::FieldTake : Inst::FieldDrop;
         i.slot = field.args.at(0).ref;
@@ -519,6 +540,14 @@ class Builder {
         referenceResults[result] = i.slot != None && index == 0
                                        ? i.slot
                                        : referenceResults.at(i.args.at(index - (i.slot != None)));
+      }
+      if (f.resultBorrowedContainer && f.resultAccess == Access::Unique) {
+        auto index = std::find(f.params.begin(), f.params.end(), f.resultOrigin) - f.params.begin();
+        auto parent = i.slot != None && index == 0
+                          ? i.slot
+                          : referenceResults.at(i.args.at(index - (i.slot != None)));
+
+        retainTemporaryParents(parent);
       }
 
       if (!f.returnsReference() && !p.semantics.containsReferences(e.type) && e.type != Str) {
@@ -653,15 +682,13 @@ class Builder {
         i.kind = s.access == Access::Shared ? Inst::BorrowShared : Inst::BorrowUnique;
         borrowSource(s.expr, i);
 
-        for (auto parent = i.slot; temporaryParents.contains(parent);
-             parent = temporaryParents.at(parent)) {
-          p.semantics.symbols[parent].inferredRegion = true;
-          temporaries.erase(std::remove(temporaries.begin(), temporaries.end(), parent),
-                            temporaries.end());
-          locals.push_back(parent);
+        {
+          auto retained = retainTemporaryParents(i.slot);
+          locals.insert(locals.end(), retained.begin(), retained.end());
         }
         i.region = s.expr.region;
-        i.payloadPath = s.expr.payloadPath;
+        if (!s.expr.payloadPath.empty())
+          i.payloadPath = s.expr.payloadPath;
         i.offset = s.symbol;
         i.type = s.expr.type;
         i.quantity = Quantity::One;
@@ -832,14 +859,15 @@ class Checker {
   std::map<FunctionId, core::Function *> definitions;
   std::map<FunctionId, regions::FunctionGraph *> regionDefinitions;
   std::set<FunctionId> checked, checking;
-  void recordProjectionStorage(const Context &c, const Inst &i) {
+  void recordResourcePoint(const Context &c, const Inst &i) {
     auto &graph = *regionDefinitions.at(function->id);
+    if (i.semanticPoint == None || i.semanticPoint >= graph.blocks.size())
+      fail(i.loc, DiagnosticCode::InvalidCore, "resource transfer has no semantic program point");
+    if (!graph.blocks[i.semanticPoint].reachable)
+      return;
+    graph.resourcePoints.insert(i.semanticPoint);
     if (graph.projectionBounds.empty())
       return;
-    if (i.semanticPoint == None || i.semanticPoint >= graph.blocks.size())
-      fail(i.loc, DiagnosticCode::InvalidCore,
-           "field initialization has no semantic program point");
-    graph.resourcePoints.insert(i.semanticPoint);
     for (auto &[loan, bound] : graph.projectionBounds) {
       auto owner = c.vars.find(bound.owner);
       if (owner == c.vars.end() || !owner->second.live)
@@ -867,7 +895,7 @@ class Checker {
     for (auto id : f.params) {
       const auto &s = symbol(id);
       if ((s.reference || (s.receiver && !f.consumesSelf)) &&
-          !p.semantics.ownedFields(s.type).empty())
+          !p.semantics.managedFields(s.type).empty())
         return true;
     }
     return false;
@@ -877,7 +905,7 @@ class Checker {
     for (auto id : function->params) {
       const auto &s = symbol(id);
       if (!(s.reference || (s.receiver && !function->consumesSelf)) ||
-          p.semantics.ownedFields(s.type).empty())
+          p.semantics.managedFields(s.type).empty())
         continue;
       auto &r = live(c, id, loc);
       if (!r.absentFields.empty())
@@ -1034,6 +1062,67 @@ class Checker {
       }
     }
   }
+  void referencePresence(Context &c, Inst &site, const CarrierMap &carriers) {
+    if (!p.semantics.containsReferences(site.type))
+      return;
+    const auto leaves = p.semantics.borrowedReferences(site.type);
+    if (p.semantics.types[site.type].kind == hir::Type::Enum) {
+      std::set<VariantId> possible;
+      for (const auto &variant : p.semantics.types[site.type].variants) {
+        bool available = true;
+        for (const auto &leaf : leaves)
+          if (leaf.path[0].variant == variant.id && !carriers.contains(leaf.path))
+            available = false;
+        if (available)
+          possible.insert(variant.id);
+      }
+      site.possibleVariants.assign(possible.begin(), possible.end());
+      c.valueVariantSets[site.result] = std::move(possible);
+    } else
+      for (const auto &leaf : leaves)
+        if (!p.semantics.conditionalReferencePosition(site.type, leaf.path) &&
+            !carriers.contains(leaf.path))
+          fail(site.loc, DiagnosticCode::EscapingView,
+               "a mandatory reference position has no live input origin");
+  }
+  std::pair<Resource *, hir::ReferencePath> fieldCarrierPlace(Context &c, SymbolId id,
+                                                              uint32_t field, Loc loc) {
+    auto &source = live(c, id, loc);
+    auto &owner = source.root == None ? source : live(c, source.root, loc);
+    hir::ReferencePath path;
+    for (auto index : source.ownedProjection)
+      path.push_back({hir::ReferenceProjectionKind::Field, index});
+    path.push_back({hir::ReferenceProjectionKind::Field, field});
+    return {&owner, std::move(path)};
+  }
+  CarrierMap takeFieldCarriers(Resource &owner, const hir::ReferencePath &prefix) {
+    CarrierMap result;
+    for (auto it = owner.carriers.begin(); it != owner.carriers.end();) {
+      if (it->first.size() >= prefix.size() &&
+          std::equal(prefix.begin(), prefix.end(), it->first.begin())) {
+        hir::ReferencePath path(it->first.begin() + prefix.size(), it->first.end());
+        result.emplace(std::move(path), std::move(it->second));
+        it = owner.carriers.erase(it);
+      } else
+        ++it;
+    }
+    return result;
+  }
+  void installFieldCarriers(Resource &owner, const hir::ReferencePath &prefix,
+                            CarrierMap carriers) {
+    for (auto &[path, provenance] : carriers) {
+      auto position = prefix;
+      position.insert(position.end(), path.begin(), path.end());
+      owner.carriers.emplace(std::move(position), std::move(provenance));
+    }
+  }
+  void releaseCarriers(Context &c, const CarrierMap &carriers, Loc loc) {
+    for (const auto &[path, provenance] : carriers) {
+      (void)path;
+      releaseLoan(c, provenance.origins, provenance.capability == Access::Unique, loc);
+      resumeParent(c, provenance.parent, loc);
+    }
+  }
   void setAliasOrigins(Resource &alias, const std::set<SymbolId> &owners) {
     alias.root = *owners.begin();
     alias.extraRoots = owners;
@@ -1047,7 +1136,7 @@ class Checker {
   }
   std::map<uint32_t, OwnedFieldState> initialFields(TypeId type) {
     std::map<uint32_t, OwnedFieldState> fields;
-    for (auto index : p.semantics.ownedFields(type)) {
+    for (auto index : p.semantics.managedFields(type)) {
       auto t = p.semantics.types[type].fields[index].type;
       fields[index] = {initial(t), p.semantics.needsDrop(t), initialFields(t), {}};
     }
@@ -1076,7 +1165,7 @@ class Checker {
     return c.vars.at(alias.root == None ? id : alias.root).fields;
   }
   std::set<uint32_t> missingFields(TypeId type, const std::map<uint32_t, OwnedFieldState> &fields) {
-    auto missing = p.semantics.ownedFields(type);
+    auto missing = p.semantics.managedFields(type);
     for (const auto &[index, state] : fields)
       missing.erase(index);
     return missing;
@@ -1091,7 +1180,7 @@ class Checker {
   }
   void initialFieldContract(TypeId type, const std::map<uint32_t, OwnedFieldState> &fields,
                             Loc loc) {
-    for (auto index : p.semantics.ownedFields(type)) {
+    for (auto index : p.semantics.managedFields(type)) {
       if (!fields.contains(index))
         fail(loc, DiagnosticCode::InvalidCore, "incomplete owned-field input contract");
       const auto &value = fields.at(index);
@@ -1106,7 +1195,7 @@ class Checker {
   FieldDropPlan fieldDropPlan(TypeId type, const std::map<uint32_t, OwnedFieldState> &fields,
                               const std::set<uint32_t> &absent, const std::string &name, Loc loc) {
     FieldDropPlan plan;
-    for (auto index : p.semantics.ownedFields(type)) {
+    for (auto index : p.semantics.managedFields(type)) {
       if (absent.contains(index)) {
         plan.fields[index].skip = true;
         continue;
@@ -1436,8 +1525,8 @@ class Checker {
         fail(l, DiagnosticCode::UnconsumedResource,
              "unconsumed linear temporary %" + std::to_string(v));
   }
-  std::set<SymbolId> call(Inst &i, Context &c) {
-    std::set<SymbolId> payloadResultOrigin;
+  CarrierMap call(Inst &i, Context &c) {
+    CarrierMap resultProvenance;
     auto &f = p.semantics.functions[i.function];
     if (hasFieldContract(f))
       checkFunction(f.id);
@@ -1553,23 +1642,43 @@ class Checker {
       }
     }
     applyFieldPostStates(i, c);
+    if (f.resultBorrowedContainer)
+      for (const auto &[path, sources] : p.semantics.referenceTransfers(f)) {
+        std::set<SymbolId> owners;
+        for (const auto &source : sources) {
+          auto parameter =
+              std::find(f.params.begin(), f.params.end(), source.parameter) - f.params.begin();
+          if (source.path.empty()) {
+            auto alias = i.slot != None && parameter == 0
+                             ? i.slot
+                             : c.references.at(i.args.at(parameter - skip));
+            auto actual = origins(c, alias, i.loc);
+            owners.insert(actual.begin(), actual.end());
+          } else {
+            const CarrierMap *carriers;
+            auto path = source.path;
+            if (i.slot != None && parameter == 0) {
+              const auto &receiver = live(c, i.slot, i.loc);
+              const auto &owner = receiver.root == None ? receiver : live(c, receiver.root, i.loc);
+              hir::ReferencePath prefix;
+              for (auto field : receiver.ownedProjection)
+                prefix.push_back({hir::ReferenceProjectionKind::Field, field});
+              path.insert(path.begin(), prefix.begin(), prefix.end());
+              carriers = &owner.carriers;
+            } else
+              carriers = &c.values.at(i.args.at(parameter - skip)).carriers;
+            if (auto actual = carriers->find(path); actual != carriers->end())
+              owners.insert(actual->second.origins.begin(), actual->second.origins.end());
+          }
+        }
+        if (!owners.empty())
+          resultProvenance[path] = {std::move(owners), f.resultAccess};
+      }
 
     for (size_t n = 0; n < i.args.size(); ++n) {
       const auto &parameter = symbol(f.params[n + skip]);
       if (!parameter.reference && p.semantics.containsReferences(parameter.type)) {
         auto &value = c.values.at(i.args[n]);
-        for (const auto &source : f.payloadResultSources()) {
-          if (source.parameter != parameter.id)
-            continue;
-          const auto &path = source.path;
-          auto offset = hir::payloadPosition(path.variant, path.field);
-          if (value.carriers.contains(offset)) {
-            const auto &owners = value.carriers.at(offset).origins;
-            payloadResultOrigin.insert(owners.begin(), owners.end());
-          } else if (!value.carriers.empty())
-            fail(i.loc, DiagnosticCode::InvalidCore,
-                 "argument loans do not match result source path");
-        }
         for (const auto &[offset, owner] : value.carriers)
           releaseCarriedLoan(c, value, offset, i.loc);
         value.carriers.clear();
@@ -1589,7 +1698,7 @@ class Checker {
       owner.consumedAt = i.loc;
       c.variants.erase(i.slot);
     }
-    return payloadResultOrigin;
+    return resultProvenance;
   }
   void pointerAccess(Context &c, ValueId value, Access requested, Loc loc, bool free = false) {
     auto it = c.pointers.find(value);
@@ -1619,7 +1728,7 @@ class Checker {
         }
       }
 
-      recordProjectionStorage(c, i);
+      recordResourcePoint(c, i);
       i.possibleVariants.clear();
       i.storedPayloadReference = false;
       i.cleanup.clear();
@@ -1674,10 +1783,21 @@ class Checker {
         }
         break;
       case Inst::StoreReference: {
-        access(c, i.slot, Access::Shared, i.loc);
+        access(c, i.slot, i.access, i.loc);
+        auto &source = live(c, i.slot, i.loc);
         auto owner = origins(c, i.slot, i.loc);
-        retainOrigins(c, owner, i.loc);
-        c.values[i.result] = {i.type, None, true, false, None, {{hir::ReferencePath{}, {owner}}}};
+        SymbolId parent = None;
+        if (i.access == Access::Unique) {
+          if (owner.size() != 1 || source.access != Access::Unique)
+            fail(i.loc, DiagnosticCode::InvalidReborrow,
+                 "exclusive stored reference requires one unique source");
+          source.unique = true;
+          parent = i.slot;
+          ++live(c, *owner.begin(), i.loc).exclusiveLoans;
+        } else
+          retainOrigins(c, owner, i.loc);
+        c.values[i.result] = {i.type, None, true,
+                              false,  None, {{hir::ReferencePath{}, {owner, i.access, parent}}}};
         break;
       }
       case Inst::ReferenceArgument:
@@ -1769,7 +1889,8 @@ class Checker {
             fail(i.loc, DiagnosticCode::AllocationContract,
                  "enum payloads with protocolled fields require a payload state contract");
           auto &payload = take(c, i.args[n], i.loc);
-          if (hasExclusiveCarriers(payload))
+          if (hasExclusiveCarriers(payload) &&
+              !p.semantics.borrowedPayloadLayoutSupported(i.type, Access::Unique))
             fail(
                 i.loc, DiagnosticCode::InvalidReborrow,
                 "storing an exclusive reference in another container requires a transfer contract");
@@ -1777,9 +1898,6 @@ class Checker {
             fail(i.loc, DiagnosticCode::ConsumedResource,
                  "cannot store a struct with uninitialized owned fields");
           if (p.semantics.reference(tid)) {
-            if (p.semantics.types[tid].referenceAccess != Access::Shared)
-              fail(i.loc, DiagnosticCode::InvalidCore,
-                   "exclusive stored references require a storage transfer contract");
             if (payload.carriers.size() != 1 || !payload.carriers.contains(hir::ReferencePath{}))
               fail(i.loc, DiagnosticCode::InvalidCore, "stored reference has no origin");
             carriers[hir::payloadPosition(i.offset, n)] = payload.carriers.at(hir::ReferencePath{});
@@ -1802,11 +1920,18 @@ class Checker {
           if (!p.semantics.linear(type))
             continue;
           auto &value = take(c, i.args[n], i.loc);
-          if (!value.carriers.empty() || !value.absentFields.empty())
+          if ((!value.carriers.empty() && !p.semantics.localCarrierType(type)) ||
+              !value.absentFields.empty())
             fail(i.loc, DiagnosticCode::AllocationContract,
-                 "struct initializer requires fully initialized, non-borrowed field owners");
-          if (p.semantics.ownedFieldType(type))
+                 "struct initializer requires initialized fields with supported carrier contracts");
+          if (p.semantics.managedFieldType(type))
             result.fields[index] = {value.state, value.allocation, value.fields, i.loc};
+          hir::ReferencePath prefix{{hir::ReferenceProjectionKind::Field, index}};
+          for (const auto &[path, provenance] : value.carriers) {
+            auto position = prefix;
+            position.insert(position.end(), path.begin(), path.end());
+            result.carriers.emplace(std::move(position), provenance);
+          }
         }
         c.values[i.result] = std::move(result);
         break;
@@ -1819,7 +1944,7 @@ class Checker {
             if (p.semantics.linear(p.semantics.types[i.type].element))
               (void)take(c, argument, i.loc);
         c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
-        c.values[i.result].absentFields = p.semantics.ownedFields(i.type);
+        c.values[i.result].absentFields = p.semantics.managedFields(i.type);
         break;
       case Inst::FieldStore:
       case Inst::FieldTake:
@@ -1831,6 +1956,7 @@ class Checker {
             access(c, i.slot, i.kind == Inst::FieldStore || borrowed ? Access::Unique : Access::Own,
                    i.loc);
         auto &fields = placeFields(c, i.slot, i.loc);
+        auto [carrierOwner, carrierPath] = fieldCarrierPlace(c, i.slot, i.fieldIndex, i.loc);
         auto fieldName = symbol(i.slot).name + "." +
                          p.semantics.types[symbol(i.slot).type].fields[i.fieldIndex].name;
         auto oldPlan = [&] {
@@ -1844,13 +1970,17 @@ class Checker {
         };
         if (i.kind == Inst::FieldStore) {
           auto &value = take(c, i.args.at(0), i.loc);
-          if (!value.carriers.empty() || !value.absentFields.empty() ||
-              (!value.allocation && !p.semantics.containsProtocolFields(i.type)))
+          if ((!value.carriers.empty() && !p.semantics.localCarrierType(i.type)) ||
+              !value.absentFields.empty() ||
+              (!value.allocation && p.semantics.needsDrop(i.type) &&
+               !p.semantics.containsProtocolFields(i.type)))
             fail(i.loc, DiagnosticCode::AllocationContract,
-                 "owned field requires a fully initialized, non-borrowed owner");
+                 "field requires an initialized owner or supported provenance carrier");
           i.replaceField = fields.contains(i.fieldIndex);
           if (i.replaceField)
             i.replacedFieldPlan = oldPlan();
+          releaseCarriers(c, takeFieldCarriers(*carrierOwner, carrierPath), i.loc);
+          installFieldCarriers(*carrierOwner, carrierPath, std::move(value.carriers));
           if (live(c, i.slot, i.loc).ownedProjection.empty())
             owner.absentFields.erase(i.fieldIndex);
           fields[i.fieldIndex] = {value.state, value.allocation, value.fields, i.loc};
@@ -1866,9 +1996,12 @@ class Checker {
           if (i.kind == Inst::FieldTake) {
             c.values[i.result] = {i.type, state.state, true, state.allocation};
             c.values[i.result].fields = std::move(state.fields);
+            c.values[i.result].carriers = takeFieldCarriers(*carrierOwner, carrierPath);
+            referencePresence(c, i, c.values[i.result].carriers);
           } else {
             i.replacedFieldPlan = oldPlan();
             i.replaceField = true;
+            releaseCarriers(c, takeFieldCarriers(*carrierOwner, carrierPath), i.loc);
           }
           if (live(c, i.slot, i.loc).ownedProjection.empty())
             owner.absentFields.insert(i.fieldIndex);
@@ -1992,21 +2125,31 @@ class Checker {
             (!c.references.contains(i.args[0]) || c.references.at(i.args[0]) != i.slot))
           fail(i.loc, DiagnosticCode::InvalidCore,
                "returned borrow origin does not match call contract");
-        if (!i.payloadPath.empty()) {
+        if (!i.payloadPath.empty() || p.semantics.reference(symbol(i.slot).type)) {
           const auto &carrier =
               c.vars.at(c.vars.at(i.slot).root == None ? i.slot : c.vars.at(i.slot).root);
           if (carrier.opaquePayloads)
             fail(i.loc, DiagnosticCode::InvalidReborrow,
                  "a shared tag-only inspection cannot project a payload");
-          if (!c.variants.contains(i.slot))
-            fail(i.loc, DiagnosticCode::InvalidCore, "payload borrow requires a proven variant");
           auto tid = symbol(i.slot).type;
-          auto variant = c.variants.at(i.slot);
-          auto payload = p.semantics.payloadType(tid, i.payloadPath);
-          if (!payload || i.payloadPath[0].variant != variant)
-            fail(i.loc, DiagnosticCode::InvalidCore,
-                 "payload borrow contradicts the proven variant");
-          bool selected = payload && i.payloadPath[0].variant == variant;
+
+          if (!i.payloadPath.empty() &&
+              i.payloadPath[0].kind == hir::ReferenceProjectionKind::VariantPayload) {
+            if (!c.variants.contains(i.slot) || i.payloadPath[0].variant != c.variants.at(i.slot))
+              fail(i.loc, DiagnosticCode::InvalidCore, "payload borrow requires a proven variant");
+          } else if (!i.payloadPath.empty()) {
+            auto *fields = &placeFields(c, i.slot, i.loc);
+            for (const auto &part : i.payloadPath) {
+              if (part.kind != hir::ReferenceProjectionKind::Field)
+                fail(i.loc, DiagnosticCode::InvalidCore, "unsupported stored-reference projection");
+              if (!fields->contains(part.index))
+                fail(i.loc, DiagnosticCode::ConsumedResource,
+                     "reference field is uninitialized or has already been consumed");
+              fields = &fields->at(part.index).fields;
+            }
+          }
+          auto payload = p.semantics.referencePositionType(tid, i.payloadPath);
+          bool selected = payload.has_value();
           bool stored = selected && p.semantics.reference(*payload) &&
                         p.semantics.types[*payload].element == i.type;
           bool found = selected && (stored || *payload == i.type);
@@ -2016,9 +2159,13 @@ class Checker {
             auto &container = c.vars.at(i.slot);
             const auto &carriers =
                 container.root == None ? container.carriers : c.vars.at(container.root).carriers;
-            if (!carriers.contains(i.payloadPath))
+            hir::ReferencePath position;
+            for (auto field : container.ownedProjection)
+              position.push_back({hir::ReferenceProjectionKind::Field, field});
+            position.insert(position.end(), i.payloadPath.begin(), i.payloadPath.end());
+            if (!carriers.contains(position))
               fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
-            const auto provenance = carriers.at(i.payloadPath);
+            const auto provenance = carriers.at(position);
             bool unique = provenance.capability == Access::Unique;
             if ((i.kind == Inst::BorrowUnique) != unique)
               fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
@@ -2116,7 +2263,7 @@ class Checker {
       case Inst::ContainerCall:
       case Inst::Call:
       case Inst::ProtocolTransition: {
-        auto payloadOrigin = call(i, c);
+        auto resultProvenance = call(i, c);
         if (p.semantics.functions[i.function].returnsReference()) {
           const auto &target = p.semantics.functions[i.function];
           auto index = std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
@@ -2132,9 +2279,8 @@ class Checker {
               p.semantics.types[i.type].kind == hir::Type::Structure)
             c.values[i.result].fields = initialFields(i.type);
           if (target.resultBorrowedContainer) {
-            auto resultOrigins = payloadOrigin;
             SymbolId resultInput = None;
-            if (!target.resultPayloadSource) {
+            if (target.resultAccess == Access::Unique) {
               auto index =
                   std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
                   target.params.begin();
@@ -2142,29 +2288,11 @@ class Checker {
                                ? i.slot
                                : c.references.at(i.args.at(index - (i.slot != None)));
               resultInput = alias;
-              auto more = origins(c, alias, i.loc);
-              resultOrigins.insert(more.begin(), more.end());
             }
-            for (auto input : target.additionalResultOrigins) {
-              if (std::find(target.params.begin(), target.params.end(), input) ==
-                  target.params.end())
-                continue;
-              auto index = std::find(target.params.begin(), target.params.end(), input) -
-                           target.params.begin();
-              auto alias = i.slot != None && index == 0
-                               ? i.slot
-                               : c.references.at(i.args.at(index - (i.slot != None)));
-              auto more = origins(c, alias, i.loc);
-              resultOrigins.insert(more.begin(), more.end());
-            }
-            if (resultOrigins.empty()) {
 
-              auto possible = p.semantics.unborrowedVariants(i.type);
-              i.possibleVariants.assign(possible.begin(), possible.end());
-              c.valueVariantSets[i.result] = std::move(possible);
-              break;
-            }
-            for (auto offset : p.semantics.borrowedPayloadPaths(i.type)) {
+            referencePresence(c, i, resultProvenance);
+            for (const auto &[offset, actual] : resultProvenance) {
+              const auto &resultOrigins = actual.origins;
               auto &provenance = c.values[i.result].carriers[offset];
               provenance.origins = resultOrigins;
               provenance.capability = target.resultAccess;
@@ -2235,6 +2363,7 @@ class Checker {
           }
           if (function->resultBorrowedContainer) {
             const auto allowed = p.semantics.borrowedPayloadPaths(function->result);
+            const auto transfers = p.semantics.referenceTransfers(*function);
             for (const auto &[offset, provenance] : result.carriers) {
               const auto &owners = provenance.origins;
               if (function->resultAccess == Access::Unique &&
@@ -2244,7 +2373,9 @@ class Checker {
               for (auto origin : owners) {
                 if (!allowed.contains(offset))
                   fail(i.loc, DiagnosticCode::InvalidCore, "invalid returned payload path");
-                if (!function->acceptsResultOrigin(origin))
+                const auto &sources = transfers.at(offset);
+                if (std::none_of(sources.begin(), sources.end(),
+                                 [&](const auto &source) { return source.origin == origin; }))
                   DiagnosticEngine()
                       .error(
                           DiagnosticCode::EscapingView, i.loc,
@@ -2444,10 +2575,8 @@ class Checker {
         origin.state = initial(symbol(contract.origin).type);
         origin.allocation = p.semantics.heap(symbol(contract.origin).type);
         origin.borrowAt = symbol(contract.parameter).loc;
-        for (auto offset : p.semantics.borrowedPayloadPaths(symbol(contract.parameter).type)) {
-          c.vars[contract.parameter].carriers[offset] = {{contract.origin}};
-          ++origin.shared;
-        }
+        c.vars[contract.parameter].carriers[contract.path] = {{contract.origin}};
+        ++origin.shared;
       }
       for (auto id : function->payloadInspectionParameters)
         c.vars.at(id).opaquePayloads = true;
@@ -2592,15 +2721,22 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
       o << " protocol=" << p.protocols[i.protocol].name
         << " state=" << p.protocols[i.protocol].states[state];
     }
-    if (!i.payloadPath.empty())
-      o << " payload.variant=#V" << i.payloadPath[0].variant
-        << " payload.field=" << i.payloadPath[0].index;
+    for (const auto &position : i.payloadPath)
+      if (position.kind == hir::ReferenceProjectionKind::Field)
+        o << " reference.field=#" << position.index;
+      else
+        o << " payload.variant=#V" << position.variant << " payload.field=" << position.index;
     for (const auto &[path, provenance] : i.carriers) {
       o << " carrier.path=";
       if (path.empty())
         o << "self";
       for (const auto &position : path)
-        o << "#V" << position.variant << ".payload[" << position.index << "]";
+        if (position.kind == hir::ReferenceProjectionKind::Field)
+          o << ".field[" << position.index << "]";
+        else if (position.kind == hir::ReferenceProjectionKind::Element)
+          o << ".element[" << position.index << "]";
+        else
+          o << "#V" << position.variant << ".payload[" << position.index << "]";
       o << " capability=" << accessName(provenance.capability) << " origins={";
       for (auto owner : provenance.origins)
         o << " #v" << owner;
@@ -2694,6 +2830,7 @@ Verified verify(Program p) {
   regions::infer(p);
   auto checked = Checker(std::move(p)).run();
   storage::infer(checked);
+  carriers::infer(checked);
   regions::validateBounds(checked);
   return Verified(std::move(checked));
 }
@@ -2736,9 +2873,15 @@ void print(const Program &p, std::ostream &o) {
       o << "  payload.region #v" << region.parameter << " #R" << region.region << " origin=#v"
         << region.origin << " Shared caller-owned"
         << (hf.acceptsResultOrigin(region.origin) ? " result-bound\n" : " noescape\n");
-    for (const auto &source : hf.payloadResultSources())
-      o << "  return.payload-source #v" << source.parameter << " variant=#V" << source.path.variant
-        << " field=" << source.path.field << "\n";
+    for (const auto &source : hf.payloadResultSources()) {
+      o << "  return.payload-source #v" << source.parameter;
+      for (const auto &part : source.path)
+        if (part.kind == hir::ReferenceProjectionKind::Field)
+          o << " field=#" << part.index;
+        else
+          o << " variant=#V" << part.variant << " field=" << part.index;
+      o << "\n";
+    }
     for (auto id : hf.payloadInspectionParameters)
       o << "  payload.inspect #v" << id << " Shared tag-only noescape\n";
     if (hf.resultBorrowedContainer)
@@ -2749,6 +2892,7 @@ void print(const Program &p, std::ostream &o) {
     for (auto origin : hf.additionalResultOrigins)
       o << "  return.region #R" << hf.resultRegion << " <= #R" << p.semantics.symbols[origin].region
         << " origin=#v" << origin << "\n";
+    hir::printReferenceContracts(p.semantics, hf, o);
     if (!hf.operations.empty()) {
       const auto &protocol = p.semantics.protocols[p.semantics.types[hf.owner].protocol];
       for (auto id : hf.operations)

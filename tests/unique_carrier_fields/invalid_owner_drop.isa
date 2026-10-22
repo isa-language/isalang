@@ -1,0 +1,13 @@
+@import "std.vec"
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let data = Vec<i32>::new();
+  data.push(1);
+  let holder = Holder {
+    value: data.first_mut()
+  };
+  data.drop();
+  holder.drop();
+}

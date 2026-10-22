@@ -1,0 +1,10 @@
+struct View {
+  value: &mut String,
+}
+fn main() {
+  let view = View {
+    value: &mut String::from("temporary")
+  };
+  let edit = view.value.move();
+  print(edit);
+}

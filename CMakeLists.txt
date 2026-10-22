@@ -23,11 +23,14 @@ add_library(
   src/liveness.cpp
   src/regions.cpp
   src/region_arguments.cpp
+  src/field_region_arguments.cpp
+  src/parent_obligations.cpp
   src/projection_bounds.cpp
   src/storage.cpp
   src/storage_paths.cpp
   src/element_bounds.cpp
   src/storage_slots.cpp
+  src/carriers.cpp
   src/references.cpp
   src/consteval.cpp
   src/ffi.cpp)
@@ -542,6 +545,84 @@ if(BUILD_TESTING)
   add_executable(isac_region_arguments_test tests/region_arguments_test.cpp)
   target_link_libraries(isac_region_arguments_test PRIVATE isac_frontend)
   add_test(NAME region_argument_invariants COMMAND isac_region_arguments_test)
+  add_executable(isac_position_contracts_test tests/position_contracts_test.cpp)
+  target_link_libraries(isac_position_contracts_test PRIVATE isac_frontend)
+  add_test(NAME positional_reference_contract_invariants
+           COMMAND isac_position_contracts_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/position_contracts/valid_positions.isa)
+  add_test(
+    NAME positional_reference_contract_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/position_contracts_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_carrier_instances_test tests/carrier_instances_test.cpp)
+  target_link_libraries(isac_carrier_instances_test PRIVATE isac_frontend)
+  add_test(NAME carrier_instance_invariants
+           COMMAND isac_carrier_instances_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/carrier_instances/valid_lifecycle.isa)
+  add_test(
+    NAME carrier_instances_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/carrier_instances_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_local_carrier_fields_test tests/local_carrier_fields_test.cpp)
+  target_link_libraries(isac_local_carrier_fields_test PRIVATE isac_frontend)
+  add_test(NAME local_carrier_field_invariants
+           COMMAND isac_local_carrier_fields_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/local_carrier_fields)
+  add_test(
+    NAME local_carrier_fields_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/local_carrier_fields_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_direct_reference_fields_test tests/direct_reference_fields_test.cpp)
+  target_link_libraries(isac_direct_reference_fields_test PRIVATE isac_frontend)
+  add_test(NAME direct_reference_field_invariants
+           COMMAND isac_direct_reference_fields_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_reference_fields)
+  add_test(
+    NAME direct_reference_fields_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_reference_fields_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_struct_region_contracts_test tests/struct_region_contracts_test.cpp)
+  target_link_libraries(isac_struct_region_contracts_test PRIVATE isac_frontend)
+  add_test(NAME struct_region_contract_invariants
+           COMMAND isac_struct_region_contracts_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/struct_region_contracts)
+  add_test(
+    NAME struct_region_contracts_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/struct_region_contracts_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME mixed_region_contracts_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/mixed_region_contracts_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_mixed_region_contracts_test tests/mixed_region_contracts_test.cpp)
+  target_link_libraries(isac_mixed_region_contracts_test PRIVATE isac_frontend)
+  add_test(NAME mixed_region_contract_invariants
+           COMMAND isac_mixed_region_contracts_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/mixed_region_contracts)
+  add_test(
+    NAME unique_carrier_fields_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_carrier_fields_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_unique_carrier_fields_test tests/unique_carrier_fields_test.cpp)
+  target_link_libraries(isac_unique_carrier_fields_test PRIVATE isac_frontend)
+  add_test(NAME unique_carrier_field_invariants
+           COMMAND isac_unique_carrier_fields_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_carrier_fields)
+  add_test(
+    NAME direct_unique_fields_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_unique_fields_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_direct_unique_fields_test tests/direct_unique_fields_test.cpp)
+  target_link_libraries(isac_direct_unique_fields_test PRIVATE isac_frontend)
+  add_test(NAME direct_unique_field_invariants
+           COMMAND isac_direct_unique_fields_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_unique_fields)
   add_executable(isac_projection_bounds_test tests/projection_bounds_test.cpp)
   target_link_libraries(isac_projection_bounds_test PRIVATE isac_frontend)
   add_test(NAME projection_storage_invariants
@@ -594,6 +675,54 @@ if(BUILD_TESTING)
   target_link_libraries(isac_backend_stack_test PRIVATE isac_backend isac_frontend)
   add_test(NAME backend_stack_boundary COMMAND isac_backend_stack_test)
   if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(
+      NAME positional_reference_contract_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/position_contracts_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(positional_reference_contract_sanitized_pipeline PROPERTIES LABELS
+                                                                                     "sanitizers")
+    add_test(
+      NAME carrier_instances_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/carrier_instances_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(carrier_instances_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME local_carrier_fields_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/local_carrier_fields_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(local_carrier_fields_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME direct_reference_fields_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_reference_fields_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(direct_reference_fields_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME struct_region_contracts_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/struct_region_contracts_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(struct_region_contracts_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME mixed_region_contracts_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/mixed_region_contracts_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(mixed_region_contracts_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME unique_carrier_fields_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_carrier_fields_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(unique_carrier_fields_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME direct_unique_fields_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_unique_fields_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(direct_unique_fields_sanitized_pipeline PROPERTIES LABELS "sanitizers")
     add_test(
       NAME storage_slots_sanitized_pipeline
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_slots_pipeline.py

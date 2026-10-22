@@ -1,0 +1,19 @@
+struct View {
+  shared: &i32,
+  unique: &mut i32,
+  owner: String,
+}
+fn main() {
+  let a = 7;
+  let b = 8;
+  let view = View {
+    shared: &a,
+    unique: &mut b,
+    owner: String::from("mixed")
+  };
+  print(view.shared);
+  let edit = view.unique.move();
+  edit = 42;
+  view.drop();
+  print(b);
+}

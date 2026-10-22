@@ -1,0 +1,15 @@
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let holder = Holder::new();
+  {
+    let data = [1];
+    holder.value = data.first_mut();
+  };
+  let value = holder.value.move();
+  match value {
+    Some(item) => print(item),
+    None => {}
+  }
+}

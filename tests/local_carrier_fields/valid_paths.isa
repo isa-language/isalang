@@ -1,0 +1,81 @@
+struct View {
+  value: Option<&i32>,
+}
+
+fn early(flag: bool) -> i32 {
+  let number = 42;
+  let holder = View {
+    value: Option::Some(&number)
+  };
+  if flag {
+    return 1;
+  }
+  holder.value.drop();
+  number = 43;
+  return number;
+}
+
+fn branches(flag: bool) {
+  let number = 50;
+  let holder = View::new();
+  if flag {
+    holder.value = Option::Some(&number);
+  }
+  else {
+    holder.value = Option::Some(&number);
+  }
+  let item = holder.value.move();
+  holder.drop();
+  match item {
+    Some(value) => print(value),
+    None => {}
+  }
+  number = 51;
+}
+
+fn main() -> i32 {
+  print(early(true));
+  print(early(false));
+  branches(true);
+  branches(false);
+  let number = 60;
+  let i = 0;
+  while i < 2 {
+    let holder = View {
+      value: Option::Some(&number)
+    };
+    holder.value.drop();
+    number = number + 1;
+    i = i + 1;
+  }
+  print(number);
+  let holder = View::new();
+  {
+    holder.value = Option::Some(&number);
+  };
+  let item = holder.value.move();
+  holder.drop();
+  match item {
+    Some(value) => print(value),
+    None => {}
+  }
+  let proven = Option::Some(&number);
+  let selected = View {
+    value: Option<&i32>::None
+  };
+  match proven {
+    Some(value) => {
+      selected.value = Option::Some(&number);
+    },
+    None => {
+      selected.value = Option<&i32>::None;
+    },
+  }
+  let chosen = selected.value.move();
+  selected.drop();
+  match chosen {
+    Some(value) => print(value),
+    None => {}
+  }
+  return 0;
+}

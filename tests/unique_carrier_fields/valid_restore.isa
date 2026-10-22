@@ -1,0 +1,24 @@
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let data = [1];
+  let source = &mut data;
+  let holder = Holder {
+    value: source.first_mut()
+  };
+  borrow unique holder as edit {
+    let value = edit.value.move();
+    match value {
+      Some(item) => {
+        item = 42;
+      },
+      None => {}
+    }
+    edit.value = source.first_mut();
+  }
+  holder.value.drop();
+  holder.value = source.first_mut();
+  holder.drop();
+  print(data[0]);
+}

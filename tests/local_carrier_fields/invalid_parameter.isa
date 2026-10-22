@@ -1,0 +1,6 @@
+struct View {
+  value: Option<&i32>,
+  owner: String,
+}
+fn inspect(value: &View) {}
+fn main() {}

@@ -91,7 +91,7 @@
   },
   "invalid_reference_field": {
     "stdout": "",
-    "code": "E6003",
+    "code": "E0312",
     "stdin": ""
   },
   "valid_reference_reborrow": {
@@ -344,9 +344,9 @@
     "code": "E6003",
     "stdin": ""
   },
-  "invalid_payload_region_multiple_paths": {
+  "valid_payload_region_multiple_paths": {
     "stdout": "",
-    "code": "E6003",
+    "code": null,
     "stdin": ""
   },
   "invalid_payload_region_drop": {

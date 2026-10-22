@@ -1,0 +1,34 @@
+struct View<T> {
+  value: &T,
+  owner: String,
+}
+impl<T> View<T> {
+  pub fn again(shared self) -> View<T> {
+    return View<T> {
+      value: self.value,
+      owner: String::from("again")
+    };
+  }
+}
+fn main() {
+  let old = 1;
+  let fresh = 2;
+  let view = View<i32> {
+    value: &old,
+    owner: String::from("first")
+  };
+  let before = view.again();
+  view.value = &fresh;
+  let after = view.again();
+  before.drop();
+  old = 3;
+  print(old);
+  borrow shared view as alias {
+    print(alias.again().value);
+  }
+  view.drop();
+  print(after.value);
+  after.drop();
+  fresh = 4;
+  print(fresh);
+}

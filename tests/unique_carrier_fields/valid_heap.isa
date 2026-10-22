@@ -1,0 +1,28 @@
+@import "std.vec"
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(1);
+  let edit = &mut values;
+  let holder = Holder {
+    value: edit.first_mut()
+  };
+  let next = holder.move();
+  next.value.drop();
+  next.drop();
+  edit.push(2);
+  print(values.len());
+  let empty = Holder {
+    value: values.get_mut(9)
+  };
+  let option = empty.value.move();
+  match option {
+    Some(item) => print(item),
+    None => print(0)
+  }
+  empty.drop();
+  values.push(3);
+  print(values.len());
+}

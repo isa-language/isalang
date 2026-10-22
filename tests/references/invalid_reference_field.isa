@@ -1,7 +1,11 @@
 struct Holder {
-  pointer: &i32,
+  pointer: &mut i32,
 }
 fn main() -> i32 {
-
+  let data = 1;
+  let holder = Holder {
+    pointer: &mut data
+  };
+  print(holder.pointer);
   return 0;
 }

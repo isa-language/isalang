@@ -18,7 +18,8 @@ std::optional<ProjectionStorageBound> projection(const core::Program &p, const L
     owned |= p.semantics.ownedFieldType(type);
     fields.push_back(part.index);
   }
-  if (!owned)
+
+  if (!owned || p.semantics.reference(type))
     return {};
   return ProjectionStorageBound{
       loan.place.root, fields, type, p.semantics.symbols.at(loan.place.root).loc, {loan.id}, {}};

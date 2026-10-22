@@ -1,0 +1,12 @@
+@import "std.vec"
+struct View {
+  value: &i32,
+}
+fn main() {
+  let data = 1;
+  let v = View {
+    value: &data
+  };
+  let items = Vec<View>::new();
+  items.push(v.move());
+}

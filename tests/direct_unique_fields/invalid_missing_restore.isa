@@ -1,0 +1,14 @@
+struct View {
+  value: &mut i32,
+}
+fn main() {
+  let data = 1;
+  let view = View {
+    value: &mut data
+  };
+  borrow unique view as edit {
+    let value = edit.value.move();
+    value = 2;
+  }
+  view.drop();
+}

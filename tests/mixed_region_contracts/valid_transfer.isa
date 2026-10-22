@@ -1,0 +1,26 @@
+struct Packet<T> {
+  value: &T,
+  owner: String,
+}
+impl<T> Packet<T> {
+  pub fn make(value: &T) -> Packet<T> {
+    return Packet<T> {
+      value: value,
+      owner: String::from("owned")
+    };
+  }
+}
+fn forward(input: Packet<i32>) -> Packet<i32> {
+  return input.move();
+}
+fn consume(input: Packet<i32>) {
+  print(input.value);
+  print(input.owner.len());
+}
+fn main() {
+  let number = 42;
+  let packet = forward(Packet<i32>::make(&number));
+  consume(packet.move());
+  number = 43;
+  print(number);
+}

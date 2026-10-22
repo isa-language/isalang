@@ -1,0 +1,11 @@
+struct View {
+  value: &mut i32,
+}
+fn main() {
+  let data = 1;
+  let shared = &data;
+  let view = View {
+    value: shared
+  };
+  view.drop();
+}

@@ -1,0 +1,6 @@
+struct Mixed {
+  value: &i32,
+  owner: String,
+}
+fn bad(v: &Mixed) {}
+fn main() {}

@@ -1,0 +1,10 @@
+struct Mixed {
+  value: &i32,
+  owner: String,
+}
+impl Mixed {
+  pub fn bad(shared self) {
+    self.owner = String::from("replacement");
+  }
+}
+fn main() {}

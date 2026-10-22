@@ -1,0 +1,30 @@
+@import "std.buffer"
+struct Packet<T> {
+  value: &i32,
+  owner: T,
+}
+fn make(value: &i32) -> Packet<Buffer> {
+  return Packet<Buffer> {
+    value: value,
+    owner: Buffer::new(3)
+  };
+}
+fn forward(input: Packet<Buffer>) -> Packet<Buffer> {
+  return input.move();
+}
+fn consume(input: Packet<Buffer>) -> Option<&i32> {
+  let owner = input.owner.move();
+  print(owner.len());
+  owner.release();
+  return Option::Some(input.value);
+}
+fn main() {
+  let number = 42;
+  let value = consume(forward(make(&number)));
+  match value {
+    Some(v) => print(v),
+    None => {}
+  }
+  number = 43;
+  print(number);
+}

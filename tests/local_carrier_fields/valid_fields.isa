@@ -1,0 +1,75 @@
+struct View {
+  value: Option<&i32>,
+  marker: i32,
+}
+struct Holder<T> {
+  value: T,
+  marker: i32,
+}
+struct Outer {
+  nested: View,
+  other: Option<&String>,
+  owner: String,
+}
+
+fn main() -> i32 {
+  let number = 10;
+  let view = View {
+    marker: 7,
+    value: Option::Some(&number)
+  };
+  print(view.marker);
+  let item = view.value.move();
+  view.value = Option<&i32>::None;
+  match item {
+    Some(value) => print(value),
+    None => {}
+  }
+  number = 20;
+  view.value = Option::Some(&number);
+  let transferred = view.move();
+  let item2 = transferred.value.move();
+  transferred.drop();
+  match item2 {
+    Some(value) => print(value),
+    None => {}
+  }
+  number = 30;
+  let generic = Holder<Option<&i32 >> {
+    marker: 8,
+    value: Option::Some(&number)
+  };
+  let projected = generic.value.move();
+  generic.drop();
+  match projected {
+    Some(value) => print(value),
+    None => {}
+  }
+  let text = String::from("stored");
+  let inner = View {
+    value: Option::Some(&number),
+    marker: 9
+  };
+  let outer = Outer {
+    owner: String::from("owned"),
+    other: Option::Some(&text),
+    nested: inner.move()
+  };
+  let moved = outer.move();
+  let inner2 = moved.nested.move();
+  let item3 = inner2.value.move();
+  inner2.drop();
+  let text_view = moved.other.move();
+  moved.drop();
+  match item3 {
+    Some(value) => print(value),
+    None => {}
+  }
+  match text_view {
+    Some(value) => print(value),
+    None => {}
+  }
+  text.clear();
+  print(text.len());
+  return 0;
+}

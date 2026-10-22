@@ -1,0 +1,29 @@
+struct View {
+  pointer: &i32,
+}
+fn main() -> i32 {
+  let old = 1;
+  let fresh = 2;
+  let view = View {
+    pointer: &old
+  };
+  let previous = view.pointer;
+  view.pointer = &fresh;
+  print(previous);
+  old = 3;
+  let current = view.pointer;
+  view.drop();
+  print(current);
+  fresh = 4;
+  let absent = View::new();
+  absent.pointer = &fresh;
+  let extracted = absent.pointer.move();
+  print(extracted);
+  absent.pointer = &old;
+  absent.pointer = absent.pointer;
+  print(absent.pointer);
+  absent.pointer.drop();
+  fresh = 5;
+  print(fresh);
+  return 0;
+}

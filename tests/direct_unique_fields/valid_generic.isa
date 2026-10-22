@@ -1,0 +1,24 @@
+struct View<T> {
+  value: &mut T,
+}
+struct Holder<T> {
+  value: T,
+}
+fn main() {
+  let first = 1;
+  let second = 2;
+  let view = View<i32> {
+    value: &mut first
+  };
+  let holder = Holder<&mut i32> {
+    value: &mut second
+  };
+  let a = view.value.move();
+  let b = holder.value.move();
+  view.drop();
+  holder.drop();
+  a = 10;
+  b = 20;
+  print(first);
+  print(second);
+}

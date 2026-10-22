@@ -1,0 +1,38 @@
+struct Pair {
+  first: &i32,
+  second: &i32,
+}
+struct View {
+  value: &i32,
+}
+fn first(value: Pair) -> View {
+  return View {
+    value: value.first
+  };
+}
+fn replace(value: View, next: &i32) -> View {
+  value.value = next;
+  return value.move();
+}
+fn main() -> i32 {
+  let a = 10;
+  let b = 20;
+    let selected = first(Pair {
+      first: &a,
+      second: &b
+  });
+  print(selected.value);
+  selected.drop();
+  a = 11;
+  b = 21;
+    let replaced = replace(View {
+      value: &a
+  }, &b);
+  print(replaced.value);
+  replaced.drop();
+  a = 12;
+  b = 22;
+  print(a);
+  print(b);
+  return 0;
+}

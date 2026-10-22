@@ -1,0 +1,7 @@
+@import "std.buffer"
+struct Mixed {
+  value: &i32,
+  owner: Buffer,
+}
+fn consume(input: Mixed) {}
+fn main() {}

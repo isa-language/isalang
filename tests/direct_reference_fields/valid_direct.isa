@@ -1,0 +1,65 @@
+struct View {
+  pointer: &i32,
+  marker: i32,
+  text: &String,
+}
+struct GenericView<T> {
+  pointer: &T,
+}
+struct Holder<T> {
+  value: T,
+}
+struct Nested {
+  inner: View,
+  owner: String,
+}
+fn inspect(value: &i32) {
+  print(value);
+}
+fn main() -> i32 {
+  let number = 42;
+  let text = String::from("shared");
+  let view = View {
+    text: &text,
+    marker: 7,
+    pointer: &number
+  };
+  print(*view.pointer);
+  print(view.marker);
+  print(view.text);
+  print(view.text.len());
+  let alias = view.pointer;
+  view.drop();
+  inspect(alias);
+  number = 43;
+  let generic = GenericView<i32> {
+    pointer: &number
+  };
+  print(generic.pointer);
+  generic.drop();
+  let holder = Holder<&i32> {
+    value: &number
+  };
+  let taken = holder.value.move();
+  holder.drop();
+  print(taken);
+  number = 44;
+  let nested = Nested {
+    inner: View {
+      pointer: &number,
+      marker: 8,
+      text: &text
+    },
+    owner: String::from("owned")
+  };
+  let second = nested.inner.pointer;
+  nested.drop();
+  inspect(second);
+  text.clear();
+  number = 45;
+  let transient = GenericView<i32> {
+    pointer: &number
+  }.pointer;
+  print(transient);
+  return 0;
+}

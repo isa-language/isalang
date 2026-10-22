@@ -1,0 +1,27 @@
+struct Mixed {
+  shared: &i32,
+  edit: Option<&mut i32>,
+  owner: String,
+}
+fn main() {
+  let number = 7;
+  let data = [1];
+  let edit = &mut data;
+  let mixed = Mixed {
+    shared: &number,
+    edit: edit.first_mut(),
+    owner: String::from("owned")
+  };
+  print(mixed.shared);
+  let value = mixed.edit.move();
+  mixed.drop();
+  number = 8;
+  print(number);
+  match value {
+    Some(item) => {
+      item = 42;
+    },
+    None => {}
+  }
+  print(data[0]);
+}

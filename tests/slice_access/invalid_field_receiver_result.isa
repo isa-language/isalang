@@ -4,5 +4,6 @@ struct Storage {
 fn main() {
   let storage = Storage::new();
   let value = storage.data.get_mut(0);
+  storage.data[0] = 42;
   print(value.is_some());
 }

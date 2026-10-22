@@ -1,9 +1,22 @@
 #include "region_inference.hpp"
+#include "storage_paths.hpp"
 #include <algorithm>
 #include <functional>
 
 namespace isac::regions::detail {
 using I = core::Inst;
+RegionId freshRegionStart(const core::Program &program) {
+  RegionId next = 0;
+  auto reserve = [&](RegionId region) {
+    if (region != None)
+      next = std::max(next, region + 1);
+  };
+  for (const auto &symbol : program.semantics.symbols)
+    reserve(symbol.region);
+  for (const auto &function : program.semantics.functions)
+    reserve(function.resultRegion);
+  return next;
+}
 Contracts contracts(const core::Program &program, RegionId &nextRegion) {
   Contracts result;
   for (const auto &function : program.semantics.functions) {
@@ -11,42 +24,76 @@ Contracts contracts(const core::Program &program, RegionId &nextRegion) {
     for (const auto &input : function.parameterRegions)
       contract.inputs[input.parameter][{}] = {input.region};
     for (const auto &input : function.payloadParameterRegions)
-      for (const auto &leaf :
-           program.semantics.borrowedReferences(program.semantics.symbols[input.parameter].type))
-        contract.inputs[input.parameter][leaf.path] = {nextRegion++};
+      contract.inputs[input.parameter][input.path] = {input.region};
     if (function.resultOrigin == None)
       continue;
-    std::set<RegionId> sources;
-    auto addDirect = [&](SymbolId parameter) {
-      auto input = contract.inputs.find(parameter);
-      if (input != contract.inputs.end() && input->second.contains({}))
-        sources.insert(input->second.at({}).begin(), input->second.at({}).end());
-    };
-    addDirect(function.resultOrigin);
-    for (auto origin : function.additionalResultOrigins)
-      addDirect(origin);
-    for (const auto &source : function.payloadResultSources()) {
-      const auto &arguments = contract.inputs.at(source.parameter);
-      const auto &regions =
-          arguments.at(hir::payloadPosition(source.path.variant, source.path.field));
-      sources.insert(regions.begin(), regions.end());
-    }
-    if (sources.empty())
-      fail(function.loc, DiagnosticCode::InvalidCore,
-           "reference result has no regional input contract");
-    if (function.returnsReference()) {
-      contract.result[{}] = {function.resultRegion};
-      contract.resultSources[function.resultRegion] = sources;
-    } else
-      for (const auto &leaf : program.semantics.borrowedReferences(function.result)) {
-        auto region = nextRegion++;
-        contract.result[leaf.path] = {region};
-        contract.resultSources[region] = sources;
+    for (const auto &[path, sources] : program.semantics.referenceTransfers(function)) {
+      auto region = function.returnsReference() ? function.resultRegion : nextRegion++;
+      contract.result[path] = {region};
+      for (const auto &source : sources) {
+        const auto &input = contract.inputs.at(source.parameter).at(source.path);
+        contract.resultSources[region].insert(input.begin(), input.end());
       }
+      if (contract.resultSources[region].empty())
+        fail(function.loc, DiagnosticCode::InvalidCore,
+             "reference result position has no regional input contract");
+    }
   }
   return result;
 }
 namespace {
+const hir::RegionArgs &lookupArguments(const auto &entries, uint32_t id) {
+  static const hir::RegionArgs empty;
+  auto found = entries.find(id);
+  return found == entries.end() ? empty : found->second;
+}
+hir::RegionSubstitution instantiate(const core::Program &program, const FunctionGraph &graph,
+                                    const I &instruction, const FunctionRegionContract &contract) {
+  const auto &function = program.semantics.functions.at(instruction.function);
+  hir::RegionSubstitution substitution;
+  for (const auto &[parameter, arguments] : contract.inputs) {
+    auto index = std::find(function.params.begin(), function.params.end(), parameter) -
+                 function.params.begin();
+    const auto *actual =
+        instruction.slot != None && index == 0
+            ? &lookupArguments(graph.symbolRegions, instruction.slot)
+            : &lookupArguments(graph.valueRegions,
+                               instruction.args.at(index - (instruction.slot != None)));
+    hir::RegionArgs projected;
+    if (instruction.slot != None && index == 0 &&
+        program.semantics.types[program.semantics.symbols[instruction.slot].type].kind ==
+            hir::Type::Structure &&
+        program.semantics.containsReferences(program.semantics.symbols[instruction.slot].type)) {
+      const auto &definition = *std::find_if(program.functions.begin(), program.functions.end(),
+                                             [&](const auto &f) { return f.id == graph.function; });
+      storage::detail::Places places(program, graph, definition);
+      if (auto base = places.get(instruction.slot)) {
+        auto at = graph.fieldRegions.find(instruction.semanticPoint);
+        if (at != graph.fieldRegions.end())
+          for (const auto &[path, regions] : lookupArguments(at->second, base->id))
+            if (path.size() >= base->path.size() &&
+                std::equal(base->path.begin(), base->path.end(), path.begin()))
+              projected[{path.begin() + base->path.size(), path.end()}] = regions;
+      }
+      actual = &projected;
+    }
+    for (const auto &[path, formalRegions] : arguments)
+      for (auto formal : formalRegions) {
+        auto &binding = substitution[formal];
+        if (auto found = actual->find(path); found != actual->end())
+          binding.insert(found->second.begin(), found->second.end());
+        else if (instruction.slot != None && index == 0 && path.empty() &&
+                 graph.storageRegions.contains(instruction.slot))
+          binding.insert(graph.storageRegions.at(instruction.slot));
+      }
+  }
+  for (const auto &[result, sources] : contract.resultSources)
+    for (auto source : sources) {
+      const auto &actual = substitution.at(source);
+      substitution[result].insert(actual.begin(), actual.end());
+    }
+  return substitution;
+}
 class RegionFacts {
   core::Program &program;
   FunctionGraph &graph;
@@ -60,32 +107,7 @@ class RegionFacts {
     return found == entries.end() ? empty : found->second;
   }
   hir::RegionSubstitution instantiate(const I &instruction) const {
-    const auto &function = program.semantics.functions[instruction.function];
-    const auto &contract = signatures.at(instruction.function);
-    hir::RegionSubstitution substitution;
-    for (const auto &[parameter, arguments] : contract.inputs) {
-      auto index = std::find(function.params.begin(), function.params.end(), parameter) -
-                   function.params.begin();
-      const auto &actual =
-          instruction.slot != None && index == 0
-              ? lookup(graph.symbolRegions, instruction.slot)
-              : lookup(graph.valueRegions, instruction.args.at(index - (instruction.slot != None)));
-      for (const auto &[path, formalRegions] : arguments)
-        for (auto formal : formalRegions) {
-          auto &binding = substitution[formal];
-          if (auto found = actual.find(path); found != actual.end())
-            binding.insert(found->second.begin(), found->second.end());
-          else if (instruction.slot != None && index == 0 && path.empty() &&
-                   graph.storageRegions.contains(instruction.slot))
-            binding.insert(graph.storageRegions.at(instruction.slot));
-        }
-    }
-    for (const auto &[result, sources] : contract.resultSources)
-      for (auto source : sources) {
-        const auto &actual = substitution.at(source);
-        substitution[result].insert(actual.begin(), actual.end());
-      }
-    return substitution;
+    return detail::instantiate(program, graph, instruction, signatures.at(instruction.function));
   }
   static bool merge(hir::RegionArgs &target, const hir::RegionArgs &source) {
     bool changed = false;
@@ -107,6 +129,7 @@ public:
   void regionArguments() {
     graph.contract = signatures.at(graph.function);
     graph.symbolRegions = graph.contract.inputs;
+    graph.fieldRegionOperations = fieldRegionOperations(program, graph);
     for (const auto &loan : graph.loans)
       graph.symbolRegions[loan.carrier][{}] = {loan.region};
 
@@ -128,13 +151,23 @@ public:
     bool changed = true;
     while (changed) {
       changed = false;
+      const auto fields = fieldArguments(graph);
+      graph.fieldRegions = fields.before;
+      for (const auto &[symbol, args] : fields.summaries)
+        changed |= merge(graph.symbolRegions[symbol], args);
       for (auto *i : instructions) {
         if (!i || !graph.blocks[i->semanticPoint].reachable)
           continue;
         hir::RegionArgs value;
-        if (i->kind == I::ReferenceArgument || i->kind == I::StoreReference ||
-            ((i->kind == I::Move || i->kind == I::Copy) &&
-             program.semantics.containsReferences(i->type)))
+        if (i->kind == I::FieldTake ||
+            (i->kind == I::Move && program.semantics.types[i->type].kind == hir::Type::Structure &&
+             program.semantics.localCarrierType(i->type))) {
+          auto found = fields.values.find(i->result);
+          if (found != fields.values.end())
+            value = found->second;
+        } else if (i->kind == I::ReferenceArgument || i->kind == I::StoreReference ||
+                   ((i->kind == I::Move || i->kind == I::Copy) &&
+                    program.semantics.containsReferences(i->type)))
           value = lookup(graph.symbolRegions, i->slot);
         else if (i->kind == I::Bind) {
           const auto &input = lookup(graph.valueRegions, i->args.at(0));
@@ -149,7 +182,7 @@ public:
               else
                 position = {{i->kind == I::StructInit ? hir::ReferenceProjectionKind::Field
                                                       : hir::ReferenceProjectionKind::Element,
-                             i->kind == I::StructInit ? static_cast<uint32_t>(n) : None}};
+                             i->kind == I::StructInit ? i->fieldPath.at(n) : None}};
               position.insert(position.end(), path.begin(), path.end());
               value[position].insert(regions.begin(), regions.end());
             }
@@ -169,16 +202,38 @@ public:
         }
       }
     }
+    graph.fieldRegions = fieldArguments(graph).before;
+    const auto &definition = *std::find_if(program.functions.begin(), program.functions.end(),
+                                           [&](const auto &f) { return f.id == graph.function; });
+    std::optional<storage::detail::Places> places;
     for (auto *i : instructions) {
       if (!i || !graph.blocks[i->semanticPoint].reachable)
         continue;
-      if ((i->kind == I::BorrowShared || i->kind == I::BorrowUnique) && !i->payloadPath.empty()) {
+      if ((i->kind == I::BorrowShared || i->kind == I::BorrowUnique) &&
+          (!i->payloadPath.empty() ||
+           program.semantics.reference(program.semantics.symbols[i->slot].type))) {
         auto source = i->slot;
         std::set<SymbolId> seen;
         while (parents.contains(source) && seen.insert(source).second)
           source = parents.at(source);
-        const auto &arguments = lookup(graph.symbolRegions, source);
-        if (auto position = arguments.find(i->payloadPath); position != arguments.end())
+        const auto *arguments = &lookup(graph.symbolRegions, source);
+        hir::ReferencePath positionPath = i->payloadPath;
+        if (program.semantics.types[program.semantics.symbols[source].type].kind ==
+            hir::Type::Structure) {
+
+          static const std::map<SymbolId, hir::RegionArgs> empty;
+          auto at = graph.fieldRegions.find(i->semanticPoint);
+          const auto &point = at == graph.fieldRegions.end() ? empty : at->second;
+          if (!places)
+            places.emplace(program, graph, definition);
+          if (auto base = places->get(i->slot)) {
+            source = base->id;
+            positionPath = base->path;
+            positionPath.insert(positionPath.end(), i->payloadPath.begin(), i->payloadPath.end());
+          }
+          arguments = &lookup(point, source);
+        }
+        if (auto position = arguments->find(positionPath); position != arguments->end())
           for (auto region : position->second)
             graph.constraints.push_back({ConstraintKind::Subregion,
                                          i->region,
@@ -310,6 +365,19 @@ public:
                                        ConstraintReason::StoredReference,
                                        b.origin});
     };
+    auto current = [&](SymbolId symbol, const BasicBlock &b) -> const hir::RegionArgs & {
+      static const hir::RegionArgs empty;
+      const auto &type = program.semantics.types[program.semantics.symbols[symbol].type];
+      if (type.kind == hir::Type::Structure &&
+          program.semantics.localCarrierType(program.semantics.symbols[symbol].type)) {
+        auto point = graph.fieldRegions.find(b.id);
+        if (point == graph.fieldRegions.end())
+          return empty;
+        auto found = point->second.find(symbol);
+        return found == point->second.end() ? empty : found->second;
+      }
+      return graph.symbolRegions.at(symbol);
+    };
     for (const auto &b : graph.blocks) {
       if (!b.reachable)
         continue;
@@ -318,7 +386,7 @@ public:
           graph.storageBounds.at(owner).points.insert(b.id);
       for (auto symbol : b.liveIn)
         if (carriers.contains(symbol) && mayIn[b.id].contains(symbol))
-          demand(graph.symbolRegions.at(symbol), b);
+          demand(current(symbol, b), b);
       for (auto value : b.valueUses)
         if (graph.valueRegions.contains(value))
           demand(graph.valueRegions.at(value), b);
@@ -329,7 +397,7 @@ public:
             if (mayIn[b.id].contains(carrier) &&
                 (cleanup ||
                  std::find(i->locals.begin(), i->locals.end(), carrier) != i->locals.end()))
-              demand(graph.symbolRegions.at(carrier), b);
+              demand(current(carrier, b), b);
       }
     }
   }
@@ -460,11 +528,32 @@ void cleanupUses(core::Program &program, FunctionGraph &graph, const std::vector
   }
 }
 void validateArguments(const core::Program &program) {
+  auto fresh = freshRegionStart(program);
+  const auto signatures = contracts(program, fresh);
 
   for (const auto &graph : program.regionGraphs) {
     const auto &signature = program.semantics.functions[graph.function];
+    const auto &expected = signatures.at(graph.function);
+    if (graph.contract.inputs != expected.inputs || graph.contract.result != expected.result ||
+        graph.contract.resultSources != expected.resultSources)
+      fail(signature.loc, DiagnosticCode::InvalidCore,
+           "function region contract contradicts positional reference transfers");
+    auto regionKind = [&](const hir::RegionArgs &arguments, RegionKind kind) {
+      for (const auto &[path, regions] : arguments)
+        for (auto region : regions) {
+          auto definition = graph.regions.find(region);
+          if (definition == graph.regions.end() || definition->second.kind != kind)
+            fail(signature.loc, DiagnosticCode::InvalidCore,
+                 "region parameter has an incompatible semantic kind");
+        }
+    };
+    for (const auto &[input, arguments] : expected.inputs)
+      regionKind(arguments, RegionKind::Parameter);
+    regionKind(expected.result, RegionKind::Return);
     std::map<TypeId, std::set<hir::ReferencePath>> schemas;
     auto check = [&](const hir::RegionArgs &arguments, TypeId type, bool reference, Loc origin) {
+      if (type >= program.semantics.types.size())
+        fail(origin, DiagnosticCode::InvalidCore, "semantic value has an undefined type");
       auto &positions = schemas[type];
       if (!reference && positions.empty())
         for (const auto &leaf : program.semantics.borrowedReferences(type))
@@ -491,13 +580,25 @@ void validateArguments(const core::Program &program) {
     const auto &function = *std::find_if(program.functions.begin(), program.functions.end(),
                                          [&](const auto &f) { return f.id == graph.function; });
     std::set<ValueId> checked;
+    std::map<uint32_t, const I *> calls;
     std::function<void(const std::vector<I> &)> values;
     values = [&](const auto &body) {
       for (const auto &i : body) {
+        if (i.kind == I::Call || i.kind == I::ContainerCall)
+          calls[i.semanticPoint] = &i;
+        bool reference = i.kind == I::ReferenceArgument ||
+                         ((i.kind == I::Call || i.kind == I::ContainerCall) &&
+                          program.semantics.functions[i.function].returnsReference());
+        if (i.result != None) {
+          auto definition = graph.valueDefinitions.find(i.result);
+          if (definition == graph.valueDefinitions.end() || definition->second.type != i.type ||
+              definition->second.reference != reference ||
+              definition->second.point.block != i.semanticPoint ||
+              definition->second.point.statementIndex != 0)
+            fail(i.loc, DiagnosticCode::InvalidCore,
+                 "semantic value definition contradicts the verified instruction");
+        }
         if (auto found = graph.valueRegions.find(i.result); found != graph.valueRegions.end()) {
-          bool reference = i.kind == I::ReferenceArgument ||
-                           ((i.kind == I::Call || i.kind == I::ContainerCall) &&
-                            program.semantics.functions[i.function].returnsReference());
           check(found->second, i.type, reference, i.loc);
           checked.insert(i.result);
         }
@@ -515,15 +616,49 @@ void validateArguments(const core::Program &program) {
     };
     values(function.body);
     for (const auto &[value, arguments] : graph.valueRegions)
-      if (!checked.contains(value))
+      if (!checked.contains(value)) {
+        auto definition = graph.valueDefinitions.find(value);
+        if (definition == graph.valueDefinitions.end() ||
+            definition->second.point.block >= graph.blocks.size() ||
+            definition->second.point.statementIndex != 0 ||
+            !graph.blocks.at(definition->second.point.block).valueDefinitions.contains(value) ||
+            graph.resourcePoints.contains(definition->second.point.block))
+          fail(signature.loc, DiagnosticCode::InvalidCore,
+               "region arguments belong to an undefined semantic value");
+
+        check(arguments, definition->second.type, definition->second.reference,
+              graph.blocks.at(definition->second.point.block).origin);
+      }
+    std::map<uint32_t, size_t> callCounts;
+    for (const auto &call : graph.calls) {
+      if (call.point.block >= graph.blocks.size() || call.point.statementIndex != 0 ||
+          call.target >= program.semantics.functions.size())
         fail(signature.loc, DiagnosticCode::InvalidCore,
-             "region arguments belong to an undefined semantic value");
-    for (const auto &call : graph.calls)
+             "call region contract has an invalid semantic point");
+      if (auto actual = calls.find(call.point.block); actual != calls.end()) {
+        ++callCounts[call.point.block];
+        const auto &instruction = *actual->second;
+        const auto &target = signatures.at(instruction.function);
+        auto arguments = instantiate(program, graph, instruction, target);
+        if (call.target != instruction.function || call.point.statementIndex != 0 ||
+            call.substitution != arguments ||
+            call.result != hir::substituteRegions(target.result, arguments))
+          fail(instruction.loc, DiagnosticCode::InvalidCore,
+               "call region substitution contradicts its input positions");
+      }
       for (const auto &[formal, actual] : call.substitution)
         for (auto region : actual)
           if (!graph.regions.contains(region))
             fail(signature.loc, DiagnosticCode::InvalidCore,
                  "call substitution contains an undefined region argument");
+    }
+    for (const auto &[point, instruction] : calls) {
+      const auto &target = signatures.at(instruction->function);
+      if (graph.resourcePoints.contains(point) &&
+          (!target.inputs.empty() || !target.result.empty()) && callCounts[point] != 1)
+        fail(instruction->loc, DiagnosticCode::InvalidCore,
+             "missing or duplicated call region instantiation");
+    }
   }
 }
 }

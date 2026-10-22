@@ -1,0 +1,47 @@
+struct View {
+  value: &i32,
+}
+struct Generic<T> {
+  value: &T,
+}
+fn make(value: &i32) -> View {
+  return View {
+    value: value
+  };
+}
+fn forward(value: View) -> View {
+  return value.move();
+}
+fn inspect(value: View) {
+  print(value.value);
+}
+impl<T> Generic<T> {
+  pub fn forward(value: Generic<T>) -> Generic<T> {
+    return value.move();
+  }
+  pub fn rewrap(shared self) -> Generic<T> {
+    return Generic<T> {
+      value: self.value
+    };
+  }
+}
+fn main() -> i32 {
+  let number = 42;
+  let view = make(&number);
+  let next = forward(view.move());
+  print(next.value);
+  inspect(next.move());
+  number = 43;
+  let value = Generic<i32> {
+    value: &number
+  };
+  let result = Generic<i32>::forward(value.move());
+  let copy = result.rewrap();
+  result.drop();
+  print(copy.value);
+  copy.drop();
+  number = 44;
+  let temporary = make(&number).value;
+  print(temporary);
+  return 0;
+}

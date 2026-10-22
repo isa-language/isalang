@@ -1,0 +1,35 @@
+struct View {
+  value: &mut i32,
+}
+fn main() {
+  let data = 0;
+  let parent = &mut data;
+  let count = 0;
+  loop {
+    let view = View {
+      value: parent
+    };
+    count = count + 1;
+    if count == 2 {
+      continue;
+    }
+    let edit = view.value.move();
+    edit = edit + 1;
+    if count == 3 {
+      break;
+    }
+  }
+  print(data);
+  let one = 1;
+  let source = &mut one;
+  let view = View::new();
+  if true {
+    view.value = source;
+  } else {
+    view.value = source;
+  }
+  let edit = view.value.move();
+  edit = 42;
+  view.drop();
+  print(one);
+}

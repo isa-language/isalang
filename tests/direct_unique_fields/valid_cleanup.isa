@@ -1,0 +1,22 @@
+struct View {
+  value: &mut i32,
+  owner: String,
+}
+fn early(data: &mut i32, yes: bool) -> i32 {
+  let view = View {
+    value: data,
+    owner: String::from("early")
+  };
+  if yes {
+    return 1;
+  }
+  let edit = view.value.move();
+  edit = 42;
+  return 2;
+}
+fn main() {
+  let data = 0;
+  print(early(&mut data, true));
+  print(early(&mut data, false));
+  print(data);
+}

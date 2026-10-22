@@ -1,0 +1,23 @@
+fn wrap(value: &mut i32) -> Option<&mut i32> {
+  return Option::Some(value);
+}
+fn main() {
+  let first = 1;
+  let second = 2;
+  let a = Option::Some(&mut first);
+  let b = wrap(&mut second);
+  match a {
+    Some(edit) => {
+      edit = 10;
+    },
+    None => {}
+  }
+  match b {
+    Some(edit) => {
+      edit = 20;
+    },
+    None => {}
+  }
+  print(first);
+  print(second);
+}

@@ -1,0 +1,131 @@
+enum Pair<A, B> {
+  Values(A, B),
+  Empty,
+}
+enum Choice<A, B> {
+  Number(A),
+  Text(B),
+  Absent,
+}
+
+fn get_number(value: Pair<&i32, &String>) -> Option<&i32> {
+  match value {
+    Pair::Values(number, text) => {
+      return Option::Some(number);
+    },
+    Pair::Empty => {
+      return Option::None;
+    },
+  }
+}
+
+fn choose(value: Pair<&i32, &String>, number: bool) -> Choice<&i32, &String> {
+  match value {
+    Pair::Values(a, b) => {
+      if number {
+        return Choice::Number(a);
+      }
+      return Choice::Text(b);
+    },
+    Pair::Empty => {
+      return Choice::Absent;
+    },
+  }
+}
+
+fn relay(value: Choice<&i32, &String>, depth: i32) -> Choice<&i32, &String> {
+  if depth == 0 {
+    return value.move();
+  }
+  return relay(value.move(), depth - 1);
+}
+
+struct Transfer<T> {
+  marker: i32,
+}
+impl<T> Transfer<T> {
+  fn forward(value: T) -> T {
+    return value.move();
+  }
+}
+
+fn first_equal(value: Pair<&i32, &i32>) -> Option<&i32> {
+  match value {
+    Pair::Values(first, second) => {
+      return Option::Some(first);
+    },
+    Pair::Empty => {
+      return Option::None;
+    },
+  }
+}
+fn show_number(value: &i32) {
+  print(value);
+}
+fn show_text(value: &String) {
+  print(value);
+}
+
+fn main() {
+  let number = 10;
+  let text = String::from("text");
+  let view = get_number(Pair::Values(&number, &text));
+
+  text.push_str("!");
+  match view.move() {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+  print(text);
+  let selected = choose(Pair::Values(&number, &text), false);
+  let forwarded = Transfer<Choice<&i32, &String >>::forward(relay(selected.move(), 3));
+  match forwarded.move() {
+    Choice::Number(value) => {
+      print(value);
+    },
+    Choice::Text(value) => {
+      print(value);
+    },
+    Choice::Absent => {},
+  }
+  text.push_str("done");
+  let empty: Pair<&i32, &String> = Pair::Empty;
+  let absent = Transfer<Choice<&i32, &String >>::forward(relay(choose(empty.move(), true), 2));
+  number = 20;
+  text.clear();
+  match absent.move() {
+    Choice::Number(value) => {
+      print(value);
+    },
+    Choice::Text(value) => {
+      print(value);
+    },
+    Choice::Absent => {
+      print(0);
+    },
+  }
+  let exact: Choice<&i32, &String> = Choice::Number(&number);
+  let returned = relay(exact.move(), 2);
+  match returned.move() {
+    Choice::Number(value) => {
+      show_number(value);
+    },
+    Choice::Text(value) => {
+      show_text(value);
+    },
+    Choice::Absent => {},
+  }
+  let other = 30;
+  let both = first_equal(Pair::Values(&number, &other));
+  match both.move() {
+    Some(value) => {
+      print(value);
+    },
+    None => {}
+  }
+  number = 40;
+  other = 50;
+  print(number + other);
+}

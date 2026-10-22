@@ -1,0 +1,14 @@
+struct View {
+  value: &i32,
+}
+fn main() {
+  let outer = 1;
+  let v = View {
+    value: &outer
+  };
+  {
+    let inner = 2;
+    v.value = &inner;
+  };
+  print(v.value);
+}

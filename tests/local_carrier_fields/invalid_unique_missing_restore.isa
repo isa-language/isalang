@@ -1,0 +1,11 @@
+struct View {
+  value: Option<&i32>,
+}
+fn main() {
+  let n = 1;
+  let holder = View {
+    value: Option::Some(&n)
+  };
+  let edit = &mut holder;
+  let item = edit.value.move();
+}

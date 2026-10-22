@@ -1,0 +1,13 @@
+struct Mixed {
+  value: &String,
+  owner: String,
+}
+impl Mixed {
+  pub fn bad(shared self) -> Mixed {
+    return Mixed {
+      value: &self.owner,
+      owner: String::from("replacement")
+    };
+  }
+}
+fn main() {}

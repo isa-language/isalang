@@ -1,0 +1,11 @@
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn main() {
+  let data = 1;
+  let holder = Holder {
+    value: Option::Some(&mut data)
+  };
+  data = 2;
+  holder.drop();
+}

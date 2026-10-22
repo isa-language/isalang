@@ -1,0 +1,26 @@
+struct Pair {
+  first: Option<&mut i32>,
+  second: Option<&mut i32>,
+}
+fn main() {
+  let old = [1];
+  let fresh = [2];
+  let left = &mut old;
+  let right = &mut fresh;
+  let pair = Pair {
+    first: left.first_mut(),
+    second: right.first_mut()
+  };
+  pair.first.drop();
+  old[0] = 3;
+  print(old[0]);
+  let value = pair.second.move();
+  pair.drop();
+  match value {
+    Some(item) => {
+      item = 4;
+    },
+    None => {}
+  }
+  print(fresh[0]);
+}

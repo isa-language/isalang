@@ -151,9 +151,9 @@ std::optional<Location> Places::resolve(SymbolId symbol, std::set<SymbolId> &see
   auto base = resolve(i.slot, seen);
   if (!base)
     return {};
+  if (i.storedPayloadReference)
+    return {};
   if (!i.payloadPath.empty()) {
-    if (i.storedPayloadReference)
-      return {};
     return append(*base, i.payloadPath);
   }
   if (i.placeProjection == core::Inst::PlaceProjection::Field) {
