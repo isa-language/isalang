@@ -1,0 +1,25 @@
+struct View {
+  read: &i32,
+  write: &mut i32,
+}
+struct Read {
+  value: &i32,
+}
+fn consume(view: View) -> Read {
+  let edit = &mut view.write;
+  edit = 42;
+  return Read {
+    value: view.read
+  };
+}
+fn main() {
+  let a = 7;
+  let b = 1;
+    let read = consume(View {
+      read: &a,
+      write: &mut b
+  });
+  b = 43;
+  print(read.value);
+  print(b);
+}

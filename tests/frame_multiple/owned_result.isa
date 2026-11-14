@@ -1,0 +1,61 @@
+@import "std.box"
+@import "std.vec"
+@import "std.env"
+fn marker() {}
+fn first() {
+  print(101);
+}
+fn second() {
+  print(202);
+}
+fn third() {
+  print(303);
+}
+fn fourth() {
+  print(404);
+}
+fn choose() -> i32 {
+  let args = env::args();
+  return args.len() as i32;
+}
+fn choose_condition() -> bool {
+  return choose() == 4;
+}
+fn fallback() -> Result<String, i32> {
+  return Result::Err(9);
+}
+fn worker(text: String) -> Result<String, i32> {
+  let stop = choose();
+  marker();
+  text.push_str("-0");
+  if stop == 1 {
+    return Result::Ok(text.move());
+  }
+  first();
+  borrow shared text as view {
+    print(view.len());
+  }
+  text.push_str("-1");
+  if stop == 2 {
+    return Result::Ok(text.move());
+  }
+  second();
+  let values = Vec<String> {
+    text.move(),
+    "other"
+  };
+  if stop == 3 {
+    return Result::Err(3);
+  }
+  third();
+  fourth();
+  print(values.len());
+  return Result::Err(7);
+}
+fn main() {
+  let result = worker(String::from("owned"));
+  match result.move() {
+    Result::Ok(text) => print(text),
+    Result::Err(code) => print(code),
+  }
+}

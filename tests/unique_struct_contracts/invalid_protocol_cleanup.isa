@@ -1,0 +1,16 @@
+@import "std.buffer"
+struct View {
+  value: &mut i32,
+  owner: Buffer,
+}
+fn wrap(input: &mut i32) -> View {
+  return View {
+    value: input,
+    owner: Buffer::new(2)
+  };
+}
+fn main() {
+  let data = 1;
+  let view = wrap(&mut data);
+  view.drop();
+}

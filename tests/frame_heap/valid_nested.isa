@@ -1,0 +1,27 @@
+@import "std.box"
+struct Inner<T> {
+  text: T,
+}
+struct Outer {
+  first: Inner<String>,
+  second: Inner<String>,
+}
+fn marker() {}
+fn create() -> Outer {
+  return Outer {
+    first: Inner<String> {
+      text: String::from("nested")
+    },
+    second: Inner<String> {
+      text: String::from("tail")
+    }
+  };
+}
+fn main() {
+  let outer = create();
+  marker();
+  print(outer.first.text.as_str());
+  outer.first.text.push_str("!");
+  print(outer.first.text.as_str());
+  print(outer.second.text.as_str());
+}

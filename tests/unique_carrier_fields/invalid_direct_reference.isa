@@ -6,5 +6,7 @@ fn main() {
   let holder = Holder {
     value: &mut data
   };
-  print(holder.value);
+  let edit = &mut holder.value;
+  holder.drop();
+  print(edit);
 }

@@ -1,0 +1,11 @@
+fn marker() {}
+fn main() {
+  let wrapped: Option<String >= Option::Some(String::from("payload"));
+  match wrapped {
+    Some(text) => {
+      marker();
+      print(text);
+    },
+    None => {},
+  }
+}

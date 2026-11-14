@@ -1,0 +1,16 @@
+struct Input {
+  number: &mut i32,
+  text: &mut String,
+  owner: String,
+}
+struct Views {
+  number: &mut i32,
+  text: &mut String,
+}
+fn forward(input: Input) -> Views {
+  return Views {
+    number: input.number.move(),
+    text: &mut input.owner
+  };
+}
+fn main() {}

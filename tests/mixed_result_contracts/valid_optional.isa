@@ -1,0 +1,69 @@
+struct Input {
+  a: Option<&mut i32>,
+  b: Option<&mut i32>,
+  read: &i32,
+}
+struct Output {
+  edit: Option<&mut i32>,
+  read: &i32,
+}
+fn forward(input: Input) -> Output {
+  return Output {
+    edit: input.b.move(),
+    read: input.read
+  };
+}
+fn some() {
+  let a = 1;
+  let b = 2;
+  let c = 3;
+    let result = forward(Input {
+      a: Option::Some(&mut a),
+      b: Option::Some(&mut b),
+      read: &c
+  });
+  a = 10;
+  print(result.read);
+  let edit = result.edit.move();
+  match edit {
+    Some(value) => {
+      value = 20;
+    },
+    None => {
+      print(7);
+    }
+  }
+  result.drop();
+  c = 30;
+  print(a);
+  print(b);
+  print(c);
+}
+fn none() {
+  let a = 1;
+  let c = 3;
+    let result = forward(Input {
+      a: Option::Some(&mut a),
+      b: Option::None,
+      read: &c
+  });
+  a = 10;
+  print(result.read);
+  let edit = result.edit.move();
+  match edit {
+    Some(value) => {
+      value = 20;
+    },
+    None => {
+      print(7);
+    }
+  }
+  result.drop();
+  c = 30;
+  print(a);
+  print(c);
+}
+fn main() {
+  some();
+  none();
+}

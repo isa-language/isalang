@@ -1,0 +1,11 @@
+struct Pair {
+  a: &mut i32,
+  b: &mut i32,
+}
+fn bad(input: &mut i32) -> Pair {
+  return Pair {
+    a: input,
+    b: input
+  };
+}
+fn main() {}

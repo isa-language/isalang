@@ -1,0 +1,20 @@
+struct Pair {
+  first: &mut i32,
+  second: &mut i32,
+}
+fn consume(pair: Pair) {
+  let first = &mut pair.first;
+  first = 10;
+  let second = &mut pair.second;
+  second = 20;
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    consume(Pair {
+      first: &mut a,
+      second: &mut b
+  });
+  print(a);
+  print(b);
+}

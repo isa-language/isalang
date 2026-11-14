@@ -1,0 +1,31 @@
+enum Choice<T> {
+  One(T),
+  Other(T),
+}
+struct Input {
+  read: Option<&i32>,
+  edit: &mut i32,
+}
+struct Output {
+  choice: Choice<&i32>,
+  edit: &mut i32,
+}
+fn forward(input: Input) -> Output {
+  let read = input.read.move();
+  match read {
+    Some(value) => {
+      return Output {
+        choice: Choice::One(value),
+        edit: input.edit.move()
+      };
+    },
+    None => {
+      let local = 1;
+      return Output {
+        choice: Choice::Other(&local),
+        edit: input.edit.move()
+      };
+    },
+  }
+}
+fn main() {}

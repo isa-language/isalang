@@ -117,7 +117,7 @@ class Bounds {
       install(state, destination, subtree(state, symbol(i.slot)));
     else if (i.kind == I::FieldTake) {
       if (auto base = places.get(i.slot))
-        install(state, destination, subtree(state, field(*base, i.fieldIndex)));
+        install(state, destination, subtree(state, fieldOperation(*base, i)));
     } else if (i.kind == I::PayloadTake) {
       if (auto base = places.get(i.slot))
         install(state, destination, subtree(state, append(*base, i.payloadPath)));
@@ -147,7 +147,7 @@ class Bounds {
                 child);
       }
     } else if (i.kind == I::Create || i.kind == I::Array || i.kind == I::ArrayRepeat ||
-               ((i.kind == I::Call || i.kind == I::ContainerCall) &&
+               ((core::functionCall(i) || i.kind == I::ContainerCall) &&
                 !p.semantics.functions.at(i.function).returnsReference())) {
       auto known = fixed(i.type, destination, i.kind != I::Create);
       state.insert(known.begin(), known.end());
@@ -196,7 +196,7 @@ class Bounds {
             erase(state, *base);
         }
     }
-    if (i.kind == I::Call || i.kind == I::ProtocolTransition) {
+    if (core::functionCall(i) || i.kind == I::ProtocolTransition) {
       const auto &target = p.semantics.functions.at(i.function);
       for (size_t n = 0; n < target.params.size(); ++n) {
         const auto &param = p.semantics.symbols.at(target.params[n]);
@@ -222,7 +222,7 @@ class Bounds {
     }
     if (i.kind == I::FieldStore || i.kind == I::FieldTake || i.kind == I::FieldDrop)
       if (auto base = places.get(i.slot)) {
-        auto target = field(*base, i.fieldIndex);
+        auto target = fieldOperation(*base, i);
         if (i.kind == I::FieldStore)
           install(state, target, subtree(state, value(i.args.at(0))));
         else

@@ -1,0 +1,9 @@
+struct View {
+  value: &mut String,
+}
+fn wrap(input: &mut String) -> View {
+  return View {
+    value: &mut String::from("temporary")
+  };
+}
+fn main() {}

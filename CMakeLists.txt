@@ -18,6 +18,12 @@ add_library(
   src/hir.cpp
   src/core.cpp
   src/core_types.cpp
+  src/frame_lifecycle.cpp
+  src/async.cpp
+  src/async_borrows.cpp
+  src/async_lowering.cpp
+  src/execution_storage.cpp
+  src/thread_contracts.cpp
   src/erasure.cpp
   src/runtime.cpp
   src/liveness.cpp
@@ -32,6 +38,19 @@ add_library(
   src/storage_slots.cpp
   src/carriers.cpp
   src/references.cpp
+  src/reference_inference.cpp
+  src/concurrency.cpp
+  src/execution.cpp
+  src/frames.cpp
+  src/frame_lowering.cpp
+  src/frame_heap.cpp
+  src/frame_outline.cpp
+  src/frame_state.cpp
+  src/frame_step.cpp
+  src/frame_projection.cpp
+  src/frame_branch.cpp
+  src/frame_deferred.cpp
+  src/container_instances.cpp
   src/consteval.cpp
   src/ffi.cpp)
 target_include_directories(isac_frontend PUBLIC include)
@@ -51,9 +70,70 @@ set(ISAC_ALLOCATOR_SOURCE
     CACHE FILEPATH "Single allocator provider linked into the Isac runtime")
 get_filename_component(ISAC_ALLOCATOR_SOURCE "${ISAC_ALLOCATOR_SOURCE}" ABSOLUTE BASE_DIR
                        "${CMAKE_CURRENT_SOURCE_DIR}")
-add_library(isac_runtime STATIC runtime/src/isac_runtime.c "${ISAC_ALLOCATOR_SOURCE}")
+find_package(Threads REQUIRED)
+add_library(isac_runtime STATIC runtime/src/isac_runtime.c runtime/src/isac_threads.c
+                                "${ISAC_ALLOCATOR_SOURCE}")
+target_link_libraries(isac_runtime PUBLIC Threads::Threads)
 target_include_directories(isac_runtime PUBLIC runtime/include)
 target_compile_options(isac_runtime PRIVATE -Wall -Wextra -Wpedantic)
+
+option(ISAC_USE_INSTALLED_RUNTIME "Use a runtime installation for generated native programs" OFF)
+set(ISAC_RUNTIME_ROOT
+    "/usr/lib/isac/runtime"
+    CACHE PATH "Installed Isac runtime directory")
+if(ISAC_USE_INSTALLED_RUNTIME)
+  set(ISAC_NATIVE_RUNTIME_SOURCE "${ISAC_RUNTIME_ROOT}/src/isac_runtime.c")
+  set(ISAC_NATIVE_THREAD_SOURCE "${ISAC_RUNTIME_ROOT}/src/isac_threads.c")
+  set(ISAC_NATIVE_RUNTIME_INCLUDE "${ISAC_RUNTIME_ROOT}/include")
+  set(ISAC_NATIVE_RUNTIME_LIBRARY "${ISAC_RUNTIME_ROOT}/libisac_runtime.a")
+
+  if(EXISTS "${ISAC_RUNTIME_ROOT}/src/isac_allocator_libc.c")
+    set(ISAC_NATIVE_ALLOCATOR_SOURCE "${ISAC_RUNTIME_ROOT}/src/isac_allocator_libc.c")
+  else()
+    set(ISAC_NATIVE_ALLOCATOR_SOURCE "")
+  endif()
+  set(ISAC_INSTALLED_ALLOCATOR_SOURCE
+      "${ISAC_NATIVE_ALLOCATOR_SOURCE}"
+      CACHE
+        FILEPATH
+        "Optional allocator source matching the installed archive; empty uses the archive provider")
+  set(ISAC_NATIVE_ALLOCATOR_SOURCE "${ISAC_INSTALLED_ALLOCATOR_SOURCE}")
+  if(ISAC_NATIVE_ALLOCATOR_SOURCE AND NOT EXISTS "${ISAC_NATIVE_ALLOCATOR_SOURCE}")
+    message(FATAL_ERROR "Missing installed allocator provider: ${ISAC_NATIVE_ALLOCATOR_SOURCE}")
+  endif()
+  foreach(REQUIRED_RUNTIME_FILE IN
+          ITEMS "${ISAC_NATIVE_RUNTIME_SOURCE}" "${ISAC_NATIVE_RUNTIME_INCLUDE}/isac_runtime.h"
+                "${ISAC_NATIVE_RUNTIME_LIBRARY}")
+    if(NOT EXISTS "${REQUIRED_RUNTIME_FILE}")
+      message(FATAL_ERROR "Missing installed runtime file: ${REQUIRED_RUNTIME_FILE}")
+    endif()
+  endforeach()
+else()
+  set(ISAC_NATIVE_RUNTIME_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/isac_runtime.c")
+  set(ISAC_NATIVE_THREAD_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/isac_threads.c")
+  set(ISAC_NATIVE_RUNTIME_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/runtime/include")
+  set(ISAC_NATIVE_RUNTIME_LIBRARY "$<TARGET_FILE:isac_runtime>")
+  set(ISAC_NATIVE_ALLOCATOR_SOURCE "${ISAC_ALLOCATOR_SOURCE}")
+endif()
+
+set(ISAC_ALLOCATOR_THREAD_CONTRACT
+    "auto"
+    CACHE STRING "Unsafe provider contract: auto, cross-thread (including free), or local-only")
+set_property(CACHE ISAC_ALLOCATOR_THREAD_CONTRACT PROPERTY STRINGS auto cross-thread local-only)
+set(ISAC_ALLOCATOR_CROSS_THREAD 0)
+if(ISAC_ALLOCATOR_THREAD_CONTRACT STREQUAL "cross-thread")
+  set(ISAC_ALLOCATOR_CROSS_THREAD 1)
+elseif(ISAC_ALLOCATOR_THREAD_CONTRACT STREQUAL "auto")
+  if(NOT ISAC_USE_INSTALLED_RUNTIME
+     AND ISAC_ALLOCATOR_SOURCE STREQUAL
+         "${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/isac_allocator_libc.c")
+    set(ISAC_ALLOCATOR_CROSS_THREAD 1)
+  endif()
+elseif(NOT ISAC_ALLOCATOR_THREAD_CONTRACT STREQUAL "local-only")
+  message(FATAL_ERROR "Invalid ISAC_ALLOCATOR_THREAD_CONTRACT")
+endif()
+target_compile_definitions(isac_frontend
+                           PRIVATE ISAC_ALLOCATOR_CROSS_THREAD=${ISAC_ALLOCATOR_CROSS_THREAD})
 
 add_library(isac_backend src/backend.cpp src/native.cpp src/target.cpp)
 target_include_directories(isac_backend PUBLIC include)
@@ -62,11 +142,14 @@ target_compile_definitions(
   isac_backend
   PRIVATE ${LLVM_DEFINITIONS}
           ISAC_CLANG="${ISAC_CLANG}"
-          ISAC_RUNTIME_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/runtime/src/isac_runtime.c"
-          ISAC_ALLOCATOR_SOURCE="${ISAC_ALLOCATOR_SOURCE}"
-          ISAC_RUNTIME_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/runtime/include"
-          ISAC_RUNTIME_LIBRARY="$<TARGET_FILE:isac_runtime>")
-add_dependencies(isac_backend isac_runtime)
+          ISAC_THREAD_SOURCE="${ISAC_NATIVE_THREAD_SOURCE}"
+          ISAC_RUNTIME_SOURCE="${ISAC_NATIVE_RUNTIME_SOURCE}"
+          ISAC_ALLOCATOR_SOURCE="${ISAC_NATIVE_ALLOCATOR_SOURCE}"
+          ISAC_RUNTIME_INCLUDE="${ISAC_NATIVE_RUNTIME_INCLUDE}"
+          ISAC_RUNTIME_LIBRARY="${ISAC_NATIVE_RUNTIME_LIBRARY}")
+if(NOT ISAC_USE_INSTALLED_RUNTIME)
+  add_dependencies(isac_backend isac_runtime)
+endif()
 target_link_libraries(
   isac_backend
   PRIVATE MLIRIR
@@ -95,6 +178,70 @@ if(NOT LLVM_ENABLE_RTTI)
 endif()
 
 include(CTest)
+if(BUILD_TESTING)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_executable(isac_execution_contracts_test tests/execution_contracts.cpp)
+  target_link_libraries(isac_execution_contracts_test PRIVATE isac_frontend)
+  add_test(NAME execution_contract_invariants COMMAND isac_execution_contracts_test)
+  add_test(
+    NAME scoped_threads_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/scoped_threads_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_scoped_threads_runtime_test tests/scoped_threads_runtime.c)
+  target_link_libraries(isac_scoped_threads_runtime_test PRIVATE isac_runtime)
+  target_link_options(isac_scoped_threads_runtime_test PRIVATE -Wl,--wrap=pthread_create
+                      -Wl,--wrap=pthread_join)
+  add_test(
+    NAME scoped_threads_runtime
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/scoped_threads_runtime.py
+            $<TARGET_FILE:isac_scoped_threads_runtime_test>)
+  add_executable(isac_deferred_task_test tests/deferred_task_test.cpp)
+  target_link_libraries(isac_deferred_task_test PRIVATE isac_frontend isac_backend)
+  add_test(NAME deferred_task_invariants COMMAND isac_deferred_task_test
+                                                 ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(
+    NAME deferred_task_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/deferred_task_pipeline.py
+            $<TARGET_FILE:isac_deferred_task_test> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_async_threads_test tests/async_threads_test.cpp)
+  target_link_libraries(isac_async_threads_test PRIVATE isac_frontend)
+  target_link_options(isac_async_threads_test PRIVATE
+                      -Wl,--wrap=_ZN4isac9execution20allocatorCrossThreadEv)
+  add_test(NAME async_threads_invariants COMMAND isac_async_threads_test)
+  add_test(NAME public_async_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/async_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME suspension_borrows_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/suspension_borrows_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_suspension_borrows_test tests/suspension_borrows_test.cpp)
+  target_link_libraries(isac_suspension_borrows_test PRIVATE isac_frontend isac_backend)
+  add_test(NAME suspension_borrow_invariants COMMAND isac_suspension_borrows_test)
+  add_test(
+    NAME suspension_cancel_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/suspension_cancel_pipeline.py
+            $<TARGET_FILE:isac_suspension_borrows_test>)
+  add_executable(isac_protocol_execution_test tests/protocol_execution_test.cpp)
+  target_link_libraries(isac_protocol_execution_test PRIVATE isac_frontend)
+  add_test(NAME protocol_execution_invariants COMMAND isac_protocol_execution_test)
+  add_test(
+    NAME protocol_execution_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/protocol_execution_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME typed_thread_calls_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/thread_calls_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(
+    NAME scoped_carrier_threads_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/thread_carriers_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_thread_carriers_test tests/thread_carriers_test.cpp)
+  target_link_libraries(isac_thread_carriers_test PRIVATE isac_frontend)
+  target_link_options(isac_thread_carriers_test PRIVATE
+                      -Wl,--wrap=_ZN4isac9execution20allocatorCrossThreadEv)
+  add_test(NAME scoped_carrier_thread_invariants COMMAND isac_thread_carriers_test)
+endif()
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_test(
@@ -163,6 +310,47 @@ if(BUILD_TESTING)
     RESULT_VARIABLE ISAC_SANITIZER_STATUS
     OUTPUT_QUIET ERROR_QUIET)
   if(ISAC_SANITIZER_STATUS EQUAL 0)
+    add_test(NAME public_async_sanitized_pipeline
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/async_pipeline.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(public_async_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME suspension_borrows_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/suspension_borrows_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(suspension_borrows_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME suspension_cancel_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/suspension_cancel_pipeline.py
+              $<TARGET_FILE:isac_suspension_borrows_test> sanitized)
+    set_tests_properties(suspension_cancel_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME protocol_execution_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/protocol_execution_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(protocol_execution_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME typed_thread_calls_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/thread_calls_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(typed_thread_calls_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME scoped_carrier_threads_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/thread_carriers_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(scoped_carrier_threads_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME scoped_threads_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/scoped_threads_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(scoped_threads_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME deferred_task_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/deferred_task_pipeline.py
+              $<TARGET_FILE:isac_deferred_task_test> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(deferred_task_sanitized_pipeline PROPERTIES LABELS "sanitizers")
     add_test(
       NAME aggregate_syntax_sanitized_pipeline
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/aggregate_syntax_pipeline.py
@@ -623,6 +811,208 @@ if(BUILD_TESTING)
   add_test(NAME direct_unique_field_invariants
            COMMAND isac_direct_unique_fields_test
                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_unique_fields)
+  add_test(
+    NAME stored_field_reborrow_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/stored_field_reborrow_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_stored_field_reborrow_test tests/stored_field_reborrow_test.cpp)
+  target_link_libraries(isac_stored_field_reborrow_test PRIVATE isac_frontend)
+  add_test(NAME stored_field_reborrow_invariants
+           COMMAND isac_stored_field_reborrow_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/stored_field_reborrow)
+  add_test(
+    NAME unique_struct_inputs_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_struct_inputs_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_unique_struct_inputs_test tests/unique_struct_inputs_test.cpp)
+  target_link_libraries(isac_unique_struct_inputs_test PRIVATE isac_frontend)
+  add_test(NAME unique_struct_input_invariants
+           COMMAND isac_unique_struct_inputs_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_struct_inputs)
+  add_test(
+    NAME unique_struct_contracts_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_struct_contracts_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_unique_struct_contracts_test tests/unique_struct_contracts_test.cpp)
+  target_link_libraries(isac_unique_struct_contracts_test PRIVATE isac_frontend)
+  add_test(NAME unique_struct_contract_invariants
+           COMMAND isac_unique_struct_contracts_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_struct_contracts)
+  add_test(
+    NAME owned_unique_transfer_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/owned_unique_transfer_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_owned_unique_transfer_test tests/owned_unique_transfer_test.cpp)
+  target_link_libraries(isac_owned_unique_transfer_test PRIVATE isac_frontend)
+  add_test(NAME owned_unique_transfer_invariants
+           COMMAND isac_owned_unique_transfer_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/owned_unique_transfer)
+  add_test(
+    NAME multi_unique_transfer_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/multi_unique_transfer_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_multi_unique_transfer_test tests/multi_unique_transfer_test.cpp)
+  target_link_libraries(isac_multi_unique_transfer_test PRIVATE isac_frontend)
+  add_test(NAME multi_unique_transfer_invariants
+           COMMAND isac_multi_unique_transfer_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/multi_unique_transfer)
+  add_test(
+    NAME inferred_unique_routing_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/inferred_unique_routing_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_inferred_unique_routing_test tests/inferred_unique_routing_test.cpp)
+  target_link_libraries(isac_inferred_unique_routing_test PRIVATE isac_frontend)
+  add_test(NAME inferred_unique_routing_invariants
+           COMMAND isac_inferred_unique_routing_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/inferred_unique_routing)
+  add_test(
+    NAME cfg_unique_routing_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/cfg_unique_routing_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_cfg_unique_routing_test tests/cfg_unique_routing_test.cpp)
+  target_link_libraries(isac_cfg_unique_routing_test PRIVATE isac_frontend)
+  add_test(NAME cfg_unique_routing_invariants
+           COMMAND isac_cfg_unique_routing_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/cfg_unique_routing)
+  add_test(
+    NAME mixed_result_contracts_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/mixed_result_contracts_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_mixed_result_contracts_test tests/mixed_result_contracts_test.cpp)
+  target_link_libraries(isac_mixed_result_contracts_test PRIVATE isac_frontend)
+  add_test(NAME mixed_result_contract_invariants
+           COMMAND isac_mixed_result_contracts_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/mixed_result_contracts)
+  add_test(
+    NAME concurrency_foundations_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency_foundations_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_concurrency_foundations_test tests/concurrency_foundations_test.cpp)
+  target_link_libraries(isac_concurrency_foundations_test PRIVATE isac_frontend)
+  add_test(NAME concurrency_foundations_invariants
+           COMMAND isac_concurrency_foundations_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency_foundations)
+  add_executable(isac_capture_region_dependencies_test tests/capture_region_dependencies_test.cpp)
+  target_link_libraries(isac_capture_region_dependencies_test PRIVATE isac_frontend)
+  add_test(NAME capture_region_dependency_invariants
+           COMMAND isac_capture_region_dependencies_test
+                   ${CMAKE_CURRENT_SOURCE_DIR}/tests/capture_region_dependencies)
+  add_executable(isac_capture_states_test tests/capture_states_test.cpp)
+  target_link_libraries(isac_capture_states_test PRIVATE isac_frontend)
+  add_test(NAME capture_states_invariants COMMAND isac_capture_states_test
+                                                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/capture_states)
+  add_test(
+    NAME capture_states_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/capture_states_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_frame_construction_test tests/frame_construction_test.cpp)
+  target_link_libraries(isac_frame_construction_test PRIVATE isac_frontend)
+  add_test(NAME frame_construction_invariants COMMAND isac_frame_construction_test
+                                                      ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(
+    NAME frame_construction_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_construction_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_frame_storage_test tests/frame_storage_test.cpp)
+  target_link_libraries(isac_frame_storage_test PRIVATE isac_frontend)
+  add_test(NAME frame_storage_invariants COMMAND isac_frame_storage_test
+                                                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_storage)
+  add_test(
+    NAME frame_storage_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_storage_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_frame_heap_test tests/frame_heap_test.cpp)
+  target_link_libraries(isac_frame_heap_test PRIVATE isac_frontend)
+  add_test(NAME frame_heap_invariants COMMAND isac_frame_heap_test
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(NAME frame_heap_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_heap_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_frame_dispatch_test tests/frame_dispatch_test.cpp)
+  target_link_libraries(isac_frame_dispatch_test PRIVATE isac_frontend)
+  add_test(NAME frame_dispatch_invariants COMMAND isac_frame_dispatch_test
+                                                  ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_dispatch)
+  add_test(
+    NAME frame_dispatch_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_dispatch_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_frame_outline_test tests/frame_outline_test.cpp)
+  target_link_libraries(isac_frame_outline_test PRIVATE isac_frontend isac_backend)
+  add_test(NAME frame_outline_invariants COMMAND isac_frame_outline_test
+                                                 ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(
+    NAME frame_outline_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_outline_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_outline_test>)
+  add_executable(isac_frame_state_test tests/frame_state_test.cpp)
+  target_link_libraries(isac_frame_state_test PRIVATE isac_frontend isac_backend)
+  add_test(NAME frame_state_invariants COMMAND isac_frame_state_test
+                                               ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(
+    NAME frame_state_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_state_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_state_test>)
+  add_executable(isac_frame_step_test tests/frame_step_test.cpp)
+  target_link_libraries(isac_frame_step_test PRIVATE isac_frontend isac_backend)
+  add_test(NAME frame_step_invariants COMMAND isac_frame_step_test
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(
+    NAME frame_step_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_step_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_step_test>)
+  add_test(
+    NAME frame_completion_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_completion_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_step_test>)
+  add_executable(isac_frame_multiple_test tests/frame_multiple_test.cpp)
+  target_link_libraries(isac_frame_multiple_test PRIVATE isac_frontend isac_backend)
+  add_test(NAME frame_multiple_invariants COMMAND isac_frame_multiple_test
+                                                  ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(
+    NAME frame_multiple_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_multiple_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_multiple_test>)
+  add_executable(isac_frame_projection_test tests/frame_projection_test.cpp)
+  target_link_libraries(isac_frame_projection_test PRIVATE isac_frontend isac_backend)
+  add_test(NAME frame_projection_invariants COMMAND isac_frame_projection_test
+                                                    ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(
+    NAME frame_projection_pipeline
+    COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_projection_pipeline.py
+      $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_projection_test>)
+  add_executable(isac_frame_deep_test tests/frame_deep_test.cpp)
+  target_link_libraries(isac_frame_deep_test PRIVATE isac_frontend)
+  add_test(NAME frame_deep_invariants COMMAND isac_frame_deep_test
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(NAME frame_deep_pipeline
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_deep_pipeline.py
+                   $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(isac_frame_branch_test tests/frame_branch_test.cpp)
+  target_link_libraries(isac_frame_branch_test PRIVATE isac_frontend isac_backend)
+  add_test(NAME frame_branch_invariants COMMAND isac_frame_branch_test
+                                                ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(
+    NAME frame_branch_pipeline
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_branch_pipeline.py
+            $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_branch_test>)
+  if(UNIX)
+    find_package(Threads QUIET)
+    if(Threads_FOUND AND CMAKE_USE_PTHREADS_INIT)
+      add_test(
+        NAME runtime_concurrency_instrumentation
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_concurrency.py
+                ${ISAC_CLANG} ${CMAKE_CURRENT_SOURCE_DIR})
+    endif()
+  endif()
   add_executable(isac_projection_bounds_test tests/projection_bounds_test.cpp)
   target_link_libraries(isac_projection_bounds_test PRIVATE isac_frontend)
   add_test(NAME projection_storage_invariants
@@ -723,6 +1113,148 @@ if(BUILD_TESTING)
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_unique_fields_pipeline.py
         $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
     set_tests_properties(direct_unique_fields_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME stored_field_reborrow_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/stored_field_reborrow_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(stored_field_reborrow_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME unique_struct_inputs_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_struct_inputs_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(unique_struct_inputs_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME unique_struct_contracts_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/unique_struct_contracts_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(unique_struct_contracts_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME owned_unique_transfer_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/owned_unique_transfer_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(owned_unique_transfer_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME multi_unique_transfer_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/multi_unique_transfer_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(multi_unique_transfer_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME inferred_unique_routing_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/inferred_unique_routing_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(inferred_unique_routing_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME cfg_unique_routing_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/cfg_unique_routing_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(cfg_unique_routing_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME mixed_result_contracts_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/mixed_result_contracts_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(mixed_result_contracts_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME concurrency_foundations_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency_foundations_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(concurrency_foundations_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME capture_states_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/capture_states_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(capture_states_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_construction_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_construction_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(frame_construction_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_storage_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_storage_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(frame_storage_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(NAME frame_heap_sanitized_pipeline
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_heap_pipeline.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(frame_heap_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_dispatch_sanitized_pipeline
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_dispatch_pipeline.py
+              $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(frame_dispatch_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_outline_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_outline_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_outline_test>
+        sanitized)
+    set_tests_properties(frame_outline_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_state_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_state_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_state_test>
+        sanitized)
+    set_tests_properties(frame_state_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_step_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_step_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_step_test>
+        sanitized)
+    set_tests_properties(frame_step_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_completion_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_completion_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_step_test>
+        sanitized)
+    set_tests_properties(frame_completion_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_multiple_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_multiple_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_multiple_test>
+        sanitized)
+    set_tests_properties(frame_multiple_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_projection_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_projection_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_projection_test>
+        sanitized)
+    set_tests_properties(frame_projection_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(NAME frame_deep_sanitized_pipeline
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_deep_pipeline.py
+                     $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+    set_tests_properties(frame_deep_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    add_test(
+      NAME frame_branch_sanitized_pipeline
+      COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_branch_pipeline.py
+        $<TARGET_FILE:isac> ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:isac_frame_branch_test>
+        sanitized)
+    set_tests_properties(frame_branch_sanitized_pipeline PROPERTIES LABELS "sanitizers")
+    if(UNIX
+       AND Threads_FOUND
+       AND CMAKE_USE_PTHREADS_INIT)
+      add_test(
+        NAME runtime_concurrency_instrumentation_sanitized
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_concurrency.py
+                ${ISAC_CLANG} ${CMAKE_CURRENT_SOURCE_DIR} sanitized)
+      set_tests_properties(runtime_concurrency_instrumentation_sanitized PROPERTIES LABELS
+                                                                                    "sanitizers")
+    endif()
     add_test(
       NAME storage_slots_sanitized_pipeline
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_slots_pipeline.py

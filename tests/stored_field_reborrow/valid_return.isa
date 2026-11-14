@@ -1,0 +1,20 @@
+struct View {
+  value: &mut i32,
+}
+fn wrapped(data: &mut i32) -> Option<&mut i32> {
+  let view = View {
+    value: data
+  };
+  return Option::Some(&mut view.value);
+}
+fn main() {
+  let data = 1;
+  let item = wrapped(&mut data);
+  match item {
+    Some(edit) => {
+      edit = 42;
+    },
+    None => {}
+  }
+  print(data);
+}

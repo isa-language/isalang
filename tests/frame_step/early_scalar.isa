@@ -1,0 +1,36 @@
+@import "std.box"
+@import "std.env"
+struct Pair {
+  left: String,
+  right: String,
+}
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn choose() -> bool {
+  let arguments = env::args();
+  return arguments.len() == 1;
+}
+fn main() -> i32 {
+  let pair = Pair {
+    left: String::from("left"),
+    right: String::from("right")
+  };
+  let stop = choose();
+  marker();
+  let left = pair.left.move();
+  print(left);
+  left.drop();
+  loop {
+    if stop {
+      return 17;
+    }
+    break;
+  }
+  let right = pair.right.move();
+  pair.drop();
+  checkpoint();
+  print(right);
+  return 23;
+}

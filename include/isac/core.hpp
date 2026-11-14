@@ -13,6 +13,7 @@ struct Merge {
 struct FieldDropPlan {
   bool skip = false;
   std::map<uint32_t, FieldDropPlan> fields;
+  bool operator==(const FieldDropPlan &) const = default;
 };
 
 struct OwnedFieldState {
@@ -37,6 +38,59 @@ struct BorrowProvenance {
   bool operator==(const BorrowProvenance &) const = default;
 };
 using CarrierMap = std::map<hir::ReferencePath, BorrowProvenance>;
+
+enum class StateSide { Before, After };
+enum class CaptureMode { Copy, Move, Shared, Unique };
+
+struct SuspensionBorrow {
+  SymbolId alias, owner;
+  TypeId type;
+  BorrowKind kind;
+  RegionId region;
+  Loc origin;
+};
+struct CaptureResource {
+  storage::Location location;
+  TypeId type = Unit;
+  MemoryState memory = MemoryState::Own;
+  CaptureMode mode = CaptureMode::Copy;
+  StateId protocolState = None;
+  ValueId version = None;
+  bool allocation = false, executionLive = false, callerOwned = false;
+  SymbolId root = None;
+  std::set<SymbolId> additionalOrigins;
+  unsigned shared = 0, exclusive = 0;
+  bool unique = false;
+  std::map<uint32_t, OwnedFieldState> fields;
+  std::set<uint32_t> absentFields;
+  std::set<hir::ReferencePath> movedPayloads;
+  CarrierMap carriers;
+};
+struct CaptureDrop {
+  storage::Location location;
+  TypeId type;
+  bool allocation;
+  FieldDropPlan fields;
+  std::set<uint32_t> absentFields;
+  std::set<hir::ReferencePath> movedPayloads;
+};
+struct CaptureState {
+  FunctionId function;
+  regions::ProgramPoint point;
+  StateSide side;
+  StateId entryState = None;
+  Loc origin;
+  std::vector<CaptureResource> resources;
+  bool terminal = false, cleanupValid = false;
+
+  std::vector<CaptureDrop> cleanup;
+  std::optional<Diagnostic> blocker;
+
+  std::vector<CaptureDrop> completedCleanup = {};
+};
+struct VerificationOptions {
+  bool retainCaptureStates = false;
+};
 struct Inst {
   enum Kind {
     Constant,
@@ -95,7 +149,12 @@ struct Inst {
     ArrayRepeat,
     FunctionAddress,
     IndirectForeignCall,
-    StructInit
+    StructInit,
+    ThreadRun,
+    FutureCreate,
+    Await,
+    BlockOn,
+    ThreadCall
   } kind;
   Loc loc;
   uint32_t semanticPoint = None;
@@ -111,6 +170,7 @@ struct Inst {
   bool storedPayloadReference = false;
   enum class PlaceProjection { None, Field, Index } placeProjection = PlaceProjection::None;
   uint32_t fieldIndex = None;
+
   std::vector<uint32_t> fieldPath;
   uint32_t loop = None;
   bool unconditional = false;
@@ -126,12 +186,14 @@ struct Inst {
   std::vector<SymbolId> cleanup;
   std::map<SymbolId, std::vector<hir::ReferencePath>> movedPayloads;
   CarrierMap carriers;
+  std::vector<SuspensionBorrow> suspensionBorrows;
   bool freeTemporary = false;
   bool replaceField = false;
   std::map<SymbolId, std::vector<uint32_t>> absentFields;
   std::vector<uint32_t> temporaryAbsentFields;
   std::map<SymbolId, FieldDropPlan> fieldCleanup;
   FieldDropPlan replacedFieldPlan, temporaryFieldPlan;
+  FieldDropPlan storedFieldPlan;
   Quantity quantity = Quantity::Omega;
   Access access = Access::Own;
   ProtocolId protocol = None;
@@ -144,16 +206,32 @@ struct Function {
   std::vector<ValueId> parameters;
   std::vector<FieldPostState> fieldPostStates = {};
 };
+
+inline bool functionCall(const Inst &i) {
+  return i.kind == Inst::Call || i.kind == Inst::ThreadCall;
+}
+
+inline bool storedFieldReborrow(const hir::Program &p, const Inst &i) {
+  if ((i.kind != Inst::BorrowShared && i.kind != Inst::BorrowUnique) || i.payloadPath.empty() ||
+      i.slot >= p.symbols.size())
+    return false;
+  for (const auto &part : i.payloadPath)
+    if (part.kind != hir::ReferenceProjectionKind::Field)
+      return false;
+  auto leaf = p.referencePositionType(p.symbols[i.slot].type, i.payloadPath);
+  return leaf && p.reference(*leaf) && p.types[*leaf].referenceAccess == Access::Unique;
+}
 struct Program {
   hir::Program semantics;
   std::vector<Function> functions;
   uint32_t values = 0;
   std::vector<regions::FunctionGraph> regionGraphs;
+  std::vector<CaptureState> captureStates = {};
 };
 class Verified {
   Program program;
   explicit Verified(Program p) : program(std::move(p)) {}
-  friend Verified verify(Program);
+  friend Verified verify(Program, VerificationOptions);
 
 public:
   const Program &get() const {
@@ -161,7 +239,7 @@ public:
   }
 };
 Program elaborate(hir::Program);
-Verified verify(Program);
+Verified verify(Program, VerificationOptions = {});
 void print(const Program &, std::ostream &);
 }
 }

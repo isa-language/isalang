@@ -34,9 +34,11 @@ int main(int argc, char **argv) {
   };
   auto first = named("first"), second = named("second"), holder = named("view");
   auto type = p.semantics.symbols[holder].type;
-  require(p.semantics.localCarrierType(type) && !p.semantics.borrowedInputSupported(type) &&
+  require(p.semantics.localCarrierType(type) && p.semantics.borrowedInputSupported(type) &&
+              !p.semantics.borrowedPayloadLayoutSupported(type, Access::Shared) &&
+              p.semantics.borrowedPayloadLayoutSupported(type, Access::Unique) &&
               !p.semantics.containerElement(type),
-          "local Unique storage widened signature or heap-element permissions");
+          "Unique carrier layout widened heap-element permissions");
   bool replaced = false, extracted = false;
   for (const auto &f : p.functions) {
     const auto &g = *std::find_if(p.regionGraphs.begin(), p.regionGraphs.end(),

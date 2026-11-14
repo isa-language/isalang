@@ -1,0 +1,14 @@
+@import "std.async"
+
+fn append(text: &mut String) {
+  text.push_str("!");
+}
+async fn number() -> i32 {
+  return 7;
+}
+async fn main() {
+  let text = String::from("joined");
+  @thread(append(&mut text));
+  let value = await number();
+  @println("{} {}", text, value);
+}

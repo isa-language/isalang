@@ -1,0 +1,13 @@
+struct Input {
+  value: &mut i32,
+  data: i32,
+}
+struct View {
+  value: &mut i32,
+}
+fn forward(input: Input) -> View {
+  return View {
+    value: &mut input.data
+  };
+}
+fn main() {}

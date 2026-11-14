@@ -1,0 +1,32 @@
+@import "std.buffer"
+struct Input {
+  number: &mut i32,
+  flag: &mut bool,
+  owner: Buffer,
+}
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn forward(input: Input) -> Views {
+  let owner = input.owner.move();
+  print(owner.len());
+  owner.release();
+  return Views {
+    number: input.number.move(),
+    flag: input.flag.move()
+  };
+}
+fn main() {
+  let data = 1;
+  let flag = false;
+    let result = forward(Input {
+      number: &mut data,
+      flag: &mut flag,
+      owner: Buffer::new(2)
+  });
+  let edit = &mut result.number;
+  edit = 42;
+  result.drop();
+  print(data);
+}

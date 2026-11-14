@@ -1,0 +1,14 @@
+struct Leaf {
+  value: &mut bool,
+}
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn forward(a: &mut i32, b: Leaf) -> Views {
+  return Views {
+    number: a,
+    flag: b.value.move()
+  };
+}
+fn main() {}

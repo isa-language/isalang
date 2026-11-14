@@ -1,0 +1,38 @@
+struct Pair {
+  read: &i32,
+  edit: &mut i32,
+}
+struct Input {
+  pair: Pair,
+  owner: String,
+}
+struct Output {
+  owner: String,
+  pair: Pair,
+}
+fn forward(input: Input) -> Output {
+  return Output {
+    owner: input.owner.move(),
+    pair: input.pair.move()
+  };
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = forward(Input {
+      owner: String::from("owned"),
+      pair: Pair {
+        read: &a,
+        edit: &mut b
+      }
+  });
+  let owner = result.owner.move();
+  print(owner);
+  print(result.pair.read);
+  let edit = &mut result.pair.edit;
+  edit = 20;
+  result.drop();
+  a = 10;
+  print(a);
+  print(b);
+}

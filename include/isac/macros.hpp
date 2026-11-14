@@ -5,7 +5,18 @@ namespace isac::macros {
 using MacroId = uint32_t;
 using ModuleId = uint32_t;
 enum class AtSymbolKind { Macro, Intrinsic, CompilerBuiltin };
-enum class BuiltinId { None, Format, Print, Println, Input, SizeOf, AlignOf, Import };
+enum class BuiltinId {
+  None,
+  Format,
+  Print,
+  Println,
+  Input,
+  SizeOf,
+  AlignOf,
+  Import,
+  BlockOn,
+  Thread
+};
 struct AtSymbol {
   AtSymbolKind kind;
   uint32_t id;

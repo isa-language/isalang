@@ -1,0 +1,11 @@
+@import "std.box"
+fn marker() {}
+fn checkpoint() {}
+fn main() {
+  let text = String::from("nested");
+  marker();
+  if true {
+    checkpoint();
+  }
+  print(text);
+}

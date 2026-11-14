@@ -1,0 +1,29 @@
+struct View {
+  value: &mut i32,
+}
+fn modify(value: &mut i32) {
+  value = 42;
+}
+fn inspect(value: &i32) {
+  print(value);
+}
+fn first(value: &mut i32) -> Option<&mut i32> {
+  return Option::Some(value);
+}
+fn main() {
+  let data = 1;
+  let view = View {
+    value: &mut data
+  };
+  modify(&mut view.value);
+  inspect(&view.value);
+  let output = first(&mut view.value);
+  match output {
+    Some(edit) => {
+      edit = 43;
+    },
+    None => {}
+  }
+  view.drop();
+  print(data);
+}

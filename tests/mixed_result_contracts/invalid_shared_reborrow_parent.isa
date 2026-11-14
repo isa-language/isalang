@@ -1,0 +1,20 @@
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+fn forward(input: View) -> View {
+  return input.move();
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+  let w = &mut a;
+  let read = &w;
+    let output = forward(View {
+      read: read,
+      edit: &mut b
+  });
+  w = 20;
+  print(output.read);
+  output.drop();
+}

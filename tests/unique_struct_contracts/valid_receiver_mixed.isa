@@ -1,0 +1,37 @@
+struct View {
+  read: &i32,
+  a: &mut i32,
+  b: &mut i32,
+  owner: String,
+}
+impl View {
+  pub fn show(shared self) {
+    print(self.read);
+    let r = &self.a;
+    print(r);
+    print(self.owner.len());
+  }
+  pub fn update(unique self) {
+    let a = &mut self.a;
+    a = 10;
+    let b = &mut self.b;
+    b = 20;
+    self.owner.push_str("!");
+  }
+}
+fn main() {
+  let n = 7;
+  let a = 1;
+  let b = 2;
+  let view = View {
+    read: &n,
+    a: &mut a,
+    b: &mut b,
+    owner: String::from("owned")
+  };
+  view.update();
+  view.show();
+  view.drop();
+  print(a);
+  print(b);
+}

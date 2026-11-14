@@ -48,7 +48,9 @@ int main(int argc, char **argv) {
   auto out = hir::payloadPosition(0, 0);
   auto transfers = p.semantics.referenceTransfers(f);
   require(transfers.size() == 1 &&
-              transfers.at(out) == std::set<hir::ReferenceSource>{{a.parameter, a.path, a.origin}},
+              transfers.at(out) ==
+                  std::set<hir::ReferenceSource>{
+                      {a.parameter, a.path, a.origin, hir::ReferenceSourceKind::Carrier}},
           "number result was bounded by unrelated text position");
   const auto &g = graphFor(first);
   require(g.contract.inputs.at(a.parameter).at(a.path) == std::set<RegionId>{a.region} &&
@@ -132,7 +134,8 @@ int main(int argc, char **argv) {
   require(leaves.size() == 2 && leaves[0].path.size() == 3 &&
               recursiveTransfers.at(leaves[0].path) == transfers.at(out) &&
               recursiveTransfers.at(leaves[1].path) ==
-                  std::set<hir::ReferenceSource>{{b.parameter, b.path, b.origin}} &&
+                  std::set<hir::ReferenceSource>{
+                      {b.parameter, b.path, b.origin, hir::ReferenceSourceKind::Carrier}} &&
               !schemas.borrowedInputSupported(vector) && !schemas.containerElement(vector),
           "recursive contract schema confused positions or authorized a layout");
   schemas.types[viewId].fields[0].offset = 17;
@@ -147,9 +150,11 @@ int main(int argc, char **argv) {
                                                 {parameter.id, b.origin, b.region, leaves[1].path}};
   auto recursiveInputs = schemas.referenceTransfers(recursiveSignature);
   require(recursiveInputs.at(leaves[0].path) ==
-                  std::set<hir::ReferenceSource>{{parameter.id, leaves[0].path, a.origin}} &&
+                  std::set<hir::ReferenceSource>{{parameter.id, leaves[0].path, a.origin,
+                                                  hir::ReferenceSourceKind::Carrier}} &&
               recursiveInputs.at(leaves[1].path) ==
-                  std::set<hir::ReferenceSource>{{parameter.id, leaves[1].path, b.origin}},
+                  std::set<hir::ReferenceSource>{
+                      {parameter.id, leaves[1].path, b.origin, hir::ReferenceSourceKind::Carrier}},
           "recursive input paths were flattened by the transfer contract");
 
   for (int corruption = 0; corruption != 5; ++corruption) {

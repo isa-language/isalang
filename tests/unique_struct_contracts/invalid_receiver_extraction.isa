@@ -1,0 +1,10 @@
+struct View {
+  value: &mut i32,
+}
+impl View {
+  pub fn take(unique self) {
+    let edit = self.value.move();
+    edit = 42;
+  }
+}
+fn main() {}

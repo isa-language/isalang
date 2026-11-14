@@ -1,0 +1,15 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+struct View {
+  value: &mut i32,
+}
+impl Views {
+  fn forward(unique self) -> Views {
+    loop {
+      return self.move();
+    }
+  }
+}
+fn main() {}

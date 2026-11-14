@@ -1,0 +1,36 @@
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn forward(input: Views, choose: bool) -> Result<&mut i32, &mut bool> {
+  if choose {
+    return Result::Ok(input.number.move());
+  }
+  return Result::Err(input.flag.move());
+}
+fn exercise(choose: bool) {
+  let data = 1;
+  let flag = false;
+  let a = &mut data;
+  let b = &mut flag;
+    let result = forward(Views {
+      number: a,
+      flag: b
+  }, choose);
+  match result {
+    Result::Ok(edit) => {
+      edit = 42;
+    },
+    Result::Err(mark) => {
+      mark = true;
+    }
+  }
+  a = 43;
+  b = false;
+  print(a);
+  print(b);
+}
+fn main() {
+  exercise(true);
+  exercise(false);
+}

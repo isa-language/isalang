@@ -1,0 +1,36 @@
+@import "std.vec"
+struct Views {
+  number: Option<&mut i32>,
+  flag: Option<&mut bool>,
+}
+fn forward(input: Views) -> Views {
+  return input.move();
+}
+fn main() {
+  let numbers = [1, 2];
+  let flags = Vec<bool>::new();
+    let result = forward(Views {
+      number: numbers.first_mut(),
+      flag: flags.first_mut()
+  });
+  let number = result.number.move();
+  match number {
+    Some(edit) => {
+      edit = 42;
+    },
+    None => {}
+  }
+  let flag = result.flag.move();
+  match flag {
+    Some(mark) => {
+      mark = true;
+    },
+    None => {
+      print(7);
+    }
+  }
+  result.drop();
+  flags.push(false);
+  print(numbers[0]);
+  print(flags.len());
+}

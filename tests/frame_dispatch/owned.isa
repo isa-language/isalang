@@ -1,0 +1,22 @@
+@import "std.box"
+@import "std.env"
+fn select_exit() -> bool {
+  print(101);
+  let arguments = env::args();
+  return arguments.len() > 1;
+}
+fn marker() {}
+fn main() -> i32 {
+  let stop = select_exit();
+  let one = String::from("one");
+  let two = String::from("two");
+  marker();
+  print(one);
+  print(two);
+  one.push_str("!");
+  print(one);
+  if stop {
+    return 17;
+  }
+  return 0;
+}

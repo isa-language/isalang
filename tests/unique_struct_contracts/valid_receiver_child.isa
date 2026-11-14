@@ -1,0 +1,24 @@
+struct View {
+  value: &mut i32,
+}
+struct Child {
+  value: &mut i32,
+}
+impl View {
+  pub fn set(unique self) {
+    let child = Child {
+      value: &mut self.value
+    };
+    let edit = &mut child.value;
+    edit = 42;
+  }
+}
+fn main() {
+  let data = 1;
+  let view = View {
+    value: &mut data
+  };
+  view.set();
+  view.drop();
+  print(data);
+}

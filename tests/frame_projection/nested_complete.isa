@@ -1,0 +1,24 @@
+@import "std.box"
+struct Inner<T> {
+  text: T,
+}
+struct Outer {
+  first: String,
+  child: Inner<String>,
+}
+fn marker() {}
+fn first() {
+  print(101);
+}
+fn main() {
+  let data = Outer {
+    first: String::from("first"),
+    child: Inner<String> {
+      text: String::from("nested")
+    }
+  };
+  marker();
+  data.first.drop();
+  first();
+  print(data.child.text.as_str());
+}

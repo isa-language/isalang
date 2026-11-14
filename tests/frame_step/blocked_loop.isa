@@ -1,0 +1,12 @@
+@import "std.box"
+fn marker() {}
+fn checkpoint() {}
+fn main() {
+  let text = String::from("loop");
+  marker();
+  loop {
+    checkpoint();
+    break;
+  }
+  print(text);
+}

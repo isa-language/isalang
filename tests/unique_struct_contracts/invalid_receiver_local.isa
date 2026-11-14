@@ -1,0 +1,10 @@
+struct View {
+  value: &mut i32,
+}
+impl View {
+  pub fn change(unique self) {
+    let local = 42;
+    self.value = &mut local;
+  }
+}
+fn main() {}

@@ -1,0 +1,36 @@
+struct View {
+  value: &mut i32,
+}
+fn wrap(input: &mut i32, choice: bool) -> View {
+  if choice {
+    return View {
+      value: input
+    };
+  }
+  return View {
+    value: input
+  };
+}
+impl View {
+  pub fn set(unique self, early: bool) {
+    if early {
+      let edit = &mut self.value;
+      edit = 10;
+      return;
+    }
+    let i = 0;
+    while i<2 {
+      let edit = &mut self.value;
+      edit = 20 + i;
+      i = i + 1;
+    }
+  }
+}
+fn main() {
+  let a = 1;
+  let view = wrap(&mut a, true);
+  view.set(true);
+  view.set(false);
+  view.drop();
+  print(a);
+}

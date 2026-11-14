@@ -550,6 +550,9 @@ class Parser {
         }
         need("]");
       }
+    } else if (eat("await")) {
+      e.kind = ast::Expr::Await;
+      e.args.push_back(primary());
     } else if (eat("&")) {
       e.kind = ast::Expr::Borrow;
       e.text = eat("mut") ? "unique" : "shared";
@@ -945,8 +948,6 @@ public:
   ast::Program run() {
     ast::Program p;
     while (peek().kind != Token::End) {
-      if (peek().text == "async" || peek().text == "await")
-        ident();
       if (peek().text == "@" && ts[pos + 1].text == "import") {
         auto origin = peek().loc;
         pos += 2;
@@ -988,8 +989,9 @@ public:
         fail(peek().loc, DiagnosticCode::InvalidDeclaration, "@initializer requires a struct");
       if (!iteration.empty() && peek().text != "struct")
         fail(peek().loc, DiagnosticCode::InvalidDeclaration, "@iteration requires a struct");
-      if (peek().text == "async" || peek().text == "await")
-        ident();
+      bool asyncFunction = eat("async");
+      if (asyncFunction && peek().text != "fn")
+        fail(peek().loc, DiagnosticCode::UnexpectedToken, "async requires a function declaration");
       auto start = peek().loc;
       bool foreign = eat("extern");
       if (foreign && stringLiteral() != "C")
@@ -1012,10 +1014,11 @@ public:
         p.foreignTypes.push_back(std::move(declaration));
       } else if (peek().text == "const" && !foreign && !unsafeFunction) {
         p.constants.push_back(stmt());
-      } else if (eat("fn"))
-        p.functions.push_back(
-            function("", pub, foreign && trusted, attr, foreign && !trusted, unsafeFunction));
-      else if (eat("impl")) {
+      } else if (eat("fn")) {
+        auto f = function("", pub, foreign && trusted, attr, foreign && !trusted, unsafeFunction);
+        f.kind = asyncFunction ? FunctionKind::Async : FunctionKind::Normal;
+        p.functions.push_back(std::move(f));
+      } else if (eat("impl")) {
         std::vector<std::string> parameters;
         if (eat("<")) {
           do {
@@ -1172,11 +1175,11 @@ bool parseFragment(const std::vector<Token> &ts, const std::string &kind) {
 static void printStmts(const std::vector<ast::Stmt> &, std::ostream &, int);
 static void printExpr(const ast::Expr &e, std::ostream &o) {
   static const char *names[] = {
-      "LiteralInt",      "LiteralBool", "Identifier",   "Binary",        "Call",
-      "MethodCall",      "Member",      "Index",        "Array",         "Assignment",
-      "Unary",           "Cast",        "Char",         "StringLiteral", "BlockExpr",
-      "AtCall",          "BorrowExpr",  "MatchExpr",    "UnsafeExpr",    "DereferenceExpr",
-      "ArrayRepeatExpr", "InvokeExpr",  "BraceInitExpr"};
+      "LiteralInt",      "LiteralBool", "Identifier",    "Binary",        "Call",
+      "MethodCall",      "Member",      "Index",         "Array",         "Assignment",
+      "Unary",           "Cast",        "Char",          "StringLiteral", "BlockExpr",
+      "AtCall",          "BorrowExpr",  "MatchExpr",     "UnsafeExpr",    "DereferenceExpr",
+      "ArrayRepeatExpr", "InvokeExpr",  "BraceInitExpr", "AwaitExpr"};
   o << "(" << names[e.kind] << " " << (e.kind == ast::Expr::String ? quoteText(e.text) : e.text);
   if (!e.body.empty())
     printStmts(e.body, o, 2);
@@ -1326,7 +1329,8 @@ void printAST(const ast::Program &p, std::ostream &o) {
       o << "unsafe ";
     if (!f.intrinsic.empty())
       o << "intrinsic " << f.intrinsic << " ";
-    o << "fn " << f.owner << "::" << f.name << " -> " << typeName(f.result) << "\n";
+    o << (f.kind == FunctionKind::Async ? "async fn " : "fn ") << f.owner << "::" << f.name
+      << " -> " << typeName(f.result) << "\n";
     if (f.variadic)
       o << "  variadic ...\n";
     if (f.foreignC)

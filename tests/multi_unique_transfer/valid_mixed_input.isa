@@ -1,0 +1,36 @@
+struct Input {
+  read: &i32,
+  number: &mut i32,
+  flag: &mut bool,
+  owner: String,
+}
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn forward(input: Input) -> Views {
+  print(input.read);
+  let owner = input.owner.move();
+  print(owner);
+  return Views {
+    number: input.number.move(),
+    flag: input.flag.move()
+  };
+}
+fn main() {
+  let read = 7;
+  let data = 1;
+  let flag = false;
+    let result = forward(Input {
+      read: &read,
+      number: &mut data,
+      flag: &mut flag,
+      owner: String::from("mixed")
+  });
+  let edit = &mut result.number;
+  edit = 42;
+  result.drop();
+  print(read);
+  print(data);
+  print(flag);
+}

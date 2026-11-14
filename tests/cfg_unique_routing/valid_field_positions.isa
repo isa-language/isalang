@@ -1,0 +1,43 @@
+struct Prefix {
+  left: i32,
+  right: i32,
+}
+struct Views {
+  prefix: Prefix,
+  first: &mut i32,
+  second: &mut i32,
+}
+fn forward(input: Views) -> Views {
+  loop {
+    break;
+  }
+  return Views {
+    prefix: Prefix {
+      left: input.prefix.left,
+      right: input.prefix.right
+    },
+    first: input.second.move(),
+    second: input.first.move(),
+  };
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = forward(Views {
+      prefix: Prefix {
+        left: 7,
+        right: 8
+      },
+      first: &mut a,
+      second: &mut b
+  });
+  print(result.prefix.left);
+  print(result.prefix.right);
+  let x = &mut result.first;
+  x = 10;
+  let y = &mut result.second;
+  y = 20;
+  result.drop();
+  print(a);
+  print(b);
+}

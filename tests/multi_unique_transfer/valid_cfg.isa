@@ -1,0 +1,27 @@
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn forward(input: Views, early: bool) -> Views {
+  if early {
+    return input.move();
+  }
+  let i = 0;
+  while i<2 {
+    let edit = &mut input.number;
+    edit = 20 + i;
+    i++;
+  }
+  return input.move();
+}
+fn main() {
+  let data = 1;
+  let flag = false;
+      let result = forward(forward(Views {
+        number: &mut data,
+        flag: &mut flag
+  }, true), false);
+  result.drop();
+  print(data);
+  print(flag);
+}

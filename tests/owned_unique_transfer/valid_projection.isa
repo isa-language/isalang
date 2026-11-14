@@ -1,0 +1,36 @@
+struct View {
+  value: &mut i32,
+}
+struct Input {
+  owner: String,
+  inner: View,
+}
+struct Output {
+  owner: String,
+  edit: View,
+}
+fn forward(input: Input) -> Output {
+  let inner = input.inner.move();
+  let value = inner.value.move();
+  return Output {
+    edit: View {
+      value: value
+    },
+    owner: input.owner.move()
+  };
+}
+fn main() {
+  let data = 1;
+    let result = forward(Input {
+      owner: String::from("owned"),
+      inner: View {
+        value: &mut data
+      }
+  });
+  let edit = &mut result.edit.value;
+  edit = 42;
+  let owner = result.owner.move();
+  print(owner);
+  result.drop();
+  print(data);
+}

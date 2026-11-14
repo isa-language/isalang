@@ -1,0 +1,45 @@
+@import "std.async"
+
+protocol WorkState {
+  initial Ready;
+  final Ready;
+  state Ready {
+    begin(self) -> Busy;
+  }
+  state Busy {
+    finish(self) -> Ready;
+  }
+}
+
+struct WorkToken: WorkState {
+  value: i32,
+}
+impl WorkToken {
+  fn begin(self) {
+    self.value = 41;
+  }
+  fn finish(self) {
+    self.value = 42;
+  }
+}
+
+fn execute(token: WorkToken) -> i32 {
+  token.begin();
+  token.finish();
+  return token.value;
+}
+
+async fn one() -> i32 {
+  return 1;
+}
+async fn deferred(token: WorkToken) -> i32 {
+  token.begin();
+  token.finish();
+  let extra = await one();
+  return token.value + extra;
+}
+
+fn main() {
+  print(@thread(execute(WorkToken::new())));
+  print(@block_on(deferred(WorkToken::new())));
+}

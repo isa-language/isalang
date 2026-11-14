@@ -1,0 +1,10 @@
+struct View {
+  value: &mut i32,
+}
+impl View {
+  pub fn bad(shared self) {
+    let edit = &mut self.value;
+    edit = 42;
+  }
+}
+fn main() {}

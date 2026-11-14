@@ -1,0 +1,24 @@
+struct Views<A, B> {
+  first: &mut A,
+  second: &mut B,
+}
+impl<A, B> Views<A, B> {
+  pub fn forward(input: Views<A, B>) -> Views<A, B> {
+    return input.move();
+  }
+}
+fn main() {
+  let data = 1;
+  let flag = false;
+    let result = Views<i32, bool>::forward(Views<i32, bool> {
+      first: &mut data,
+      second: &mut flag
+  });
+  let edit = &mut result.first;
+  edit = 42;
+  let mark = &mut result.second;
+  mark = true;
+  result.drop();
+  print(data);
+  print(flag);
+}

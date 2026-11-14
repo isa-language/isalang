@@ -144,6 +144,7 @@ class Analysis {
     case I::Discard:
       return true;
     case I::Call:
+    case I::ThreadCall:
     case I::ProtocolTransition:
     case I::ContainerCall: {
       const auto &target = p.semantics.functions.at(i.function);
@@ -164,10 +165,32 @@ class Analysis {
     if (i.kind == I::Bind)
       return extract(state, value(i.args.at(0)));
     if (i.kind == I::FieldTake && base)
-      return extract(state, storage::detail::field(*base, i.fieldIndex));
+      return extract(state, storage::detail::fieldOperation(*base, i));
     if (i.kind == I::PayloadTake && base)
       return extract(state, storage::detail::append(*base, i.payloadPath));
     State result;
+    if (core::functionCall(i) || i.kind == I::ContainerCall) {
+      const auto &target = p.semantics.functions.at(i.function);
+      if (target.resultBorrowedContainer && target.resultAccess == Access::Unique &&
+          target.resultPayloadSource) {
+        for (const auto &[path, sources] : p.semantics.referenceTransfers(target)) {
+          if (p.semantics.referenceResultAccess(target, path) != Access::Unique)
+            continue;
+          const auto &source = *sources.begin();
+          auto index = std::find(target.params.begin(), target.params.end(), source.parameter) -
+                       target.params.begin();
+          auto forwarded =
+              extract(state, storage::detail::append(value(i.args.at(index - (i.slot != None))),
+                                                     source.path));
+
+          for (auto &[position, binding] : forwarded)
+            binding.present = false;
+          auto destination = value(None);
+          destination.path = path;
+          store(result, destination, forwarded);
+        }
+      }
+    }
     if (i.kind == I::EnumConstruct || i.kind == I::StructInit || i.kind == I::Array)
       for (size_t n = 0; n < i.args.size(); ++n) {
         auto destination = value(None);
@@ -222,9 +245,10 @@ class Analysis {
       if (!payload.contains(value(None)))
         fail(i.loc, DiagnosticCode::InvalidCore, "stored payload alias has no carrier occurrence");
       auto &binding = payload.at(value(None));
-      if (i.kind == I::BorrowShared) {
+      if (i.kind == I::BorrowShared || core::storedFieldReborrow(p.semantics, i)) {
         binding.instances = {births.at({i.semanticPoint, {}})};
         binding.parent = None;
+        binding.capability = i.kind == I::BorrowShared ? Access::Shared : Access::Unique;
       } else
         end(state, position, EndKind::Transfer, ends);
       binding.regions = {i.region};
@@ -237,7 +261,7 @@ class Analysis {
       end(state, symbol(i.slot), EndKind::Drop, ends);
     if (i.kind == I::FieldTake || i.kind == I::FieldStore || i.kind == I::FieldDrop) {
       if (base) {
-        auto destination = storage::detail::field(*base, i.fieldIndex);
+        auto destination = storage::detail::fieldOperation(*base, i);
         auto replacement = i.kind == I::FieldStore ? extract(state, value(i.args.at(0))) : State{};
         end(state, destination, i.kind == I::FieldTake ? EndKind::Transfer : EndKind::Drop, ends);
         if (i.kind == I::FieldStore)
@@ -246,15 +270,31 @@ class Analysis {
     }
     if (i.kind == I::PayloadTake && base)
       end(state, storage::detail::append(*base, i.payloadPath), EndKind::Transfer, ends);
+    if (core::functionCall(i) || i.kind == I::ContainerCall) {
+      const auto &target = p.semantics.functions.at(i.function);
+      if (target.resultBorrowedContainer && target.resultAccess == Access::Unique &&
+          target.resultPayloadSource) {
+        for (const auto &[path, sources] : p.semantics.referenceTransfers(target)) {
+          if (p.semantics.referenceResultAccess(target, path) != Access::Unique)
+            continue;
+          const auto &source = *sources.begin();
+          auto index = std::find(target.params.begin(), target.params.end(), source.parameter) -
+                       target.params.begin();
+          end(state,
+              storage::detail::append(value(i.args.at(index - (i.slot != None))), source.path),
+              EndKind::Transfer, ends);
+        }
+      }
+    }
     for (size_t n = 0; n < i.args.size(); ++n)
       if (consumes(i, n))
         end(state, value(i.args[n]),
-            i.kind == I::Return                                 ? EndKind::Return
-            : i.kind == I::Discard                              ? EndKind::Drop
-            : (i.kind == I::Call || i.kind == I::ContainerCall) ? EndKind::Consume
-                                                                : EndKind::Transfer,
+            i.kind == I::Return                                     ? EndKind::Return
+            : i.kind == I::Discard                                  ? EndKind::Drop
+            : (core::functionCall(i) || i.kind == I::ContainerCall) ? EndKind::Consume
+                                                                    : EndKind::Transfer,
             ends);
-    if ((i.kind == I::Call || i.kind == I::ProtocolTransition || i.kind == I::ContainerCall) &&
+    if ((core::functionCall(i) || i.kind == I::ProtocolTransition || i.kind == I::ContainerCall) &&
         i.slot != None && p.semantics.functions.at(i.function).consumesSelf)
       end(state, symbol(i.slot), EndKind::Consume, ends);
     if (i.kind == I::Bind) {
@@ -313,7 +353,13 @@ public:
       auto id = static_cast<CarrierId>(facts.identities.size());
       facts.identities.push_back({id, None, input.parameter, input.path});
       entry[storage::detail::append(symbol(input.parameter), input.path)] = {
-          {id}, {input.origin}, {input.region}, Access::Shared, None, false};
+          {id},
+          {input.origin},
+          {input.region},
+          p.semantics.symbols.at(input.origin).access,
+          None,
+          !p.semantics.conditionalReferencePosition(p.semantics.symbols.at(input.parameter).type,
+                                                    input.path)};
     }
     bool outputs = false;
     for (auto *i : places.instructions)
@@ -326,7 +372,7 @@ public:
         }
     for (auto *i : places.instructions)
       if (i && active(i->semanticPoint) && i->storedPayloadReference &&
-          i->kind == I::BorrowShared) {
+          (i->kind == I::BorrowShared || core::storedFieldReborrow(p.semantics, *i))) {
         auto id = static_cast<CarrierId>(facts.identities.size());
         facts.identities.push_back({id, i->semanticPoint, None, {}});
         births[{i->semanticPoint, {}}] = id;

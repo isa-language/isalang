@@ -42,7 +42,7 @@ class Builder {
     if (i.result != None) {
       b.valueDefinitions.insert(i.result);
       bool reference = i.kind == I::ReferenceArgument ||
-                       ((i.kind == I::Call || i.kind == I::ContainerCall) &&
+                       ((core::functionCall(i) || i.kind == I::ContainerCall) &&
                         program.semantics.functions.at(i.function).returnsReference());
       graph.valueDefinitions.emplace(i.result, SemanticValueDefinition{i.type, reference, {id, 0}});
     }
@@ -143,7 +143,7 @@ public:
     while (originsChanged) {
       originsChanged = false;
       for (auto *i : instructions) {
-        if (!i || (i->kind != I::Call && i->kind != I::ContainerCall) ||
+        if (!i || (!core::functionCall(*i) && i->kind != I::ContainerCall) ||
             referenceArguments.contains(i->result))
           continue;
         const auto &target = program.semantics.functions[i->function];
@@ -551,6 +551,15 @@ void print(const core::Program &p, std::ostream &out) {
         out << " " << p.semantics.symbols[parent].name << "#v" << parent;
       out << "\n";
     }
+    for (const auto &[point, op] : graph.parentOperations)
+      if (op.kind == ParentOperation::Forward)
+        for (const auto &[path, source] : op.transfers) {
+          out << "  parent.forward bb" << point << ":0 %" << source.id;
+          storage::detail::printPath(source.path, out);
+          out << " -> %" << op.destination.id;
+          storage::detail::printPath(path, out);
+          out << " [transfer existing obligation]\n";
+        }
     for (const auto &[point, state] : graph.parentStates)
       for (const auto &[position, parents] : state) {
         out << "  parent obligation bb" << point << ":0 "

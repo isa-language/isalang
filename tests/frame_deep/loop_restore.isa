@@ -1,0 +1,29 @@
+@import "std.box"
+struct Inner {
+  left: String,
+  right: String,
+}
+struct Outer {
+  inner: Inner,
+}
+fn main() {
+  let data = Outer {
+    inner: Inner {
+      left: String::from("initial"),
+      right: String::from("right")
+    }
+  };
+  let i = 0;
+  while i < 3 {
+    data.inner.left.drop();
+    if i == 0 {
+      print(data.inner.right.as_str());
+    }
+    else {
+      print(data.inner.right.as_str());
+    }
+    data.inner.left = String::from("next");
+    i = i + 1;
+  }
+  print(data.inner.left.as_str());
+}

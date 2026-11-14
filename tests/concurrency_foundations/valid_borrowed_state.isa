@@ -1,0 +1,35 @@
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+fn inspect(value: &i32) {
+  print(value);
+}
+fn observe(flag: bool) {
+  let data = 1;
+  let view = &data;
+  {
+    let data = 7;
+    print(data);
+  };
+  if flag {
+    inspect(view);
+  } else {
+    inspect(view);
+  }
+  let edit = &mut data;
+  edit = 20;
+  let other = 2;
+  let stored = View {
+    read: &other,
+    edit: edit
+  };
+  print(stored.read);
+  stored.drop();
+  edit = 21;
+  print(data);
+}
+fn main() {
+  observe(true);
+  observe(false);
+}

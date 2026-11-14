@@ -1,0 +1,31 @@
+struct View {
+  value: &mut i32,
+  owner: String,
+}
+fn consume(view: View, early: bool) {
+  if early {
+    let edit = &mut view.value;
+    edit = 10;
+    return;
+  }
+  let count = 0;
+  while count<2 {
+    let edit = &mut view.value;
+    edit = 20 + count;
+    count = count + 1;
+  }
+}
+fn main() {
+  let a = 1;
+    consume(View {
+      value: &mut a,
+      owner: String::from("early")
+  }, true);
+  print(a);
+  let b = 2;
+    consume(View {
+      value: &mut b,
+      owner: String::from("loop")
+  }, false);
+  print(b);
+}

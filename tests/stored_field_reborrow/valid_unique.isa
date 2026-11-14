@@ -1,0 +1,17 @@
+struct View<T> {
+  value: &mut T,
+}
+fn main() {
+  let data = 1;
+  let view = View<i32> {
+    value: &mut data
+  };
+  let edit = &mut view.value;
+  edit = 42;
+  let next = view.value;
+  next = 43;
+  let moved = view.value.move();
+  moved = 44;
+  view.drop();
+  print(data);
+}

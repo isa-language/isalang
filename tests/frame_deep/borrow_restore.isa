@@ -1,0 +1,24 @@
+@import "std.box"
+struct Inner {
+  value: String,
+  other: String,
+}
+struct Outer {
+  inner: Inner,
+}
+fn edit(data: &mut Outer) {
+  let previous = data.inner.value.move();
+  print(previous);
+  data.inner.value = String::from("updated");
+}
+fn main() {
+  let data = Outer {
+    inner: Inner {
+      value: String::from("old"),
+      other: String::from("other")
+    }
+  };
+  edit(&mut data);
+  print(data.inner.value.as_str());
+  print(data.inner.other.as_str());
+}

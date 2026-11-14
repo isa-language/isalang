@@ -1,4 +1,5 @@
 #include "isac/hir.hpp"
+#include "isac/async.hpp"
 #include "isac/ffi.hpp"
 #include "isac/macros.hpp"
 #include "isac/iteration.hpp"
@@ -243,18 +244,8 @@ class Resolver {
     }
     hir::Type type{hir::Type::Structure, name + ">"};
     if (decl.representation != hir::Representation::Stack) {
-      if (arguments.size() != 1 || !p.containerElement(arguments[0]))
-        fail(loc, DiagnosticCode::InvalidPayload,
-             "generic heap containers require reference-free owned elements with a final initial "
-             "protocol state");
-      type.representation = decl.representation;
-      type.dropGlue = hir::DropGlue::ContainerElements;
-      type.element = arguments[0];
-      instance.id = static_cast<InstanceId>(p.instances.size());
-      auto tid = instance.type = static_cast<TypeId>(p.types.size());
-      types[type.name] = tid;
-      p.types.push_back(std::move(type));
-      p.instances.push_back(std::move(instance));
+      auto tid = hir::instantiateHeapContainer(p, id, arguments, loc);
+      types[p.types[tid].name] = tid;
       instanceCache.emplace(std::move(key), tid);
       resolvingInstances.erase({id, arguments});
       return tid;
@@ -940,6 +931,11 @@ class Resolver {
     return fixedArray(t, static_cast<uint32_t>(s.count), s.loc);
   }
   void declareFunction(const ast::Function &a, TypeId ownerOverride = None) {
+    if ((a.kind != FunctionKind::Normal && a.kind != FunctionKind::Async) ||
+        (a.kind == FunctionKind::Normal && a.effects.asynchronous))
+      fail(
+          a.loc, DiagnosticCode::FutureFeature,
+          "async/coroutine function metadata requires suspension and frame verification, not yet implemented");
     if (ownerOverride != None &&
         (a.external || a.releases ||
          (!a.intrinsic.empty() &&
@@ -965,6 +961,7 @@ class Resolver {
     if (!a.intrinsic.empty() && f.intrinsicId == IntrinsicId::None)
       fail(a.loc, DiagnosticCode::RestrictedOperation, "unknown intrinsic `" + a.intrinsic + "`");
     f.effects = intrinsicInfo(f.intrinsicId).effects;
+    f.effects.asynchronous = a.kind == FunctionKind::Async;
     f.effects.unsafeEffect = a.foreignC || a.unsafeFunction;
     f.releases = a.releases;
     f.pub = a.pub;
@@ -1001,11 +998,22 @@ class Resolver {
     f.result = getType(a.result, a.result.reference);
 
     if (!a.result.reference && f.intrinsic.empty() && !f.external &&
-        p.types[f.result].kind == hir::Type::Enum && p.containsReferences(f.result) &&
-        p.referenceCapability(f.result, Access::Unique) &&
+        p.containsReferences(f.result) && !p.referenceCapability(f.result, Access::Shared) &&
+        p.borrowedResultLayoutSupported(f.result) &&
         std::any_of(a.params.begin(), a.params.end(), [&](const auto &parameter) {
-          return parameter.type.mutableReference ||
-                 (parameter.name == "self" && parameter.access == Access::Unique);
+          if (parameter.type.mutableReference ||
+              (parameter.name == "self" && parameter.access == Access::Unique))
+            return true;
+
+          if (parameter.name == "self" || parameter.type.reference)
+            return false;
+          auto type = getType(parameter.type);
+          if (p.types[type].kind != hir::Type::Structure)
+            return false;
+          const auto leaves = p.borrowedReferences(type);
+          return std::any_of(leaves.begin(), leaves.end(), [](const auto &leaf) {
+            return leaf.reference.capability == Access::Unique;
+          });
         }))
       f.resultAccess = Access::Unique;
     if (p.types[f.result].kind == hir::Type::ForeignRecord ||
@@ -1016,10 +1024,11 @@ class Resolver {
       fail(f.loc, DiagnosticCode::EscapingView,
            "returning str views requires lifetime contracts, outside this PoC");
     f.resultBorrowedContainer = !a.result.reference && p.containsReferences(f.result);
-    if (f.resultBorrowedContainer && !p.referenceCapability(f.result, f.resultAccess))
+    if (f.resultBorrowedContainer && f.resultAccess == Access::Shared &&
+        !p.referenceCapability(f.result, Access::Shared))
       fail(a.result.loc, DiagnosticCode::EscapingView,
            "unique payload returns require an exclusive storage result contract");
-    if (f.resultBorrowedContainer && !p.borrowedPayloadLayoutSupported(f.result, f.resultAccess))
+    if (f.resultBorrowedContainer && !p.borrowedResultLayoutSupported(f.result))
       fail(a.result.loc, DiagnosticCode::EscapingView,
            "borrowed result requires a supported positional reference and owned-field contract");
     if (!a.result.reference && p.linear(f.result) && f.intrinsic.empty() &&
@@ -1052,9 +1061,13 @@ class Resolver {
       if (inspectPayload && (a.result.reference || f.resultBorrowedContainer))
         fail(a.result.loc, DiagnosticCode::EscapingView,
              "a tag-only payload inspection cannot return borrowed values");
+      if (self && p.containsReferences(t) && !p.referenceCapability(t, Access::Shared) &&
+          (a.result.reference || f.resultBorrowedContainer))
+        fail(a.result.loc, DiagnosticCode::EscapingView,
+             "a Unique-bearing receiver requires a separate borrowed-result transfer contract");
       if (p.containsReferences(t) && !inspectPayload &&
-          (ap.type.reference || (self && ap.access != Access::Shared) || f.external ||
-           !f.intrinsic.empty() || !p.borrowedInputSupported(t)))
+          (ap.type.reference || (self && !p.borrowedReceiverSupported(t, ap.access)) ||
+           f.external || !f.intrinsic.empty() || !p.borrowedInputSupported(t)))
         fail(ap.loc, DiagnosticCode::EscapingView,
              "borrowed container parameters require payload origin contracts");
       if (t == Unit)
@@ -1069,8 +1082,9 @@ class Resolver {
         for (const auto &leaf : p.borrowedReferences(t)) {
           auto origin = static_cast<SymbolId>(p.symbols.size());
           auto region = nextRegion++;
-          hir::Symbol symbol{origin, ap.name, leaf.reference.referent, Access::Shared, true,
-                             false,  ap.loc};
+          hir::Symbol symbol{
+              origin, ap.name, leaf.reference.referent, leaf.reference.capability, true,
+              false,  ap.loc};
           symbol.reference = true;
           symbol.region = region;
           p.symbols.push_back(std::move(symbol));
@@ -1113,26 +1127,46 @@ class Resolver {
       if (f.resultBorrowedContainer) {
         std::set<hir::ReferenceSource> sources;
         bool missingPosition = false;
-        for (const auto &[path, inputs] : p.referenceTransfers(f)) {
+        const auto candidates = p.referenceTransferCandidates(f);
+        bool ambiguous = f.resultAccess == Access::Unique &&
+                         std::any_of(candidates.begin(), candidates.end(),
+                                     [](const auto &entry) { return entry.second.size() > 1; });
+        for (const auto &[path, inputs] : candidates) {
           missingPosition |= inputs.empty();
+          if (f.resultAccess == Access::Unique) {
+            if (inputs.empty())
+              fail(
+                  a.result.loc, DiagnosticCode::EscapingView,
+                  "exclusive payload returns require a compatible unique input for every output position");
+            if (!ambiguous && p.referenceResultAccess(f, path) == Access::Unique &&
+                sources.contains(*inputs.begin()))
+              fail(a.result.loc, DiagnosticCode::EscapingView,
+                   "exclusive result positions cannot duplicate an input capability");
+          }
           sources.insert(inputs.begin(), inputs.end());
+        }
+        if (ambiguous) {
+          for (const auto &source : sources) {
+            const auto &parameter = p.symbols[source.parameter];
+            if (source.kind != hir::ReferenceSourceKind::Carrier || parameter.reference ||
+                parameter.receiver || p.types[parameter.type].kind != hir::Type::Structure ||
+                !p.borrowedInputSupported(parameter.type))
+              fail(
+                  a.result.loc, DiagnosticCode::EscapingView,
+                  "exclusive payload returns require exactly one compatible unique input origin per output position");
+          }
+          f.transferInferencePending = true;
         }
         if (missingPosition && !sources.empty())
           fail(a.result.loc, DiagnosticCode::EscapingView,
                "a returned reference position has no compatible input-region contract");
+        if (!f.transferInferencePending && !p.referenceResultPresenceSupported(f, candidates))
+          fail(a.result.loc, DiagnosticCode::EscapingView,
+               "result presence requires references not guaranteed by the input contract");
         for (const auto &source : sources) {
-          if (f.resultOrigin != None && f.resultAccess == Access::Unique)
-            fail(a.result.loc, DiagnosticCode::EscapingView,
-                 "exclusive payload returns require exactly one compatible unique input origin");
           std::optional<hir::PayloadResultSource> payload;
-          if (!source.path.empty()) {
-            if (p.conditionalReferencePosition(p.symbols[source.parameter].type, source.path) &&
-                !p.referenceFreeValuePossible(f.result))
-              fail(
-                  a.result.loc, DiagnosticCode::EscapingView,
-                  "conditionally present input references require a reference-free result case in this subset");
+          if (source.kind == hir::ReferenceSourceKind::Carrier)
             payload = hir::PayloadResultSource{source.parameter, source.path};
-          }
           if (f.resultOrigin == None) {
             f.resultOrigin = source.origin;
             f.resultPayloadSource = payload;
@@ -1150,9 +1184,11 @@ class Resolver {
              "reference return requires a compatible shared input-region contract; local owners "
              "cannot escape");
       f.resultRegion = nextRegion++;
-      if (f.resultAccess == Access::Unique && f.intrinsic.empty() && !p.exclusivePayloadResult(f))
-        fail(a.result.loc, DiagnosticCode::EscapingView,
-             "exclusive payload returns require a direct unique input and one payload capability");
+      if (f.resultAccess == Access::Unique && f.intrinsic.empty() && !f.transferInferencePending &&
+          !p.exclusivePayloadResult(f))
+        fail(
+            a.result.loc, DiagnosticCode::EscapingView,
+            "exclusive payload returns require one direct unique input/output or distinct owned input leaves for every output");
     }
     scopes.pop_back();
     f.consumesSelf = f.owner != None &&
@@ -1168,6 +1204,8 @@ class Resolver {
       fail(f.loc, DiagnosticCode::InvalidCAbi,
            "unsupported C ABI signature; use scalars, raw pointers, borrowed scalar "
            "arrays/slices, str or &String; owned values and borrowed results require wrappers");
+    if (f.kind == FunctionKind::Async)
+      f.futureType = asyncs::declareFuture(p, f);
     p.functions.push_back(f);
     functionSources.push_back({&a, activeTypeParameters, activeSubstitution, ownerOverride});
   }
@@ -1242,6 +1280,18 @@ class Resolver {
       return true;
     return e.kind == hir::Expr::Field && !p.heap(e.args[0].type) && fieldPlace(e.args[0]);
   }
+  void fieldTransferContract(const hir::Expr &e) {
+
+    const auto *part = &e.args.at(0);
+    while (part->kind == hir::Expr::Field) {
+      const auto parent = part->args[0].type;
+      if (p.types[parent].protocol != None || p.containsReferences(parent))
+        fail(e.loc, DiagnosticCode::FutureFeature,
+             "deep owned-field transfer through `" + p.types[parent].name +
+                 "` requires a recursive reference/protocol projection contract");
+      part = &part->args[0];
+    }
+  }
   hir::Expr initializerExpr(const ast::Expr &value, TypeId target) {
     auto argument = expr(value, target);
     if (argument.type == Str &&
@@ -1296,17 +1346,9 @@ class Resolver {
     coerce(target, argument);
     return argument;
   }
-  hir::Expr expr(const ast::Expr &a, TypeId expected = None, bool storedPlace = false) {
-    auto value = unadjustedExpr(a, expected);
+  hir::Expr adjustReference(hir::Expr value, bool storedPlace = false) {
     if (storedPlace || !p.reference(value.type))
       return value;
-    if (p.types[value.type].referenceAccess == Access::Unique && value.kind == hir::Expr::Field)
-      DiagnosticEngine()
-          .error(DiagnosticCode::InvalidReborrow, value.loc,
-                 "an exclusive reference field requires an explicit transfer")
-          .help(
-              "extract the field with .move(), use the resulting reference, and restore the field when required")
-          .emit();
     hir::Expr reference{};
     reference.kind = hir::Expr::Borrow;
     reference.loc = value.loc;
@@ -1318,12 +1360,63 @@ class Resolver {
     reference.args.push_back(std::move(value));
     return reference;
   }
+  hir::Expr expr(const ast::Expr &a, TypeId expected = None, bool storedPlace = false) {
+    return adjustReference(unadjustedExpr(a, expected), storedPlace);
+  }
   hir::Expr unadjustedExpr(const ast::Expr &a, TypeId expected) {
     hir::Expr e{};
     e.loc = a.loc;
     e.text = a.text;
     using A = ast::Expr;
     using H = hir::Expr;
+    if (a.kind == A::AtCall && macros::findBuiltin(a.text) == macros::BuiltinId::Thread) {
+      if (a.args.size() != 1 || !a.typeArguments.empty())
+        fail(a.loc, DiagnosticCode::ArgumentMismatch, "@thread expects one resolved function call");
+      auto call = expr(a.args[0]);
+      if (call.kind != H::Call)
+        fail(a.loc, DiagnosticCode::ArgumentMismatch,
+             "@thread requires an ordinary top-level function call");
+      const auto &target = p.functions.at(call.ref);
+      if (target.owner != None || target.external || target.foreignC || target.unsafeFunction ||
+          target.intrinsicId != IntrinsicId::None)
+        fail(a.loc, DiagnosticCode::ArgumentMismatch,
+             "@thread requires an ordinary safe Isalang function");
+      call.kind = H::ThreadCall;
+      call.loc = a.loc;
+      return call;
+    }
+    if (a.kind == A::Await ||
+        (a.kind == A::AtCall && macros::findBuiltin(a.text) == macros::BuiltinId::BlockOn)) {
+      const bool awaiting = a.kind == A::Await;
+      if (awaiting && (!current || current->kind != FunctionKind::Async))
+        fail(a.loc, DiagnosticCode::FutureFeature,
+             "`await` can only be used inside an async function");
+      if (a.args.size() != 1 || !a.typeArguments.empty())
+        fail(a.loc, DiagnosticCode::ArgumentMismatch,
+             "Future consumption expects one value argument");
+      auto value = expr(a.args[0]);
+      if (value.kind == H::Borrow ||
+          (value.kind == H::Variable && p.symbols.at(value.ref).reference))
+        fail(a.loc, DiagnosticCode::TypeMismatch,
+             "await/block_on consumes an owned Future, not a borrowed Future");
+      const auto producer = p.types.at(value.type).futureFunction;
+      if (producer == None)
+        fail(a.loc, DiagnosticCode::TypeMismatch,
+             "await/block_on requires a Future produced by an async function");
+      if (value.kind == H::Variable) {
+        hir::Expr move{};
+        move.kind = H::Move;
+        move.type = value.type;
+        move.loc = value.loc;
+        move.args.push_back(std::move(value));
+        value = std::move(move);
+      }
+      e.kind = awaiting ? H::Await : H::BlockOn;
+      e.ref = producer;
+      e.type = p.functions.at(producer).result;
+      e.args.push_back(std::move(value));
+      return e;
+    }
     if (a.kind == A::Unsafe) {
       ++unsafeDepth;
       e.kind = H::Unsafe;
@@ -1436,7 +1529,16 @@ class Resolver {
         return e;
       }
       e.kind = H::Borrow;
-      e.args.push_back(expr(a.args.at(0)));
+      auto stored = expr(a.args.at(0), None, true);
+      if (stored.kind == H::Field && p.reference(stored.type) &&
+          p.types[stored.type].referenceAccess == Access::Unique && fieldPlace(stored)) {
+        e.type = p.types[stored.type].element;
+        e.args.push_back(std::move(stored));
+        e.borrowKind = a.text == "unique" ? BorrowKind::Unique : BorrowKind::Shared;
+        e.region = nextRegion++;
+        return e;
+      }
+      e.args.push_back(adjustReference(std::move(stored)));
       const auto &source = e.args[0];
       bool projection = (source.kind == H::Field && fieldPlace(source) &&
                          (scalar(source.type) || p.ownedFieldType(source.type) ||
@@ -2064,11 +2166,12 @@ class Resolver {
       if (e.args[0].type == RawPtr)
         fail(a.loc, DiagnosticCode::RestrictedOperation,
              "raw pointer reassignment is not supported");
-      if (p.linear(e.args[0].type) &&
-          !(e.args[0].kind == H::Field && e.args[0].args[0].kind == H::Variable &&
-            p.managedFieldType(e.args[0].type)))
+      if (p.linear(e.args[0].type) && !(e.args[0].kind == H::Field && fieldPlace(e.args[0]) &&
+                                        p.managedFieldType(e.args[0].type)))
         fail(a.loc, DiagnosticCode::InvalidPlace,
              "PoC assignment supports scalar places; use a fresh let for resource moves");
+      if (e.args[0].kind == H::Field && p.managedFieldType(e.args[0].type))
+        fieldTransferContract(e.args[0]);
       break;
     case A::Method: {
       auto &recv = e.args[0];
@@ -2095,11 +2198,12 @@ class Resolver {
       }
       if (a.text == "move" || a.text == "drop") {
         if (recv.kind != H::Variable &&
-            !(recv.kind == H::Field && recv.args[0].kind == H::Variable &&
-              p.managedFieldType(recv.type)))
+            !(recv.kind == H::Field && fieldPlace(recv) && p.managedFieldType(recv.type)))
           fail(a.loc, DiagnosticCode::InvalidPlace, "explicit move/drop requires a named place");
         if (e.args.size() != 1)
           fail(a.loc, DiagnosticCode::ArgumentMismatch, "move/drop take no arguments");
+        if (recv.kind == H::Field)
+          fieldTransferContract(recv);
         e.kind = a.text == "move" ? H::Move : H::Drop;
         e.type = a.text == "move" ? recv.type : Unit;
         break;
@@ -2108,6 +2212,9 @@ class Resolver {
         fail(
             a.loc, DiagnosticCode::EscapingView,
             "borrowed field receivers require projection contracts; extract the field with move()");
+      if (p.types[recv.type].futureFunction != None)
+        fail(a.loc, DiagnosticCode::TypeMismatch,
+             "Future storage is private; use await, @block_on, move() or drop()");
       auto method = a.text;
       std::vector<hir::Stmt> formattingTemps;
       if (method == "append_display" || method == "append_debug") {
@@ -2256,8 +2363,8 @@ class Resolver {
              "internal runtime function is not part of the public API");
       if ((f.foreignC && f.external) || f.unsafeFunction)
         requireUnsafe(a.loc, "call to `" + f.name + "`");
-      e.kind = H::Call;
-      e.type = f.result;
+      e.kind = f.kind == FunctionKind::Async ? H::FutureCreate : H::Call;
+      e.type = f.kind == FunctionKind::Async ? f.futureType : f.result;
       args(e, f, 0);
       break;
     }
@@ -2895,10 +3002,12 @@ class Resolver {
         continue;
       }
       s.expr = initializer ? std::move(*initializer)
-                           : expr(a.expr, a.kind == ast::Stmt::Return ? current->result
-                                          : a.kind == ast::Stmt::Let && a.annotated
-                                              ? getType(a.annotation, a.annotation.reference)
-                                              : None);
+                           : expr(a.expr,
+                                  a.kind == ast::Stmt::Return ? current->result
+                                  : a.kind == ast::Stmt::Let && a.annotated
+                                      ? getType(a.annotation, a.annotation.reference)
+                                      : None,
+                                  a.kind == ast::Stmt::Borrow);
       if (s.expr.kind == hir::Expr::Borrow &&
           !(a.kind == ast::Stmt::Return && current->returnsReference()))
         fail(a.loc, DiagnosticCode::EscapingView,
@@ -2933,14 +3042,18 @@ class Resolver {
       if (a.kind == ast::Stmt::If)
         same(Bool, s.expr.type, a.loc);
       if (a.kind == ast::Stmt::Borrow) {
-        if (s.expr.kind != hir::Expr::Variable)
+        bool field = s.expr.kind == hir::Expr::Field && fieldPlace(s.expr) &&
+                     p.reference(s.expr.type) &&
+                     p.types[s.expr.type].referenceAccess == Access::Unique;
+        if (s.expr.kind != hir::Expr::Variable && !field)
           fail(a.loc, DiagnosticCode::InvalidPlace, "borrow requires a named resource");
         scopes.emplace_back();
-        s.symbol = add(a.name, s.expr.type, a.loc, a.access);
+        auto type = field ? p.types[s.expr.type].element : s.expr.type;
+        s.symbol = add(a.name, type, a.loc, a.access);
         hir::Expr borrowed{};
         borrowed.kind = hir::Expr::Borrow;
         borrowed.loc = a.loc;
-        borrowed.type = s.expr.type;
+        borrowed.type = type;
         borrowed.args.push_back(s.expr);
         borrowed.borrowKind = a.access == Access::Unique ? BorrowKind::Unique : BorrowKind::Shared;
         borrowed.region = nextRegion++;
@@ -3480,8 +3593,17 @@ public:
         visitExpr = [&](const hir::Expr &e) {
           if (e.kind == hir::Expr::Print)
             f.effects.io = true;
+          if (e.kind == hir::Expr::ThreadCall) {
+            f.effects.threading = true;
+            f.effects.merge(p.functions.at(e.ref).effects);
+          }
           if (e.kind == hir::Expr::Call || e.kind == hir::Expr::Method)
             f.effects.merge(p.functions.at(e.ref).effects);
+          if (e.kind == hir::Expr::Await || e.kind == hir::Expr::BlockOn) {
+            auto effects = p.functions.at(e.ref).effects;
+            effects.asynchronous = e.kind == hir::Expr::Await;
+            f.effects.merge(effects);
+          }
           for (auto &arg : e.args)
             visitExpr(arg);
           visitBlock(e.body);
@@ -3536,6 +3658,7 @@ public:
     }
     for (auto &function : p.functions)
       numberBlock(function.body);
+    hir::inferReferenceTransfers(p);
     return std::move(p);
   }
 };
@@ -3572,7 +3695,11 @@ void printE(const hir::Expr &e, std::ostream &o) {
                                 "array.repeat",
                                 "function.address",
                                 "foreign.call.indirect",
-                                "struct.init"};
+                                "struct.init",
+                                "future.create",
+                                "await",
+                                "block_on",
+                                "thread.call"};
   o << names[e.kind] << "<T" << e.type << ">";
   if (e.id != None)
     o << " expr=#E" << e.id;
@@ -3702,7 +3829,10 @@ void printHIR(const hir::Program &p, std::ostream &o) {
       for (auto parameter : p.types[i].parameters)
         o << " #T" << parameter;
       o << " } result=#T" << p.types[i].element << " bits=" << p.target.pointerWidth;
-    } else if (p.dynamicContainer(i))
+    } else if (p.types[i].futureFunction != None)
+      o << " representation=FutureFramePointer producer=#F" << p.types[i].futureFunction
+        << " inputs=#T" << p.types[i].element << " DropGlue=FutureFrame";
+    else if (p.dynamicContainer(i))
       o << " representation="
         << (p.types[i].representation == hir::Representation::GenericBox ? "BoxStorage"
                                                                          : "VecStorage")
@@ -3732,7 +3862,10 @@ void printHIR(const hir::Program &p, std::ostream &o) {
       o << " declaration=#F" << f.variadicDeclaration;
     if (f.unsafeFunction)
       o << " unsafe";
-    o << " kind=Normal effects={" << f.effects.describe() << " }";
+    o << " kind=" << (f.kind == FunctionKind::Async ? "Async" : "Normal") << " effects={"
+      << f.effects.describe() << " }";
+    if (f.futureType != None)
+      o << " call-result=#T" << f.futureType;
     if (!f.intrinsic.empty())
       o << " intrinsic=#" << static_cast<unsigned>(f.intrinsicId) << ":" << f.intrinsic;
     if (f.releases)
@@ -3750,7 +3883,7 @@ void printHIR(const hir::Program &p, std::ostream &o) {
         << (f.acceptsResultOrigin(region.parameter) ? " result-bound\n" : " noescape\n");
     for (const auto &region : f.payloadParameterRegions)
       o << "  payload.region #v" << region.parameter << " #R" << region.region << " origin=#v"
-        << region.origin << " Shared caller-owned"
+        << region.origin << " " << accessName(p.symbols[region.origin].access) << " caller-owned"
         << (f.acceptsResultOrigin(region.origin) ? " result-bound\n" : " noescape\n");
     for (auto id : f.payloadInspectionParameters)
       o << "  payload.inspect #v" << id << " Shared tag-only noescape\n";
@@ -3764,7 +3897,12 @@ void printHIR(const hir::Program &p, std::ostream &o) {
       o << "\n";
     }
     if (f.resultBorrowedContainer)
-      o << "  result.payload-regions: " << accessName(f.resultAccess) << " borrowed container\n";
+      o << "  result.payload-regions: "
+        << (!p.referenceCapability(f.result, Access::Shared) &&
+                    !p.referenceCapability(f.result, Access::Unique)
+                ? "Mixed"
+                : accessName(f.resultAccess))
+        << " borrowed container\n";
     if (f.resultOrigin != None)
       o << "  return.region #R" << f.resultRegion << " <= #R" << p.symbols[f.resultOrigin].region
         << " origin=#v" << f.resultOrigin << "\n";

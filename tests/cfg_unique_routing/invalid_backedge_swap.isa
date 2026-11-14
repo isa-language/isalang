@@ -1,0 +1,17 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+struct View {
+  value: &mut i32,
+}
+fn forward(input: Views, flag: bool) -> Views {
+  while flag {
+    let a = input.first.move();
+    let b = input.second.move();
+    input.first = b;
+    input.second = a;
+  }
+  return input.move();
+}
+fn main() {}

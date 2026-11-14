@@ -1,4 +1,6 @@
 #include "isac/core.hpp"
+#include "isac/execution.hpp"
+#include "isac/async.hpp"
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -163,6 +165,29 @@ class Builder {
     auto [id, off] = place(e.args[0], access);
     return {id, off + e.ref * (e.kind == hir::Expr::Index ? p.semantics.storageWidth(e.type) : 1)};
   }
+  bool fieldPlace(const hir::Expr &e, Inst &i) {
+    if (e.kind != hir::Expr::Field)
+      return false;
+    std::vector<uint32_t> path;
+    const auto *part = &e;
+    while (part->kind == hir::Expr::Field && !p.semantics.heap(part->args[0].type)) {
+      const auto &fields = p.semantics.types[part->args[0].type].fields;
+      const auto field = std::find_if(fields.begin(), fields.end(),
+                                      [&](const auto &f) { return f.offset == part->ref; });
+      if (field == fields.end())
+        return false;
+      path.insert(path.begin(), field - fields.begin());
+      part = &part->args[0];
+    }
+    if (part->kind != hir::Expr::Variable)
+      return false;
+    i.slot = part->ref;
+    i.fieldIndex = path.back();
+    path.pop_back();
+    i.fieldPath = std::move(path);
+    i.offset = e.ref;
+    return true;
+  }
   ValueId expr(const hir::Expr &e) {
     using E = hir::Expr;
     Inst i = make(Inst::Constant, e.loc, e.type);
@@ -270,6 +295,11 @@ class Builder {
         i.args = {expr(e.args.at(1))};
         return emit(i);
       }
+      if (scalar(e.type) && fieldPlace(e, i)) {
+        i.kind = Inst::Read;
+        i.placeProjection = Inst::PlaceProjection::Field;
+        return emit(i);
+      }
       auto [id, off] = place(e);
       i.kind = Inst::Read;
       i.slot = id;
@@ -330,13 +360,12 @@ class Builder {
       const auto &target = e.args.at(0);
       if (target.kind == E::Field && p.semantics.managedFieldType(target.type)) {
         i.kind = Inst::FieldStore;
-        i.slot = target.args.at(0).ref;
+        if (!fieldPlace(target, i))
+          fail(e.loc, DiagnosticCode::InvalidPlace,
+               "owned field assignment requires a named struct place");
+        i.offset = 0;
         i.type = target.type;
         i.quantity = Quantity::One;
-        const auto &fields = p.semantics.types[target.args[0].type].fields;
-        for (uint32_t n = 0; n < fields.size(); ++n)
-          if (fields[n].offset == target.ref)
-            i.fieldIndex = n;
         i.args = {expr(e.args.at(1))};
         emit(i, false);
         return None;
@@ -395,6 +424,14 @@ class Builder {
         emit(i, false);
         return None;
       }
+      if (scalar(target.type) && fieldPlace(target, i)) {
+        i.kind = Inst::Write;
+        i.placeProjection = Inst::PlaceProjection::Field;
+        i.type = target.type;
+        i.args = {expr(e.args[1])};
+        emit(i, false);
+        return None;
+      }
       auto [id, off] = place(e.args[0], Access::Unique);
       i.kind = Inst::Write;
       i.slot = id;
@@ -409,6 +446,16 @@ class Builder {
       i.slot = e.args.at(0).ref;
       i.payloadPath = e.payloadPath;
       return emit(i);
+    case E::FutureCreate:
+    case E::Await:
+    case E::BlockOn:
+      i.kind = e.kind == E::FutureCreate ? Inst::FutureCreate
+               : e.kind == E::Await      ? Inst::Await
+                                         : Inst::BlockOn;
+      i.function = e.ref;
+      for (auto &a : e.args)
+        i.args.push_back(expr(a));
+      return emit(i, e.type != Unit);
     case E::EnumConstruct:
       i.kind = Inst::EnumConstruct;
       i.offset = e.ref;
@@ -435,13 +482,12 @@ class Builder {
       if (e.args[0].kind == E::Field && p.semantics.managedFieldType(e.args[0].type)) {
         const auto &field = e.args[0];
         i.kind = e.kind == E::Move ? Inst::FieldTake : Inst::FieldDrop;
-        i.slot = field.args.at(0).ref;
+        if (!fieldPlace(field, i))
+          fail(e.loc, DiagnosticCode::InvalidPlace,
+               "owned field move/drop requires a named struct place");
+        i.offset = 0;
         i.type = field.type;
         i.quantity = Quantity::One;
-        const auto &fields = p.semantics.types[field.args[0].type].fields;
-        for (uint32_t n = 0; n < fields.size(); ++n)
-          if (fields[n].offset == field.ref)
-            i.fieldIndex = n;
         return emit(i, e.kind == E::Move);
       }
       if (e.kind == E::Drop) {
@@ -476,9 +522,10 @@ class Builder {
         i.args.push_back(expr(argument));
       return emit(i, e.type != Unit);
     case E::Call:
+    case E::ThreadCall:
     case E::Method: {
       size_t temporaryStart = temporaries.size();
-      i.kind = Inst::Call;
+      i.kind = e.kind == E::ThreadCall ? Inst::ThreadCall : Inst::Call;
       i.function = e.ref;
       auto &f = p.semantics.functions[e.ref];
       i.intrinsicId = f.intrinsicId;
@@ -541,7 +588,7 @@ class Builder {
                                        ? i.slot
                                        : referenceResults.at(i.args.at(index - (i.slot != None)));
       }
-      if (f.resultBorrowedContainer && f.resultAccess == Access::Unique) {
+      if (f.resultBorrowedContainer && f.resultAccess == Access::Unique && !f.resultPayloadSource) {
         auto index = std::find(f.params.begin(), f.params.end(), f.resultOrigin) - f.params.begin();
         auto parent = i.slot != None && index == 0
                           ? i.slot
@@ -788,6 +835,8 @@ struct Resource {
   std::map<uint32_t, OwnedFieldState> fields = {};
   std::vector<uint32_t> ownedProjection = {};
   SymbolId loanParent = None;
+  SymbolId storageParent = None;
+  hir::ReferencePath storagePath = {};
   VariantId knownVariant = None;
   unsigned exclusiveLoans = 0;
   bool exclusiveCarrier = false;
@@ -801,6 +850,7 @@ struct Resource {
   bool operator==(const Resource &other) const {
     return memory() == other.memory() && state == other.state && root == other.root &&
            ownedProjection == other.ownedProjection && loanParent == other.loanParent &&
+           storageParent == other.storageParent && storagePath == other.storagePath &&
            extraRoots == other.extraRoots && shared == other.shared && unique == other.unique &&
            allocation == other.allocation && exclusiveLoans == other.exclusiveLoans &&
            exclusiveCarrier == other.exclusiveCarrier && opaquePayloads == other.opaquePayloads &&
@@ -849,6 +899,10 @@ struct Context {
 };
 class Checker {
   Program p;
+  VerificationOptions options;
+  StateId captureEntry = None;
+  std::vector<CaptureDrop> *captureDrops = nullptr;
+  std::vector<CaptureDrop> *edgeDrops = nullptr;
   hir::Function *function = nullptr;
   struct LoopCheck {
     uint32_t id;
@@ -859,6 +913,139 @@ class Checker {
   std::map<FunctionId, core::Function *> definitions;
   std::map<FunctionId, regions::FunctionGraph *> regionDefinitions;
   std::set<FunctionId> checked, checking;
+  void recordDrop(CaptureDrop step) {
+    auto *target = captureDrops ? captureDrops : edgeDrops;
+    if (target)
+      target->push_back(std::move(step));
+  }
+  void recordCaptureState(const Context &context, const Inst &i, StateSide side,
+                          const std::vector<CaptureDrop> &completed = {}) {
+    if (!options.retainCaptureStates || i.kind == Inst::If || i.kind == Inst::Loop ||
+        i.kind == Inst::UnsafeScope)
+      return;
+    const auto &graph = *regionDefinitions.at(function->id);
+    if (!graph.resourcePoints.contains(i.semanticPoint))
+      return;
+    const auto &block = graph.blocks.at(i.semanticPoint);
+    const auto &symbols = side == StateSide::Before ? block.liveIn : block.liveOut;
+    const auto &values = side == StateSide::Before ? block.valuesIn : block.valuesOut;
+    CaptureState state{function->id, {i.semanticPoint, 0}, side,  captureEntry, i.loc,
+                       {},           context.returned,     false, {},           {}};
+    state.completedCleanup = completed;
+    for (const auto &[id, r] : context.vars)
+      if (r.live) {
+        const auto &s = symbol(id);
+        CaptureResource value;
+        value.location = {storage::Location::Symbol, id};
+        value.type = s.type;
+        value.memory = r.memory();
+        value.protocolState = r.state;
+        value.version = r.version;
+        value.mode = (s.reference || r.root != None || r.access != Access::Own)
+                         ? (r.access == Access::Unique ? CaptureMode::Unique : CaptureMode::Shared)
+                         : (p.semantics.linear(s.type) ? CaptureMode::Move : CaptureMode::Copy);
+        value.allocation = r.allocation;
+        value.executionLive = symbols.contains(id);
+        value.callerOwned =
+            s.reference || (s.receiver && !function->consumesSelf) || r.access != Access::Own;
+        value.root = r.root;
+        value.additionalOrigins = r.extraRoots;
+        value.shared = r.shared;
+        value.unique = r.unique;
+        value.exclusive = r.exclusiveLoans;
+        value.fields = r.fields;
+        value.absentFields = r.absentFields;
+        value.movedPayloads = r.movedPayloads;
+        value.carriers = r.carriers;
+        state.resources.push_back(std::move(value));
+      }
+    for (const auto &[id, t] : context.values)
+      if (t.available && p.semantics.linear(t.type)) {
+        CaptureResource value;
+        value.location = {storage::Location::Value, id};
+        value.type = t.type;
+        value.mode = CaptureMode::Move;
+        if (p.semantics.reference(t.type)) {
+          const bool unique = p.semantics.types[t.type].referenceAccess == Access::Unique;
+          value.mode = unique ? CaptureMode::Unique : CaptureMode::Shared;
+          value.memory = unique ? MemoryState::Unique : MemoryState::Shared;
+          value.callerOwned = true;
+        }
+        value.protocolState = t.state;
+        value.allocation = t.allocation;
+        value.executionLive = values.contains(id);
+        value.fields = t.fields;
+        value.absentFields = t.absentFields;
+        value.carriers = t.carriers;
+        state.resources.push_back(std::move(value));
+      }
+
+    for (const auto &[id, definition] : graph.valueDefinitions)
+      if (values.contains(id) && !p.semantics.linear(definition.type)) {
+        CaptureResource value;
+        value.location = {storage::Location::Value, id};
+        value.type = definition.type;
+        if (definition.reference) {
+          bool unique = false;
+          if (auto alias = context.references.find(id); alias != context.references.end())
+            unique = context.vars.at(alias->second).access == Access::Unique;
+          value.mode = unique ? CaptureMode::Unique : CaptureMode::Shared;
+          value.memory = unique ? MemoryState::Unique : MemoryState::Shared;
+        }
+        value.executionLive = true;
+        value.callerOwned = definition.reference;
+        state.resources.push_back(std::move(value));
+      }
+    auto blocked = [&](std::string message) {
+      state.blocker =
+          DiagnosticEngine()
+              .error(DiagnosticCode::FutureFeature, i.loc, std::move(message))
+              .note("capture planning does not enable suspension or concurrent execution")
+              .build();
+    };
+    if (state.terminal)
+      blocked("terminal edge has no continuation to capture");
+    else if (!context.views.empty())
+      blocked("borrowed text view requires a frame region contract");
+    for (const auto &r : state.resources) {
+      if (state.blocker)
+        break;
+      if (r.callerOwned || r.root != None || r.shared || r.unique || r.exclusive ||
+          !r.carriers.empty() || p.semantics.containsReferences(r.type) || r.type == Str ||
+          p.semantics.types.at(r.type).kind == hir::Type::Slice)
+        blocked("borrowed resource requires a frame region contract");
+    }
+    if (!state.blocker) {
+
+      Context probe = context;
+      std::vector<CaptureDrop> drops;
+      captureDrops = &drops;
+      try {
+        for (auto it = probe.values.rbegin(); it != probe.values.rend(); ++it)
+          if (it->second.available && p.semantics.linear(it->second.type)) {
+            Inst discard{};
+            discard.kind = Inst::Discard;
+            discard.loc = i.loc;
+            discard.type = it->second.type;
+            discard.args = {it->first};
+            discardTemporary(probe, discard);
+          }
+        Inst cleanup{};
+        cleanup.kind = Inst::Return;
+        cleanup.loc = i.loc;
+        finish(probe, i.loc, cleanup);
+        state.cleanup = std::move(drops);
+        state.cleanupValid = true;
+      } catch (const Error &error) {
+        captureDrops = nullptr;
+        if (error.diagnostic.code == DiagnosticCode::InvalidCore)
+          throw;
+        state.blocker = error.diagnostic;
+      }
+      captureDrops = nullptr;
+    }
+    p.captureStates.push_back(std::move(state));
+  }
   void recordResourcePoint(const Context &c, const Inst &i) {
     auto &graph = *regionDefinitions.at(function->id);
     if (i.semanticPoint == None || i.semanticPoint >= graph.blocks.size())
@@ -900,7 +1087,8 @@ class Checker {
     }
     return false;
   }
-  void recordFieldPostStates(Context &c, Loc loc) {
+  void recordFieldPostStates(Context &c, const Inst &site) {
+    auto loc = site.loc;
     auto &summary = definitions.at(function->id)->fieldPostStates;
     for (auto id : function->params) {
       const auto &s = symbol(id);
@@ -916,6 +1104,30 @@ class Checker {
             .help("restore every extracted field before returning")
             .emit();
       completeFields(s.type, r.fields, loc);
+      if (s.receiver && p.semantics.containsReferences(s.type)) {
+        CarrierMap expected;
+        for (const auto &input : function->payloadParameterRegions)
+          if (input.parameter == id)
+            expected[input.path] = {{input.origin}, symbol(input.origin).access};
+        if (r.carriers != expected)
+          DiagnosticEngine()
+              .error(DiagnosticCode::BorrowConflict, loc,
+                     "receiver must preserve its stored reference origins and capabilities")
+              .secondary(s.loc, "caller retains these reference obligations")
+              .help("retain the original references in every field before returning")
+              .emit();
+        const auto &graph = *regionDefinitions.at(function->id);
+        auto fields = graph.fieldRegions.find(site.semanticPoint);
+        auto inputs = graph.contract.inputs.find(id);
+        if (fields == graph.fieldRegions.end() || inputs == graph.contract.inputs.end() ||
+            !fields->second.contains(id) || fields->second.at(id) != inputs->second)
+          DiagnosticEngine()
+              .error(DiagnosticCode::BorrowConflict, loc,
+                     "receiver must preserve its stored reference region arguments")
+              .secondary(s.loc, "caller retains these input regions")
+              .help("retain the original reference positions instead of replacing them")
+              .emit();
+      }
       if (s.access == Access::Shared && r.fields != initialFields(s.type))
         fail(loc, DiagnosticCode::SharedMutation,
              "shared field contract cannot change owned fields");
@@ -1086,13 +1298,15 @@ class Checker {
                "a mandatory reference position has no live input origin");
   }
   std::pair<Resource *, hir::ReferencePath> fieldCarrierPlace(Context &c, SymbolId id,
-                                                              uint32_t field, Loc loc) {
+                                                              const Inst &i, Loc loc) {
     auto &source = live(c, id, loc);
     auto &owner = source.root == None ? source : live(c, source.root, loc);
     hir::ReferencePath path;
     for (auto index : source.ownedProjection)
       path.push_back({hir::ReferenceProjectionKind::Field, index});
-    path.push_back({hir::ReferenceProjectionKind::Field, field});
+    for (auto index : i.fieldPath)
+      path.push_back({hir::ReferenceProjectionKind::Field, index});
+    path.push_back({hir::ReferenceProjectionKind::Field, i.fieldIndex});
     return {&owner, std::move(path)};
   }
   CarrierMap takeFieldCarriers(Resource &owner, const hir::ReferencePath &prefix) {
@@ -1128,8 +1342,17 @@ class Checker {
     alias.extraRoots = owners;
     alias.extraRoots.erase(alias.root);
   }
-  void complete(const Resource &resource, Loc loc) {
-    if (!resource.absentFields.empty())
+  bool initializedFields(TypeId type, const std::map<uint32_t, OwnedFieldState> &fields) {
+    for (auto index : p.semantics.managedFields(type)) {
+      const auto found = fields.find(index);
+      if (found == fields.end() ||
+          !initializedFields(p.semantics.types[type].fields[index].type, found->second.fields))
+        return false;
+    }
+    return true;
+  }
+  void complete(const Resource &resource, TypeId type, Loc loc) {
+    if (!resource.absentFields.empty() || !initializedFields(type, resource.fields))
       fail(loc, DiagnosticCode::ConsumedResource,
            "struct has uninitialized or moved owned fields; initialize them before moving or "
            "borrowing the whole value");
@@ -1163,6 +1386,21 @@ class Checker {
     if (alias.root != None && symbol(id).type != symbol(alias.root).type)
       return alias.fields;
     return c.vars.at(alias.root == None ? id : alias.root).fields;
+  }
+  std::map<uint32_t, OwnedFieldState> &operationFields(Context &c, const Inst &i) {
+    auto *fields = &placeFields(c, i.slot, i.loc);
+    auto type = symbol(i.slot).type;
+    for (auto index : i.fieldPath) {
+      const auto child = p.semantics.types[type].fields.at(index).type;
+      if (p.semantics.managedFieldType(child)) {
+        if (!fields->contains(index))
+          fail(i.loc, DiagnosticCode::ConsumedResource,
+               "cannot access an uninitialized or consumed ancestor field");
+        fields = &fields->at(index).fields;
+      }
+      type = child;
+    }
+    return *fields;
   }
   std::set<uint32_t> missingFields(TypeId type, const std::map<uint32_t, OwnedFieldState> &fields) {
     auto missing = p.semantics.managedFields(type);
@@ -1207,7 +1445,8 @@ class Checker {
       const auto &value = fields.at(index);
       const auto &field = p.semantics.types[type].fields[index];
       final(field.type, value.state, name + "." + field.name, loc, value.origin);
-      auto child = fieldDropPlan(field.type, value.fields, {}, name + "." + field.name, loc);
+      auto child = fieldDropPlan(field.type, value.fields, missingFields(field.type, value.fields),
+                                 name + "." + field.name, loc);
       child.skip = !value.allocation;
       plan.fields[index] = std::move(child);
     }
@@ -1232,7 +1471,7 @@ class Checker {
                     "use the child reference or wait until its last use before accessing the parent");
         bool backedge = false;
         for (const auto &[alias, loan] : c.vars) {
-          if (!loan.live || loan.loanParent != id)
+          if (!loan.live || (loan.loanParent != id && loan.storageParent != id))
             continue;
           diagnostic.secondary(loan.borrowAt, "derived borrow created here");
           if (symbol(alias).lastUse.span.file != NoFile)
@@ -1279,7 +1518,8 @@ class Checker {
         Loc lastUse;
         bool backedge = false;
         for (auto &[alias, resource] : c.vars)
-          if (resource.live && (resource.root == id || resource.extraRoots.contains(id))) {
+          if (resource.live && (resource.root == id || resource.extraRoots.contains(id) ||
+                                resource.storageParent == id)) {
             activeOrigin = resource.borrowAt;
             lastUse = symbol(alias).lastUse;
             backedge = liveOnBackedge(alias);
@@ -1427,6 +1667,13 @@ class Checker {
     final(symbol(id).type, r.state, symbol(id).name, l, r.stateAt);
     site.fieldCleanup[id] =
         fieldDropPlan(symbol(id).type, r.fields, r.absentFields, symbol(id).name, l);
+    if (captureDrops || edgeDrops)
+      recordDrop({{storage::Location::Symbol, id},
+                  symbol(id).type,
+                  r.allocation,
+                  site.fieldCleanup.at(id),
+                  r.absentFields,
+                  r.movedPayloads});
     if (r.allocation) {
       site.cleanup.push_back(id);
       site.movedPayloads[id] = {r.movedPayloads.begin(), r.movedPayloads.end()};
@@ -1448,13 +1695,32 @@ class Checker {
     it->second.available = false;
     return it->second;
   }
+  void discardTemporary(Context &c, Inst &i) {
+    if (!p.semantics.linear(i.type))
+      return;
+    auto &t = take(c, i.args[0], i.loc);
+    final(t.type, t.state, "temporary", i.loc);
+    i.temporaryFieldPlan = fieldDropPlan(t.type, t.fields, t.absentFields, "temporary", i.loc);
+    i.freeTemporary = t.allocation;
+    i.temporaryAbsentFields = {t.absentFields.begin(), t.absentFields.end()};
+    if (captureDrops || edgeDrops)
+      recordDrop({{storage::Location::Value, i.args[0]},
+                  t.type,
+                  t.allocation,
+                  i.temporaryFieldPlan,
+                  t.absentFields,
+                  {}});
+    for (const auto &[offset, owner] : t.carriers)
+      releaseCarriedLoan(c, t, offset, i.loc);
+    t.carriers.clear();
+  }
   void endBorrow(Context &c, SymbolId id) {
     auto it = c.vars.find(id);
     if (it == c.vars.end() || !it->second.live)
       return;
     auto &r = it->second;
     for (auto &[child, loan] : c.vars)
-      if (loan.live && loan.loanParent == id)
+      if (loan.live && (loan.loanParent == id || loan.storageParent == id))
         endBorrow(c, child);
     for (const auto &[carrier, resource] : c.vars)
       if (resource.live)
@@ -1469,6 +1735,22 @@ class Checker {
             fail(r.borrowAt, DiagnosticCode::InvalidReborrow,
                  "cannot end a parent borrow while an exclusive temporary is retained");
     auto &root = c.vars.at(r.root);
+    if (r.storageParent != None) {
+      auto &parent = live(c, r.storageParent, r.borrowAt);
+      auto &owner = parent.root == None ? parent : live(c, parent.root, r.borrowAt);
+      if (!owner.carriers.contains(r.storagePath))
+        fail(r.borrowAt, DiagnosticCode::InvalidCore,
+             "reborrowed field lost its reference position");
+      if (r.access == Access::Unique) {
+        if (!parent.unique)
+          fail(r.borrowAt, DiagnosticCode::InvalidCore, "unbalanced exclusive field reborrow");
+        parent.unique = false;
+      } else {
+        if (!parent.shared)
+          fail(r.borrowAt, DiagnosticCode::InvalidCore, "unbalanced shared field reborrow");
+        --parent.shared;
+      }
+    }
     if (r.exclusiveCarrier) {
       releaseLoan(c, origins(c, id, {}), true, r.borrowAt);
       resumeParent(c, r.loanParent, r.borrowAt);
@@ -1497,15 +1779,56 @@ class Checker {
       releaseOrigins(c, owners, {});
     c.views.clear();
   }
+  void cleanupLoans(Context &c, const std::set<SymbolId> &bindings, Loc l, Inst &site) {
+
+    bool progress = true;
+    while (progress) {
+      progress = false;
+      std::set<SymbolId> retained;
+      std::vector<SymbolId> pending;
+      auto requireParent = [&](const auto &carrier) {
+        for (const auto &[path, provenance] : carrier.carriers)
+          if (provenance.parent != None)
+            pending.push_back(provenance.parent);
+      };
+      for (const auto &[id, resource] : c.vars)
+        if (resource.live)
+          requireParent(resource);
+      for (const auto &[value, temporary] : c.values)
+        if (temporary.available)
+          requireParent(temporary);
+      while (!pending.empty()) {
+        auto parent = pending.back();
+        pending.pop_back();
+        if (!retained.insert(parent).second)
+          continue;
+        const auto &alias = live(c, parent, l);
+        if (alias.loanParent != None)
+          pending.push_back(alias.loanParent);
+        if (alias.storageParent != None)
+          pending.push_back(alias.storageParent);
+      }
+
+      for (auto &[id, r] : c.vars)
+        if (bindings.contains(id) && r.live && r.root != None && !retained.contains(id)) {
+          endBorrow(c, id);
+          progress = true;
+        }
+      for (auto &[id, r] : c.vars)
+        if (bindings.contains(id) && r.live && r.root == None && hasExclusiveCarriers(r) &&
+            !r.shared && !r.unique && (!symbol(id).receiver || function->consumesSelf) &&
+            !symbol(id).reference) {
+          drop(c, id, l, true, site);
+          progress = true;
+        }
+    }
+  }
   void finish(Context &c, Loc l, Inst &site) {
     endViews(c);
-    for (auto &[id, r] : c.vars)
-      if (r.live && r.root != None && hasExclusiveCarriers(c.vars.at(r.root)))
-        endBorrow(c, id);
-
-    for (auto &[id, r] : c.vars)
-      if (r.live && r.root == None && hasExclusiveCarriers(r))
-        drop(c, id, l, true, site);
+    std::set<SymbolId> bindings;
+    for (const auto &[id, resource] : c.vars)
+      bindings.insert(id);
+    cleanupLoans(c, bindings, l, site);
     for (auto &[id, r] : c.vars)
       if (r.live && r.root != None)
         endBorrow(c, id);
@@ -1536,7 +1859,7 @@ class Checker {
       const auto &receiver = live(c, i.slot, i.loc);
       const auto *field = projectedState(c, i.slot, i.loc);
       if (!field)
-        complete(r, i.loc);
+        complete(r, symbol(i.slot).type, i.loc);
       auto &fields = placeFields(c, i.slot, i.loc);
       if (!missingFields(symbol(i.slot).type, fields).empty())
         fail(i.loc, DiagnosticCode::ConsumedResource, "method receiver has absent owned fields");
@@ -1632,10 +1955,21 @@ class Checker {
         }
       } else if (p.semantics.linear(t)) {
         auto &v = take(c, i.args[n], i.loc);
-        if (!v.absentFields.empty())
+        if (!v.absentFields.empty() || !initializedFields(t, v.fields))
           fail(i.loc, DiagnosticCode::ConsumedResource,
                "cannot pass a struct with uninitialized owned fields");
         initialFieldContract(t, v.fields, i.loc);
+
+        for (const auto &[path, provenance] : v.carriers)
+          for (auto root : provenance.origins) {
+            if (argumentRoots.contains(root) && (provenance.capability == Access::Unique ||
+                                                 argumentRoots.at(root) == Access::Unique))
+              fail(i.loc, DiagnosticCode::InvalidReborrow,
+                   "overlapping reference origins in the same call");
+            argumentRoots[root] = provenance.capability;
+            if (provenance.capability == Access::Unique)
+              forgetVariantSets(c, root);
+          }
         if (v.state != initial(t))
           fail(i.loc, DiagnosticCode::ProtocolReturn,
                "owned resource arguments must be in their initial protocol state");
@@ -1648,7 +1982,7 @@ class Checker {
         for (const auto &source : sources) {
           auto parameter =
               std::find(f.params.begin(), f.params.end(), source.parameter) - f.params.begin();
-          if (source.path.empty()) {
+          if (source.kind == hir::ReferenceSourceKind::Parameter) {
             auto alias = i.slot != None && parameter == 0
                              ? i.slot
                              : c.references.at(i.args.at(parameter - skip));
@@ -1656,31 +1990,43 @@ class Checker {
             owners.insert(actual.begin(), actual.end());
           } else {
             const CarrierMap *carriers;
-            auto path = source.path;
+            auto sourcePath = source.path;
             if (i.slot != None && parameter == 0) {
               const auto &receiver = live(c, i.slot, i.loc);
               const auto &owner = receiver.root == None ? receiver : live(c, receiver.root, i.loc);
               hir::ReferencePath prefix;
               for (auto field : receiver.ownedProjection)
                 prefix.push_back({hir::ReferenceProjectionKind::Field, field});
-              path.insert(path.begin(), prefix.begin(), prefix.end());
+              sourcePath.insert(sourcePath.begin(), prefix.begin(), prefix.end());
               carriers = &owner.carriers;
             } else
               carriers = &c.values.at(i.args.at(parameter - skip)).carriers;
-            if (auto actual = carriers->find(path); actual != carriers->end())
+            if (auto actual = carriers->find(sourcePath); actual != carriers->end()) {
               owners.insert(actual->second.origins.begin(), actual->second.origins.end());
+
+              if (p.semantics.referenceResultAccess(f, path) == Access::Unique)
+                resultProvenance[path] = actual->second;
+            }
           }
         }
-        if (!owners.empty())
-          resultProvenance[path] = {std::move(owners), f.resultAccess};
+        auto capability = p.semantics.referenceResultAccess(f, path);
+        if (!owners.empty() && !(capability == Access::Unique && f.resultPayloadSource))
+          resultProvenance[path] = {std::move(owners), capability};
       }
 
+    std::set<std::pair<SymbolId, hir::ReferencePath>> exported;
+    if (f.resultAccess == Access::Unique && f.resultPayloadSource)
+      for (const auto &[path, sources] : p.semantics.referenceTransfers(f))
+        if (p.semantics.referenceResultAccess(f, path) == Access::Unique)
+          for (const auto &source : sources)
+            exported.insert({source.parameter, source.path});
     for (size_t n = 0; n < i.args.size(); ++n) {
       const auto &parameter = symbol(f.params[n + skip]);
       if (!parameter.reference && p.semantics.containsReferences(parameter.type)) {
         auto &value = c.values.at(i.args[n]);
         for (const auto &[offset, owner] : value.carriers)
-          releaseCarriedLoan(c, value, offset, i.loc);
+          if (!exported.contains({parameter.id, offset}))
+            releaseCarriedLoan(c, value, offset, i.loc);
         value.carriers.clear();
       }
     }
@@ -1714,6 +2060,99 @@ class Checker {
     if (free)
       r.allocation = false;
   }
+  void suspensionLoans(Context &c, Inst &site) {
+    const auto &body = definitions.at(function->id)->body;
+    const bool directBoundary =
+        std::any_of(body.begin(), body.end(), [&](const auto &i) { return &i == &site; });
+    const auto &graph = *regionDefinitions.at(function->id);
+    for (const auto &[value, definition] : graph.valueDefinitions)
+      if (definition.reference && graph.blocks.at(site.semanticPoint).valuesOut.contains(value))
+        fail(
+            site.loc, DiagnosticCode::FutureFeature,
+            "borrowed expression value remains active across `await`; bind and reconstruct a local borrow instead");
+    for (const auto &[value, temporary] : c.values) {
+      (void)value;
+      if (temporary.available && !temporary.carriers.empty())
+        fail(site.loc, DiagnosticCode::FutureFeature,
+             "borrowed carrier temporary remains active across `await`");
+    }
+    std::map<SymbolId, unsigned> shared;
+    std::set<SymbolId> unique;
+    for (const auto &[id, r] : c.vars)
+      if (r.live && (r.root != None || !r.carriers.empty())) {
+        auto loan = std::find_if(graph.loans.begin(), graph.loans.end(),
+                                 [&](const auto &l) { return l.carrier == id; });
+        const Inst *creation = nullptr;
+        if (loan != graph.loans.end())
+          for (const auto &i : body)
+            if (i.semanticPoint == loan->created.block)
+              creation = &i;
+        const auto owner = c.vars.find(r.root);
+        bool proved =
+            directBoundary && creation && owner != c.vars.end() && owner->second.live &&
+            owner->second.root == None && owner->second.access == Access::Own &&
+            !symbol(r.root).reference && !symbol(r.root).temporary &&
+            symbol(id).type == symbol(r.root).type &&
+            asyncs::closedStorage(p.semantics, symbol(r.root).type) &&
+            !p.semantics.containsProtocolFields(symbol(r.root).type) && r.carriers.empty() &&
+            r.extraRoots.empty() && r.ownedProjection.empty() && r.loanParent == None &&
+            r.storageParent == None && !r.exclusiveCarrier && !r.shared && !r.unique &&
+            !r.exclusiveLoans && !symbol(id).temporary && creation->slot == r.root &&
+            creation->offset == id && creation->payloadPath.empty() &&
+            creation->placeProjection == Inst::PlaceProjection::None && creation->args.empty() &&
+            ((creation->kind == Inst::BorrowShared && r.access == Access::Shared) ||
+             (creation->kind == Inst::BorrowUnique && r.access == Access::Unique));
+        if (!proved)
+          DiagnosticEngine()
+              .error(DiagnosticCode::FutureFeature, site.loc,
+                     "borrow remains active across `await`")
+              .label(site.loc, "suspension occurs here")
+              .secondary(symbol(id).loc,
+                         "reference or carrier `" + symbol(id).name + "` begins here")
+              .note(
+                  "this reference has no proved owner-relative reconstruction at the state boundary")
+              .help("keep the owner and a direct local borrow, or shorten the borrow before await")
+              .emit();
+        complete(owner->second, symbol(r.root).type, site.loc);
+        if (r.access == Access::Shared)
+          ++shared[r.root];
+        else
+          unique.insert(r.root);
+        site.suspensionBorrows.push_back(
+            {id, r.root, symbol(id).type,
+             r.access == Access::Shared ? BorrowKind::Shared : BorrowKind::Unique,
+             symbol(id).region, creation->loc});
+      }
+    for (const auto &recipe : site.suspensionBorrows) {
+      const auto &owner = c.vars.at(recipe.owner);
+      if (owner.shared != shared[recipe.owner] || owner.unique != unique.contains(recipe.owner) ||
+          owner.exclusiveLoans || !owner.carriers.empty())
+        fail(site.loc, DiagnosticCode::FutureFeature,
+             "owner has an unaccounted loan across `await`");
+    }
+
+    std::function<void(TypeId, StateId, const std::map<uint32_t, OwnedFieldState> &,
+                       const std::string &)>
+        states;
+    states = [&](TypeId type, StateId state, const auto &fields, const std::string &name) {
+      final(type, state, name, site.loc);
+      if (state != initial(type))
+        fail(site.loc, DiagnosticCode::FutureFeature,
+             "suspension requires an explicit state transport contract for `" + name +
+                 "`; current transport preserves its droppable initial state");
+      for (const auto &[index, field] : fields) {
+        const auto &member = p.semantics.types[type].fields.at(index);
+        states(member.type, field.state, field.fields, name + "." + member.name);
+      }
+    };
+    for (const auto &[id, r] : c.vars)
+      if (r.live && r.root == None && r.access == Access::Own && !symbol(id).reference &&
+          !symbol(id).receiver)
+        states(symbol(id).type, r.state, r.fields, symbol(id).name);
+    if (!c.views.empty())
+      fail(site.loc, DiagnosticCode::FutureFeature,
+           "borrowed temporary remains active across `await`");
+  }
   void block(std::vector<Inst> &ops, Context &c) {
     for (auto &i : ops) {
       if (c.returned)
@@ -1729,28 +2168,35 @@ class Checker {
       }
 
       recordResourcePoint(c, i);
+      recordCaptureState(c, i, StateSide::Before);
       i.possibleVariants.clear();
       i.storedPayloadReference = false;
       i.cleanup.clear();
       i.movedPayloads.clear();
       i.carriers.clear();
+      i.suspensionBorrows.clear();
       i.freeTemporary = false;
       i.replaceField = false;
       i.absentFields.clear();
       i.temporaryAbsentFields.clear();
       i.fieldCleanup.clear();
       i.replacedFieldPlan = {};
+      i.storedFieldPlan = {};
       i.temporaryFieldPlan = {};
       if (i.kind == Inst::FieldStore || i.kind == Inst::FieldTake || i.kind == Inst::FieldDrop) {
         i.protocol = None;
         i.from = i.to = None;
       }
+      std::vector<CaptureDrop> completed;
+      auto *previousDrops = edgeDrops;
+      edgeDrops = options.retainCaptureStates ? &completed : nullptr;
       switch (i.kind) {
       case Inst::UnsafeScope:
         block(i.body, c);
         break;
       case Inst::RawAddress:
       case Inst::FunctionAddress:
+      case Inst::ThreadRun:
       case Inst::IndirectForeignCall:
       case Inst::PointerCast:
       case Inst::RawLoad:
@@ -1894,7 +2340,7 @@ class Checker {
             fail(
                 i.loc, DiagnosticCode::InvalidReborrow,
                 "storing an exclusive reference in another container requires a transfer contract");
-          if (!payload.absentFields.empty())
+          if (!payload.absentFields.empty() || !initializedFields(tid, payload.fields))
             fail(i.loc, DiagnosticCode::ConsumedResource,
                  "cannot store a struct with uninitialized owned fields");
           if (p.semantics.reference(tid)) {
@@ -1912,6 +2358,40 @@ class Checker {
                               None,   std::move(carriers)};
         break;
       }
+      case Inst::FutureCreate: {
+        const auto &producer = p.semantics.functions.at(i.function);
+        for (size_t n = 0; n < i.args.size(); ++n) {
+          auto type = symbol(producer.params[n]).type;
+          if (!p.semantics.linear(type))
+            continue;
+          auto &input = take(c, i.args[n], i.loc);
+          completeFields(type, input.fields, i.loc);
+          if (!input.absentFields.empty() || !input.carriers.empty())
+            fail(i.loc, DiagnosticCode::InvalidCore,
+                 "Future input requires complete closed storage");
+          final(type, input.state, "async input", i.loc);
+        }
+        c.values[i.result] = {i.type, initial(i.type), true, true};
+        break;
+      }
+      case Inst::Await:
+      case Inst::BlockOn: {
+        if (i.kind == Inst::Await)
+          suspensionLoans(c, i);
+        const auto input = p.semantics.functions.at(i.function).futureType;
+        auto &future = take(c, i.args.at(0), i.loc);
+        if (!future.allocation)
+          fail(i.loc, DiagnosticCode::InvalidCore, "Future no longer owns its frame allocation");
+        completeFields(input, future.fields, i.loc);
+        if (!future.carriers.empty())
+          fail(i.loc, DiagnosticCode::InvalidCore,
+               "Future consumption requires a proved reference-free frame");
+        if (p.semantics.linear(i.type)) {
+          c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
+          c.values[i.result].fields = initialFields(i.type);
+        }
+        break;
+      }
       case Inst::StructInit: {
         Temporary result{i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
         for (size_t n = 0; n < i.args.size(); ++n) {
@@ -1921,7 +2401,7 @@ class Checker {
             continue;
           auto &value = take(c, i.args[n], i.loc);
           if ((!value.carriers.empty() && !p.semantics.localCarrierType(type)) ||
-              !value.absentFields.empty())
+              !value.absentFields.empty() || !initializedFields(type, value.fields))
             fail(i.loc, DiagnosticCode::AllocationContract,
                  "struct initializer requires initialized fields with supported carrier contracts");
           if (p.semantics.managedFieldType(type))
@@ -1955,33 +2435,60 @@ class Checker {
         auto &owner =
             access(c, i.slot, i.kind == Inst::FieldStore || borrowed ? Access::Unique : Access::Own,
                    i.loc);
-        auto &fields = placeFields(c, i.slot, i.loc);
-        auto [carrierOwner, carrierPath] = fieldCarrierPlace(c, i.slot, i.fieldIndex, i.loc);
-        auto fieldName = symbol(i.slot).name + "." +
-                         p.semantics.types[symbol(i.slot).type].fields[i.fieldIndex].name;
+        auto &fields = operationFields(c, i);
+        auto [carrierOwner, carrierPath] = fieldCarrierPlace(c, i.slot, i, i.loc);
+        auto parentType = symbol(i.slot).type;
+        auto fieldName = symbol(i.slot).name;
+        for (auto index : i.fieldPath) {
+          const auto &field = p.semantics.types[parentType].fields.at(index);
+          fieldName += "." + field.name;
+          parentType = field.type;
+        }
+        fieldName += "." + p.semantics.types[parentType].fields[i.fieldIndex].name;
         auto oldPlan = [&] {
           if (!fields.contains(i.fieldIndex))
             fail(i.loc, DiagnosticCode::InvalidCore, "missing field protocol state");
           const auto &old = fields.at(i.fieldIndex);
           final(i.type, old.state, fieldName, i.loc, old.origin);
-          auto plan = fieldDropPlan(i.type, old.fields, {}, fieldName, i.loc);
+          auto plan = fieldDropPlan(i.type, old.fields, missingFields(i.type, old.fields),
+                                    fieldName, i.loc);
           plan.skip = !old.allocation;
+          if (edgeDrops) {
+            const auto &receiver = live(c, i.slot, i.loc);
+            storage::Location place{storage::Location::Symbol,
+                                    receiver.root == None ? i.slot : receiver.root};
+            for (auto field : receiver.ownedProjection)
+              place.path.push_back({hir::ReferenceProjectionKind::Field, field});
+            for (auto field : i.fieldPath)
+              place.path.push_back({hir::ReferenceProjectionKind::Field, field});
+            place.path.push_back({hir::ReferenceProjectionKind::Field, i.fieldIndex});
+            recordDrop({place, i.type, old.allocation, plan, {}, {}});
+          }
           return plan;
         };
         if (i.kind == Inst::FieldStore) {
           auto &value = take(c, i.args.at(0), i.loc);
+          const bool partial =
+              !value.absentFields.empty() || !initializedFields(i.type, value.fields);
+          const auto &shape = p.semantics.types[i.type];
+
           if ((!value.carriers.empty() && !p.semantics.localCarrierType(i.type)) ||
-              !value.absentFields.empty() ||
+              (partial && (shape.kind != hir::Type::Structure || p.semantics.heap(i.type) ||
+                           p.semantics.containsReferences(i.type) ||
+                           p.semantics.containsProtocolFields(i.type))) ||
               (!value.allocation && p.semantics.needsDrop(i.type) &&
                !p.semantics.containsProtocolFields(i.type)))
             fail(i.loc, DiagnosticCode::AllocationContract,
                  "field requires an initialized owner or supported provenance carrier");
           i.replaceField = fields.contains(i.fieldIndex);
+          if (partial)
+            i.storedFieldPlan =
+                fieldDropPlan(i.type, value.fields, value.absentFields, fieldName, i.loc);
           if (i.replaceField)
             i.replacedFieldPlan = oldPlan();
           releaseCarriers(c, takeFieldCarriers(*carrierOwner, carrierPath), i.loc);
           installFieldCarriers(*carrierOwner, carrierPath, std::move(value.carriers));
-          if (live(c, i.slot, i.loc).ownedProjection.empty())
+          if (live(c, i.slot, i.loc).ownedProjection.empty() && i.fieldPath.empty())
             owner.absentFields.erase(i.fieldIndex);
           fields[i.fieldIndex] = {value.state, value.allocation, value.fields, i.loc};
           i.to = value.state;
@@ -1994,8 +2501,13 @@ class Checker {
           i.from = state.state;
           i.protocol = p.semantics.types[i.type].protocol;
           if (i.kind == Inst::FieldTake) {
+            if (!initializedFields(i.type, state.fields))
+              fail(
+                  i.loc, DiagnosticCode::ConsumedResource,
+                  "cannot extract an aggregate with absent owned fields; restore them or move initialized descendants");
             c.values[i.result] = {i.type, state.state, true, state.allocation};
             c.values[i.result].fields = std::move(state.fields);
+            c.values[i.result].absentFields = missingFields(i.type, c.values[i.result].fields);
             c.values[i.result].carriers = takeFieldCarriers(*carrierOwner, carrierPath);
             referencePresence(c, i, c.values[i.result].carriers);
           } else {
@@ -2003,7 +2515,7 @@ class Checker {
             i.replaceField = true;
             releaseCarriers(c, takeFieldCarriers(*carrierOwner, carrierPath), i.loc);
           }
-          if (live(c, i.slot, i.loc).ownedProjection.empty())
+          if (live(c, i.slot, i.loc).ownedProjection.empty() && i.fieldPath.empty())
             owner.absentFields.insert(i.fieldIndex);
           fields.erase(i.fieldIndex);
         }
@@ -2012,7 +2524,7 @@ class Checker {
       case Inst::Move: {
         c.variants.erase(i.slot);
         auto &r = access(c, i.slot, Access::Own, i.loc);
-        complete(r, i.loc);
+        complete(r, symbol(i.slot).type, i.loc);
         if (symbol(i.slot).receiver && !function->consumesSelf)
           fail(i.loc, DiagnosticCode::BorrowConflict, "method self cannot be moved");
         if (!r.movedPayloads.empty())
@@ -2038,6 +2550,8 @@ class Checker {
       case Inst::Copy:
       case Inst::Read: {
         auto &resource = access(c, i.slot, Access::Shared, i.loc);
+        if (i.placeProjection == Inst::PlaceProjection::Field)
+          (void)operationFields(c, i);
         auto &carrier = c.vars.at(c.vars.at(i.slot).root == None ? i.slot : c.vars.at(i.slot).root);
         if (carrier.opaquePayloads &&
             (i.kind == Inst::Copy || i.offset != 0 || i.type != I64 || !i.args.empty()))
@@ -2067,8 +2581,15 @@ class Checker {
       }
       case Inst::Write:
         access(c, i.slot, Access::Unique, i.loc);
+        if (i.placeProjection == Inst::PlaceProjection::Field)
+          (void)operationFields(c, i);
         break;
       case Inst::Bind: {
+        if (auto previous = c.vars.find(i.slot);
+            previous != c.vars.end() && previous->second.live && p.semantics.linear(i.type))
+          fail(i.loc, DiagnosticCode::UnconsumedResource,
+               "linear binding `" + symbol(i.slot).name +
+                   "` must be moved or dropped before reinitialization");
         StateId state = None;
         bool allocation = false;
         if (p.semantics.linear(i.type)) {
@@ -2107,17 +2628,7 @@ class Checker {
         drop(c, i.slot, i.loc, false, i);
         break;
       case Inst::Discard:
-        if (p.semantics.linear(i.type)) {
-          auto &t = take(c, i.args[0], i.loc);
-          final(t.type, t.state, "temporary", i.loc);
-          i.temporaryFieldPlan =
-              fieldDropPlan(t.type, t.fields, t.absentFields, "temporary", i.loc);
-          i.freeTemporary = t.allocation;
-          i.temporaryAbsentFields = {t.absentFields.begin(), t.absentFields.end()};
-          for (const auto &[offset, owner] : t.carriers)
-            releaseCarriedLoan(c, t, offset, i.loc);
-          t.carriers.clear();
-        }
+        discardTemporary(c, i);
         break;
       case Inst::BorrowShared:
       case Inst::BorrowUnique: {
@@ -2155,7 +2666,9 @@ class Checker {
           bool found = selected && (stored || *payload == i.type);
           if (stored) {
             i.storedPayloadReference = true;
-            access(c, i.slot, Access::Shared, i.loc);
+            bool reborrow = storedFieldReborrow(p.semantics, i);
+            bool childUnique = i.kind == Inst::BorrowUnique;
+            access(c, i.slot, reborrow && childUnique ? Access::Unique : Access::Shared, i.loc);
             auto &container = c.vars.at(i.slot);
             const auto &carriers =
                 container.root == None ? container.carriers : c.vars.at(container.root).carriers;
@@ -2167,7 +2680,7 @@ class Checker {
               fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
             const auto provenance = carriers.at(position);
             bool unique = provenance.capability == Access::Unique;
-            if ((i.kind == Inst::BorrowUnique) != unique)
+            if (childUnique != unique && !reborrow)
               fail(i.loc, DiagnosticCode::InvalidCore, "missing stored-reference origin");
             auto owners = provenance.origins;
             if (owners.empty())
@@ -2175,7 +2688,19 @@ class Checker {
             auto owner = *owners.begin();
             auto &root = live(c, owner, i.loc);
             SymbolId parent = None;
-            if (unique) {
+            if (reborrow) {
+              if (owners.size() != 1)
+                fail(i.loc, DiagnosticCode::InvalidCore,
+                     "exclusive field reborrow requires one origin");
+              if (childUnique) {
+                container.unique = true;
+                ++root.exclusiveLoans;
+              } else {
+                ++container.shared;
+                retainOrigins(c, owners, i.loc);
+              }
+              container.borrowAt = i.loc;
+            } else if (unique) {
               access(c, i.slot, Access::Own, i.loc);
               if (container.root != None || !container.movedPayloads.insert(i.payloadPath).second)
                 fail(i.loc, DiagnosticCode::InvalidCore,
@@ -2184,12 +2709,17 @@ class Checker {
               parent = provenance.parent;
             } else
               retainOrigins(c, owners, i.loc);
-            c.vars[i.offset] = {true,         root.state, unique ? Access::Unique : Access::Shared,
-                                owner,        0,          false,
-                                root.version, false,      "",
-                                None};
-            c.vars[i.offset].exclusiveCarrier = unique;
+            c.vars[i.offset] = {
+                true,         root.state, childUnique ? Access::Unique : Access::Shared,
+                owner,        0,          false,
+                root.version, false,      "",
+                None};
+            c.vars[i.offset].exclusiveCarrier = childUnique;
             c.vars[i.offset].loanParent = parent;
+            if (reborrow) {
+              c.vars[i.offset].storageParent = i.slot;
+              c.vars[i.offset].storagePath = position;
+            }
             setAliasOrigins(c.vars[i.offset], owners);
             c.vars[i.offset].borrowAt = i.loc;
             break;
@@ -2200,8 +2730,13 @@ class Checker {
         auto &source = live(c, i.slot, i.loc);
         bool ownedProjection =
             i.placeProjection == Inst::PlaceProjection::Field && p.semantics.ownedFieldType(i.type);
-        if (!ownedProjection)
-          complete(source, i.loc);
+        if (i.placeProjection != Inst::PlaceProjection::Field) {
+          if (source.root == None)
+            complete(source, symbol(i.slot).type, i.loc);
+          else if (!initializedFields(symbol(i.slot).type, placeFields(c, i.slot, i.loc)))
+            fail(i.loc, DiagnosticCode::ConsumedResource,
+                 "cannot reborrow an incomplete owned aggregate");
+        }
         bool shared = i.kind == Inst::BorrowShared;
 
         bool derivedUnique = source.root != None && source.access == Access::Unique;
@@ -2213,7 +2748,8 @@ class Checker {
         if (i.placeProjection == Inst::PlaceProjection::Field) {
           auto type = symbol(i.slot).type;
           auto *fields = &placeFields(c, i.slot, i.loc);
-          for (auto index : i.fieldPath) {
+          for (size_t n = 0; n < i.fieldPath.size(); ++n) {
+            const auto index = i.fieldPath[n];
             const auto &member = p.semantics.types[type].fields.at(index);
             if (p.semantics.ownedFieldType(member.type)) {
               if (!fields->contains(index))
@@ -2221,7 +2757,7 @@ class Checker {
                      "cannot borrow an uninitialized or consumed owned field");
               fields = &fields->at(index).fields;
               path.push_back(index);
-              if (!missingFields(member.type, *fields).empty())
+              if (n + 1 == i.fieldPath.size() && !initializedFields(member.type, *fields))
                 fail(i.loc, DiagnosticCode::ConsumedResource,
                      "borrowed aggregate has absent owned fields");
             }
@@ -2262,6 +2798,7 @@ class Checker {
       case Inst::ForeignCall:
       case Inst::ContainerCall:
       case Inst::Call:
+      case Inst::ThreadCall:
       case Inst::ProtocolTransition: {
         auto resultProvenance = call(i, c);
         if (p.semantics.functions[i.function].returnsReference()) {
@@ -2271,7 +2808,7 @@ class Checker {
           c.references[i.result] = i.slot != None && index == 0
                                        ? i.slot
                                        : c.references.at(i.args.at(index - (i.slot != None)));
-        } else if ((i.kind == Inst::Call || i.kind == Inst::ContainerCall) &&
+        } else if ((functionCall(i) || i.kind == Inst::ContainerCall) &&
                    p.semantics.linear(i.type)) {
           c.values[i.result] = {i.type, initial(i.type), true, p.semantics.needsDrop(i.type)};
           const auto &target = p.semantics.functions[i.function];
@@ -2280,7 +2817,7 @@ class Checker {
             c.values[i.result].fields = initialFields(i.type);
           if (target.resultBorrowedContainer) {
             SymbolId resultInput = None;
-            if (target.resultAccess == Access::Unique) {
+            if (target.resultAccess == Access::Unique && !target.resultPayloadSource) {
               auto index =
                   std::find(target.params.begin(), target.params.end(), target.resultOrigin) -
                   target.params.begin();
@@ -2294,12 +2831,13 @@ class Checker {
             for (const auto &[offset, actual] : resultProvenance) {
               const auto &resultOrigins = actual.origins;
               auto &provenance = c.values[i.result].carriers[offset];
-              provenance.origins = resultOrigins;
-              provenance.capability = target.resultAccess;
-              if (target.resultAccess == Access::Unique) {
+              provenance = actual;
+              if (actual.capability == Access::Unique) {
                 if (resultOrigins.size() != 1)
                   fail(i.loc, DiagnosticCode::InvalidReborrow,
                        "exclusive stored results require a single input origin");
+                if (target.resultPayloadSource)
+                  continue;
                 auto &owner = live(c, *resultOrigins.begin(), i.loc);
                 auto &receiver = live(c, resultInput, i.loc);
                 bool derived = receiver.root != None || symbol(resultInput).reference;
@@ -2320,10 +2858,22 @@ class Checker {
         }
         break;
       }
-      case Inst::ScopeEnd:
-        for (auto id : i.locals)
-          if (c.vars.contains(id) && c.vars.at(id).live && hasExclusiveCarriers(c.vars.at(id)))
-            drop(c, id, i.loc, true, i);
+      case Inst::ScopeEnd: {
+        std::set<SymbolId> bindings(i.locals.begin(), i.locals.end());
+        bool changed = true;
+        while (changed) {
+          changed = false;
+          for (const auto &[id, r] : c.vars)
+            if (r.live && r.root != None &&
+                ((!symbol(r.root).temporary &&
+                  (bindings.contains(r.root) ||
+                   std::any_of(r.extraRoots.begin(), r.extraRoots.end(),
+                               [&](auto root) { return bindings.contains(root); }))) ||
+                 (r.storageParent != None && !symbol(r.storageParent).temporary &&
+                  bindings.contains(r.storageParent))))
+              changed |= bindings.insert(id).second;
+        }
+        cleanupLoans(c, bindings, i.loc, i);
         for (auto &[id, r] : c.vars)
           if (r.live && r.root != None && !symbol(r.root).temporary &&
               (std::find(i.locals.begin(), i.locals.end(), r.root) != i.locals.end() ||
@@ -2337,6 +2887,7 @@ class Checker {
           c.variantSets.erase(id);
         }
         break;
+      }
       case Inst::Return:
         if (function->returnsReference()) {
           auto alias = c.references.at(i.args.at(0));
@@ -2366,8 +2917,8 @@ class Checker {
             const auto transfers = p.semantics.referenceTransfers(*function);
             for (const auto &[offset, provenance] : result.carriers) {
               const auto &owners = provenance.origins;
-              if (function->resultAccess == Access::Unique &&
-                  (provenance.capability != Access::Unique || owners.size() != 1))
+              if (provenance.capability != p.semantics.referenceResultAccess(*function, offset) ||
+                  (provenance.capability == Access::Unique && owners.size() != 1))
                 fail(i.loc, DiagnosticCode::InvalidCore,
                      "exclusive payload return is missing its unique provenance obligation");
               for (auto origin : owners) {
@@ -2401,7 +2952,7 @@ class Checker {
               (!aggregate && result.allocation != p.semantics.needsDrop(function->result)))
             fail(i.loc, DiagnosticCode::InvalidCore, "unsupported resource return contract");
         }
-        recordFieldPostStates(c, i.loc);
+        recordFieldPostStates(c, i);
         finish(c, i.loc, i);
         c.returned = true;
         break;
@@ -2410,13 +2961,11 @@ class Checker {
         if (loops.empty() || loops.back().id != i.loop)
           fail(i.loc, DiagnosticCode::InvalidCore, "invalid loop target in Core");
         auto &entry = loops.back().entry;
-        for (auto &[id, r] : c.vars)
-          if (!entry.vars.contains(id) && r.live && r.root != None &&
-              hasExclusiveCarriers(c.vars.at(r.root)))
-            endBorrow(c, id);
-        for (auto &[id, r] : c.vars)
-          if (!entry.vars.contains(id) && r.live && r.root == None && hasExclusiveCarriers(r))
-            drop(c, id, i.loc, true, i);
+        std::set<SymbolId> bindings;
+        for (const auto &[id, r] : c.vars)
+          if (!entry.vars.contains(id))
+            bindings.insert(id);
+        cleanupLoans(c, bindings, i.loc, i);
         for (auto &[id, r] : c.vars)
           if (!entry.vars.contains(id) && r.live && r.root != None)
             endBorrow(c, id);
@@ -2527,6 +3076,8 @@ class Checker {
       else if (i.kind == Inst::Bind && c.vars.contains(i.slot))
         i.carriers = c.vars.at(i.slot).carriers;
       validateCarriers(c, i.type, i.carriers, i.loc);
+      recordCaptureState(c, i, StateSide::After, completed);
+      edgeDrops = previousDrops;
     }
   }
 
@@ -2538,6 +3089,7 @@ class Checker {
            "recursive owned-field contracts require explicit fixed-point summaries, outside this "
            "subset");
     auto *previousFunction = function;
+    auto previousEntry = captureEntry;
     auto previousLoops = std::move(loops);
     loops.clear();
     auto &cf = *definitions.at(id);
@@ -2552,6 +3104,7 @@ class Checker {
             entries.push_back(op.from);
     }
     for (auto entry : entries) {
+      captureEntry = entry;
       Context c;
       for (size_t n = 0; n < function->params.size(); ++n) {
         auto id = function->params[n];
@@ -2571,12 +3124,15 @@ class Checker {
       for (const auto &contract : function->payloadParameterRegions) {
         auto &origin = c.vars[contract.origin];
         origin.live = true;
-        origin.access = Access::Shared;
+        origin.access = symbol(contract.origin).access;
         origin.state = initial(symbol(contract.origin).type);
         origin.allocation = p.semantics.heap(symbol(contract.origin).type);
         origin.borrowAt = symbol(contract.parameter).loc;
-        c.vars[contract.parameter].carriers[contract.path] = {{contract.origin}};
-        ++origin.shared;
+        c.vars[contract.parameter].carriers[contract.path] = {{contract.origin}, origin.access};
+        if (origin.access == Access::Unique)
+          ++origin.exclusiveLoans;
+        else
+          ++origin.shared;
       }
       for (auto id : function->payloadInspectionParameters)
         c.vars.at(id).opaquePayloads = true;
@@ -2588,19 +3144,22 @@ class Checker {
       }
     }
     function = previousFunction;
+    captureEntry = previousEntry;
     loops = std::move(previousLoops);
     checking.erase(id);
     checked.insert(id);
   }
 
 public:
-  explicit Checker(Program x) : p(std::move(x)) {}
+  explicit Checker(Program x, VerificationOptions o) : p(std::move(x)), options(o) {}
   Program run() {
+    p.captureStates.clear();
 
     std::function<void(std::vector<Inst> &)> clearSnapshots;
     clearSnapshots = [&](auto &body) {
       for (auto &instruction : body) {
         instruction.carriers.clear();
+        instruction.storedFieldPlan = {};
         clearSnapshots(instruction.body);
         clearSnapshots(instruction.otherwise);
         clearSnapshots(instruction.condition);
@@ -2680,13 +3239,21 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
                                 "array.repeat",
                                 "function.address",
                                 "foreign.call.indirect",
-                                "struct.init"};
+                                "struct.init",
+                                "thread.run",
+                                "future.create",
+                                "await",
+                                "block_on",
+                                "thread.call"};
   for (auto &i : ops) {
     if (i.kind == Inst::Loop)
       dump(i.condition, p, o, d + 2);
     for (auto id : i.cleanup)
       o << std::string(d, ' ') << "drop #v" << id << " DropGlue(#T" << p.symbols[id].type
-        << (p.dynamicContainer(p.symbols[id].type) ? ") => drop owned elements, then free storage\n"
+        << (p.types[p.symbols[id].type].futureFunction != None
+                ? ") => drop captured inputs / active Future state\n"
+            : p.dynamicContainer(p.symbols[id].type)
+                ? ") => drop owned elements, then free storage\n"
             : p.types[p.symbols[id].type].dropGlue == hir::DropGlue::StringAllocation
                 ? ") => string.drop (free payload)\n"
             : p.types[p.symbols[id].type].dropGlue == hir::DropGlue::InputAllocation
@@ -2710,8 +3277,19 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
     if (i.result != None)
       o << "%" << i.result << " = ";
     o << names[i.kind];
-    if (i.kind == Inst::FieldStore || i.kind == Inst::FieldTake || i.kind == Inst::FieldDrop)
+    if (i.kind == Inst::ThreadRun)
+      o << " worker=#F" << i.function << " callback=#T" << i.offset << " scoped-join";
+    for (const auto &borrow : i.suspensionBorrows)
+      o << " reconstruct-borrow(#v" << borrow.alias << "="
+        << (borrow.kind == BorrowKind::Shared ? "Shared" : "Unique") << " owner=#v" << borrow.owner
+        << " region=#R" << borrow.region << ")";
+    if (i.kind == Inst::FieldStore || i.kind == Inst::FieldTake || i.kind == Inst::FieldDrop ||
+        ((i.kind == Inst::Read || i.kind == Inst::Write) &&
+         i.placeProjection == Inst::PlaceProjection::Field)) {
+      for (auto index : i.fieldPath)
+        o << " ancestor=#" << index;
       o << " field=#" << i.fieldIndex << (i.replaceField ? " drop-previous" : "");
+    }
     if (i.kind == Inst::StructInit)
       for (auto field : i.fieldPath)
         o << " field=#" << field;
@@ -2746,6 +3324,8 @@ void dump(const std::vector<Inst> &ops, const hir::Program &p, std::ostream &o, 
     }
     if (i.storedPayloadReference)
       o << " stored-reference";
+    if (storedFieldReborrow(p, i))
+      o << " stored-field-reborrow [retain field; suspend storage parent]";
     if (!i.possibleVariants.empty()) {
       o << " possible-variants={";
       for (auto variant : i.possibleVariants)
@@ -2825,14 +3405,18 @@ Program elaborate(hir::Program h) {
   return Builder(std::move(h)).run();
 }
 void checkTypes(const Program &);
-Verified verify(Program p) {
+Verified verify(Program p, VerificationOptions options) {
   checkTypes(p);
+  asyncs::check(p);
+  execution::detail::checkThreadRuns(p);
   regions::infer(p);
-  auto checked = Checker(std::move(p)).run();
+  auto checked = Checker(std::move(p), options).run();
   storage::infer(checked);
   carriers::infer(checked);
   regions::validateBounds(checked);
-  return Verified(std::move(checked));
+  auto verified = Verified(std::move(checked));
+  execution::detail::checkThreadCalls(verified);
+  return verified;
 }
 void print(const Program &p, std::ostream &o) {
   o << "Verified Core (0 / 1 / omega; MemoryState independent of ProtocolState)\n";
@@ -2840,8 +3424,9 @@ void print(const Program &p, std::ostream &o) {
   regions::printConstraints(p, o);
   for (auto &f : p.functions) {
     auto &hf = p.semantics.functions[f.id];
-    o << "fn #F" << f.id << " " << hf.name << " kind=Normal effects={" << hf.effects.describe()
-      << " }\n";
+    o << "fn #F" << f.id << " " << hf.name
+      << " kind=" << (hf.kind == FunctionKind::Async ? "Async" : "Normal") << " effects={"
+      << hf.effects.describe() << " }\n";
     for (size_t n = 0; n < hf.params.size(); ++n) {
       auto id = hf.params[n];
       auto &s = p.semantics.symbols[id];
@@ -2871,7 +3456,8 @@ void print(const Program &p, std::ostream &o) {
         << (hf.acceptsResultOrigin(region.parameter) ? " result-bound\n" : " noescape\n");
     for (const auto &region : hf.payloadParameterRegions)
       o << "  payload.region #v" << region.parameter << " #R" << region.region << " origin=#v"
-        << region.origin << " Shared caller-owned"
+        << region.origin << " " << accessName(p.semantics.symbols[region.origin].access)
+        << " caller-owned"
         << (hf.acceptsResultOrigin(region.origin) ? " result-bound\n" : " noescape\n");
     for (const auto &source : hf.payloadResultSources()) {
       o << "  return.payload-source #v" << source.parameter;
@@ -2885,7 +3471,12 @@ void print(const Program &p, std::ostream &o) {
     for (auto id : hf.payloadInspectionParameters)
       o << "  payload.inspect #v" << id << " Shared tag-only noescape\n";
     if (hf.resultBorrowedContainer)
-      o << "  result.payload-regions: " << accessName(hf.resultAccess) << " borrowed container\n";
+      o << "  result.payload-regions: "
+        << (!p.semantics.referenceCapability(hf.result, Access::Shared) &&
+                    !p.semantics.referenceCapability(hf.result, Access::Unique)
+                ? "Mixed"
+                : accessName(hf.resultAccess))
+        << " borrowed container\n";
     if (hf.resultOrigin != None)
       o << "  return.region #R" << hf.resultRegion << " <= #R"
         << p.semantics.symbols[hf.resultOrigin].region << " origin=#v" << hf.resultOrigin << "\n";

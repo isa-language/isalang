@@ -1,0 +1,25 @@
+@import "std.vec"
+struct View {
+  value: Option<&mut i32>,
+}
+fn forward(input: View) -> View {
+  return input.move();
+}
+fn main() {
+  let data: Vec<i32 >= Vec<i32>::new();
+  let view = View {
+    value: data.first_mut()
+  };
+  let result = forward(view.move());
+  let item = result.value.move();
+  match item {
+    Some(edit) => {
+      edit = 42;
+    }, None => {
+      print(7);
+    }
+  }
+  result.drop();
+  data.push(8);
+  print(data.len());
+}

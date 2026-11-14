@@ -1,0 +1,19 @@
+@import "std.vec"
+struct View {
+  value: &mut Vec<i32>,
+}
+fn consume(view: View) {
+  view.value.push(42);
+  let item = view.value.get(0);
+  match item {
+    Some(value) => print(value),
+    None => {}
+  }
+}
+fn main() {
+  let values = Vec<i32>::new();
+    consume(View {
+      value: &mut values
+  });
+  print(values.len());
+}

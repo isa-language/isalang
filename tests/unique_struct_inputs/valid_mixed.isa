@@ -1,0 +1,22 @@
+struct View {
+  read: &i32,
+  write: &mut i32,
+  owner: String,
+}
+fn consume(view: View) {
+  print(view.read);
+  let edit = &mut view.write;
+  edit = 42;
+  let owner = view.owner.move();
+  print(owner);
+}
+fn main() {
+  let a = 7;
+  let b = 1;
+    consume(View {
+      read: &a,
+      write: &mut b,
+      owner: String::from("mixed")
+  });
+  print(b);
+}

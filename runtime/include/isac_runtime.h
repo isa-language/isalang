@@ -12,6 +12,11 @@ void *isac_rt_alloc_zeroed(size_t size);
 void isac_rt_free(void *ptr);
 void *isac_rt_memcpy(void *dst, const void *src, size_t size);
 void *isac_rt_memmove(void *dst, const void *src, size_t size);
+
+typedef uint64_t (*IsacScalarWorker)(uint64_t);
+uint64_t isac_rt_thread_run_u64(IsacScalarWorker worker, uint64_t argument);
+typedef void (*IsacScopedWorker)(void *);
+void isac_rt_thread_call(IsacScopedWorker worker, void *context);
 void isac_rt_print_i64(int64_t value);
 void isac_rt_print_u64(uint64_t value);
 void isac_rt_print_f64(double value);

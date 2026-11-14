@@ -1,0 +1,43 @@
+struct View {
+  read: Option<&i32>,
+  edit: &mut i32,
+}
+fn forward(input: View) -> View {
+  return input.move();
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let first = forward(View {
+      read: Option::Some(&a),
+      edit: &mut b
+  });
+  let read = first.read.move();
+  match read {
+    Some(value) => {
+      print(value);
+    },
+    None => {
+      print(7);
+    }
+  }
+  first.drop();
+  a = 10;
+  b = 20;
+    let second = forward(View {
+      read: Option::None,
+      edit: &mut b
+  });
+  let other = second.read.move();
+  match other {
+    Some(value) => {
+      print(value);
+    },
+    None => {
+      print(7);
+    }
+  }
+  second.drop();
+  print(a);
+  print(b);
+}

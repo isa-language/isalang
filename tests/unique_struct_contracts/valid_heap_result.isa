@@ -1,0 +1,17 @@
+struct View {
+  value: &mut String,
+}
+fn wrap(input: &mut String) -> View {
+  return View {
+    value: input
+  };
+}
+fn main() {
+  let data = String::from("hello");
+  let view = wrap(&mut data);
+  view.value.push_str("!");
+  let read = &view.value;
+  print(read);
+  view.drop();
+  print(data);
+}

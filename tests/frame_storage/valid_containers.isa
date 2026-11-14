@@ -1,0 +1,16 @@
+@import "std.vec"
+@import "std.box"
+fn marker() {}
+fn main() {
+  let values = Vec<String>::new();
+  values.push(String::from("value"));
+  let boxed = Box<String>::new(String::from("box"));
+  marker();
+  print(values.len());
+  print(boxed.get());
+  values.push(String::from("second"));
+  let text = boxed.into_inner();
+  text.push_str("!");
+  print(text);
+  print(values.len());
+}

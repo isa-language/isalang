@@ -148,15 +148,19 @@ struct ParentOperation {
     Drop,
     Construct,
     Alias,
+    Reborrow,
     EndAlias,
     Scope,
     Return,
-    Consume
+    Consume,
+    Forward
   } kind;
   storage::Location place{storage::Location::Symbol, None};
   storage::Location destination{storage::Location::Value, None};
   std::vector<ValueId> inputs;
   std::vector<hir::ReferencePath> paths;
+
+  std::map<hir::ReferencePath, storage::Location> transfers;
   std::map<hir::ReferencePath, ParentSet> seeds;
   std::set<storage::Location> reads;
   std::vector<SymbolId> locals;

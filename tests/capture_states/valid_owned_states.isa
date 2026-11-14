@@ -1,0 +1,32 @@
+@import "std.vec"
+@import "std.box"
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+fn marker() {}
+fn run(stop: bool) {
+  let partial = Pair<String>::new();
+  marker();
+  partial.first = String::from("first");
+  marker();
+  if stop {
+    return;
+  }
+  partial.second = String::from("second");
+  let removed = partial.first.move();
+  marker();
+  let transferred = removed.move();
+  marker();
+  transferred.drop();
+  let values = Vec<String>::new();
+  values.push(String::from("element"));
+  let boxed = Box<String>::new(String::from("box"));
+  marker();
+  print(values.len());
+  print(boxed.get().len());
+}
+fn main() {
+  run(true);
+  run(false);
+}

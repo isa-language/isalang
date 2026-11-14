@@ -1,0 +1,39 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+fn forward(input: Views) -> Views {
+  let choice = match true {
+    true => 1,
+    false => 2,
+  };
+  match choice {
+    1 => {
+      return Views {
+        first: input.second.move(),
+        second: input.first.move()
+      };
+    },
+    _ => {
+      return Views {
+        first: input.second.move(),
+        second: input.first.move()
+      };
+    },
+  }
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = forward(Views {
+      first: &mut a,
+      second: &mut b
+  });
+  let x = &mut result.first;
+  x = x + 10;
+  let y = &mut result.second;
+  y = y + 20;
+  result.drop();
+  print(a);
+  print(b);
+}

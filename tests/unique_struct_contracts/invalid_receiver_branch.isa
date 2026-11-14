@@ -1,0 +1,12 @@
+struct View {
+  value: &mut i32,
+}
+impl View {
+  pub fn change(unique self, other: &mut i32, yes: bool) {
+    if yes {
+      self.value = other;
+      return;
+    }
+  }
+}
+fn main() {}

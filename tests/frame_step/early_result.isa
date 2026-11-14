@@ -1,0 +1,33 @@
+@import "std.box"
+@import "std.env"
+@import "std.result"
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn choose() -> bool {
+  let arguments = env::args();
+  return arguments.len() == 1;
+}
+fn fallback() -> Result<String, i32> {
+  return Result::Err(9);
+}
+fn worker(text: String) -> Result<String, i32> {
+  let stop = choose();
+  marker();
+  if stop {
+    text.push_str("!");
+    print(303);
+    return Result::Ok(text.move());
+  }
+  checkpoint();
+  text.drop();
+  return Result::Err(7);
+}
+fn main() {
+  let result = worker(String::from("result"));
+  match result.move() {
+    Result::Ok(text) => print(text),
+    Result::Err(code) => print(code),
+  }
+}

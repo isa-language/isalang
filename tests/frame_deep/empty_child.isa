@@ -1,0 +1,36 @@
+@import "std.box"
+struct Pair {
+  count: i32,
+  left: String,
+  right: String,
+}
+struct Outer {
+  pair: Pair,
+  tail: String,
+}
+fn marker() {}
+fn first() {
+  print(101);
+}
+fn second() {
+  print(202);
+}
+fn main() {
+  let data = Outer {
+    pair: Pair {
+      count: 8,
+      left: String::from("left"),
+      right: String::from("right")
+    },
+    tail: String::from("tail")
+  };
+  marker();
+  data.pair.left.drop();
+  data.pair.right.drop();
+  first();
+  print(data.pair.count);
+  data.pair.right = String::from("restored");
+  second();
+  print(data.pair.right.as_str());
+  print(data.tail.as_str());
+}

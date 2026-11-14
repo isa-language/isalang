@@ -1,0 +1,8 @@
+@import "std.box"
+fn marker() {}
+fn main() {
+  let text = String::from("borrowed");
+  let view = &text;
+  marker();
+  print(view);
+}

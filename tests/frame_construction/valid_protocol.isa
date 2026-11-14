@@ -1,0 +1,16 @@
+@import "std.buffer"
+struct Packet<T> {
+  value: T,
+}
+fn marker() {}
+fn main() {
+  let buffer = Buffer::new(2);
+  buffer.release();
+  let packet = Packet<Buffer> {
+    value: buffer.move()
+  };
+  let text = String::from("ready");
+  marker();
+  print(text);
+  packet.drop();
+}

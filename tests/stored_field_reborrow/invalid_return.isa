@@ -1,0 +1,11 @@
+struct View {
+  value: &mut i32,
+}
+fn bad(input: &mut i32) -> Option<&mut i32> {
+  let local = 1;
+  let view = View {
+    value: &mut local
+  };
+  return Option::Some(&mut view.value);
+}
+fn main() {}

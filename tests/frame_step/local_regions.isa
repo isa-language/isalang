@@ -1,0 +1,16 @@
+@import "std.box"
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn main() {
+  let text = String::from("local");
+  marker();
+  let view = &text;
+  print(view);
+  text.push_str("!");
+  checkpoint();
+  borrow shared text as after {
+    print(after);
+  }
+}

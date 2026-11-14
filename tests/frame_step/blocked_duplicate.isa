@@ -1,0 +1,10 @@
+@import "std.box"
+fn marker() {}
+fn checkpoint() {}
+fn main() {
+  let text = String::from("duplicate");
+  marker();
+  checkpoint();
+  checkpoint();
+  print(text);
+}

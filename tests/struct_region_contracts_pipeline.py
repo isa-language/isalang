@@ -63,7 +63,7 @@ codes = {
     "invalid_return_parameter_storage": "E6003",
     "invalid_shared_receiver_mutation": "E0311",
     "invalid_shared_receiver_take": "E0311",
-    "invalid_unique_receiver": "E6003",
+    "invalid_unique_receiver": "E0310",
     "invalid_vec": "E0611",
 }
 assert set(codes) == {source.stem for source in cases.glob("invalid_*.isa")}

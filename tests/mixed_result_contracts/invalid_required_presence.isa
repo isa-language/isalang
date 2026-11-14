@@ -1,0 +1,23 @@
+struct Input {
+  read: Option<&i32>,
+  edit: &mut i32,
+}
+struct Output {
+  read: &i32,
+  edit: &mut i32,
+}
+fn forward(input: Input) -> Output {
+  let read = input.read.move();
+  match read {
+    Some(value) => {
+      return Output {
+        read: value,
+        edit: input.edit.move()
+      };
+    },
+    None => {
+      loop {}
+    },
+  }
+}
+fn main() {}

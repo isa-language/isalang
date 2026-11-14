@@ -1,0 +1,20 @@
+fn marker() {}
+fn run(stop: bool) {
+  let i = 0;
+  while i<3 {
+    let text = String::from("iteration");
+    i = i + 1;
+    if i == 1 {
+      continue;
+    }
+    marker();
+    if stop {
+      return;
+    }
+    break;
+  }
+}
+fn main() {
+  run(true);
+  run(false);
+}

@@ -36,6 +36,8 @@ with tempfile.TemporaryDirectory() as directory:
 
 
 for name, count, output in [
+    ("valid_nested_owned_partial_store", 2, "second\n"),
+    ("valid_ordinary_owned_partial_store", 2, "initialized\nagain\n"),
     ("valid_deep_owned_methods", 2, "42\n3\n"),
     ("valid_stack_owned_projection", 1, "2\n"),
     ("valid_stack_owned_unique_projection", 1, "3\n"),

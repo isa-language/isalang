@@ -1,0 +1,27 @@
+@import "std.buffer"
+struct Input {
+  value: &mut i32,
+  owner: Buffer,
+}
+struct View {
+  value: &mut i32,
+}
+fn forward(input: Input) -> View {
+  let owner = input.owner.move();
+  print(owner.len());
+  owner.release();
+  return View {
+    value: input.value.move()
+  };
+}
+fn main() {
+  let data = 1;
+    let result = forward(Input {
+      value: &mut data,
+      owner: Buffer::new(2)
+  });
+  let edit = &mut result.value;
+  edit = 42;
+  result.drop();
+  print(data);
+}

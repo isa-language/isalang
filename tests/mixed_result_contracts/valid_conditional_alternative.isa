@@ -1,0 +1,79 @@
+enum Choice<A, B> {
+  One(A),
+  Other(B),
+}
+struct Input {
+  read: Option<&i32>,
+  fallback: &bool,
+  edit: &mut i32,
+}
+struct Output {
+  choice: Choice<&i32, &bool>,
+  edit: &mut i32,
+}
+fn forward(input: Input) -> Output {
+  let read = input.read.move();
+  match read {
+    Some(value) => {
+      return Output {
+        choice: Choice::One(value),
+        edit: input.edit.move()
+      };
+    },
+    None => {
+      return Output {
+        choice: Choice::Other(input.fallback),
+        edit: input.edit.move()
+      };
+    },
+  }
+}
+fn some() {
+  let a = 1;
+  let b = true;
+  let c = 3;
+    let output = forward(Input {
+      read: Option::Some(&a),
+      fallback: &b,
+      edit: &mut c
+  });
+  let choice = output.choice.move();
+  match choice {
+    One(value) => {
+      print(value);
+    },
+    Other(flag) => {
+      print(flag);
+    }
+  }
+  let edit = &mut output.edit;
+  edit = 30;
+  output.drop();
+  print(c);
+}
+fn none() {
+  let b = true;
+  let c = 3;
+    let output = forward(Input {
+      read: Option::None,
+      fallback: &b,
+      edit: &mut c
+  });
+  let choice = output.choice.move();
+  match choice {
+    One(value) => {
+      print(value);
+    },
+    Other(flag) => {
+      print(flag);
+    }
+  }
+  let edit = &mut output.edit;
+  edit = 30;
+  output.drop();
+  print(c);
+}
+fn main() {
+  some();
+  none();
+}

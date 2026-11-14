@@ -10,6 +10,11 @@ Location append(Location base, const Path &path) {
 Location field(Location base, uint32_t index) {
   return append(base, {{hir::ReferenceProjectionKind::Field, index}});
 }
+Location fieldOperation(Location base, const core::Inst &i) {
+  for (auto index : i.fieldPath)
+    base = field(std::move(base), index);
+  return field(std::move(base), i.fieldIndex);
+}
 Location element(Location base, uint32_t index) {
   return append(base, {{hir::ReferenceProjectionKind::Element, index}});
 }
@@ -151,7 +156,10 @@ std::optional<Location> Places::resolve(SymbolId symbol, std::set<SymbolId> &see
   auto base = resolve(i.slot, seen);
   if (!base)
     return {};
-  if (i.storedPayloadReference)
+  auto leaf = program.semantics.referencePositionType(program.semantics.symbols.at(i.slot).type,
+                                                      i.payloadPath);
+  if (i.storedPayloadReference || (i.placeProjection == core::Inst::PlaceProjection::None &&
+                                   i.args.empty() && leaf && program.semantics.reference(*leaf)))
     return {};
   if (!i.payloadPath.empty()) {
     return append(*base, i.payloadPath);

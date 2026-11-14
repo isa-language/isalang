@@ -1,0 +1,17 @@
+@import "std.box"
+fn marker() {}
+fn evaluate() -> i32 {
+  print(101);
+  return 7;
+}
+fn checkpoint(value: i32) -> i32 {
+  print(value);
+  return value + 1;
+}
+fn main() {
+  let text = String::from("ssa");
+  marker();
+  let result = checkpoint(evaluate());
+  print(text);
+  print(result);
+}

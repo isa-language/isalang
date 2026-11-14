@@ -1,0 +1,9 @@
+struct View {
+  value: &i32,
+}
+impl View {
+  pub fn change(unique self, other: &i32) {
+    self.value = other;
+  }
+}
+fn main() {}

@@ -1,0 +1,33 @@
+struct Input {
+  read: &i32,
+  edit: &mut i32,
+}
+struct Output {
+  a: &i32,
+  b: &i32,
+  edit: &mut i32,
+}
+fn forward(input: Input) -> Output {
+  return Output {
+    a: input.read,
+    b: input.read,
+    edit: input.edit.move()
+  };
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = forward(Input {
+      read: &a,
+      edit: &mut b
+  });
+  print(result.a);
+  result.a.drop();
+  print(result.b);
+  let edit = &mut result.edit;
+  edit = 20;
+  result.drop();
+  a = 10;
+  print(a);
+  print(b);
+}

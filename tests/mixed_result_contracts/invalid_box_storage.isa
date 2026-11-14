@@ -1,0 +1,13 @@
+@import "std.box"
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let value = Box<View>::new(View {
+      read: &a,
+      edit: &mut b
+  });
+}

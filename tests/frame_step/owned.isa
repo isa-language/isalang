@@ -1,0 +1,17 @@
+@import "std.box"
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn main() {
+  let old = String::from("old");
+  let keep = String::from("keep");
+  marker();
+  print(old);
+  old.drop();
+  let next = String::from("next");
+  keep.push_str("!");
+  checkpoint();
+  print(keep);
+  print(next);
+}

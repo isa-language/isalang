@@ -215,7 +215,7 @@ class Slots {
     std::set<Location> result;
     auto base = i.slot == None ? std::nullopt : places.get(i.slot);
     if ((i.kind == I::FieldStore || i.kind == I::FieldTake || i.kind == I::FieldDrop) && base)
-      result.insert(field(*base, i.fieldIndex));
+      result.insert(fieldOperation(*base, i));
     if (i.kind == I::PayloadTake && base)
       result.insert(append(*base, i.payloadPath));
     if (i.kind == I::Move || i.kind == I::Drop)
@@ -247,7 +247,7 @@ class Slots {
           auto box = p.semantics.types.at(*type).representation == hir::Representation::GenericBox;
           result.insert(element(target, box ? 0 : None));
         }
-    if ((i.kind == I::Call || i.kind == I::ProtocolTransition || i.kind == I::ContainerCall) &&
+    if ((core::functionCall(i) || i.kind == I::ProtocolTransition || i.kind == I::ContainerCall) &&
         p.semantics.functions.at(i.function).consumesSelf && base)
       result.insert(*base);
     for (auto local : i.cleanup)
@@ -263,7 +263,7 @@ class Slots {
     if (i.kind == I::Move)
       install(state, destination, subtree(state, symbol(i.slot)));
     else if (i.kind == I::FieldTake && base)
-      install(state, destination, subtree(state, field(*base, i.fieldIndex)));
+      install(state, destination, subtree(state, fieldOperation(*base, i)));
     else if (i.kind == I::PayloadTake && base)
       install(state, destination, subtree(state, append(*base, i.payloadPath)));
     else if (i.kind == I::StructInit || i.kind == I::EnumConstruct) {
@@ -342,7 +342,7 @@ class Slots {
         } else
           collapse(state, *base, point);
       }
-    } else if ((i.kind == I::Call || i.kind == I::ProtocolTransition) && i.result != None &&
+    } else if ((core::functionCall(i) || i.kind == I::ProtocolTransition) && i.result != None &&
                !p.semantics.functions.at(i.function).returnsReference())
       opaque(state, i.type, destination);
 
@@ -361,7 +361,7 @@ class Slots {
       erase(state, value(i.args.at(0)));
     }
     if ((i.kind == I::FieldStore || i.kind == I::FieldTake || i.kind == I::FieldDrop) && base) {
-      auto target = field(*base, i.fieldIndex);
+      auto target = fieldOperation(*base, i);
       if (i.kind == I::FieldStore)
         install(state, target, subtree(state, value(i.args.at(0))));
       else
@@ -370,7 +370,7 @@ class Slots {
     if (i.kind == I::PayloadTake && base)
       erase(state, append(*base, i.payloadPath));
     bool consumes = i.kind == I::Move || i.kind == I::Drop;
-    if (i.kind == I::Call || i.kind == I::ProtocolTransition || i.kind == I::ContainerCall)
+    if (core::functionCall(i) || i.kind == I::ProtocolTransition || i.kind == I::ContainerCall)
       consumes |= p.semantics.functions.at(i.function).consumesSelf;
     if (consumes)
       erase(state, symbol(i.slot));

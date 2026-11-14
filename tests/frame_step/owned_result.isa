@@ -1,0 +1,26 @@
+@import "std.box"
+@import "std.env"
+fn choose() -> bool {
+  let arguments = env::args();
+  return arguments.len() == 1;
+}
+fn fallback() -> String {
+  return String::from("canceled");
+}
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn worker(text: String) -> String {
+  let old = String::from("old");
+  marker();
+  print(old);
+  old.drop();
+  text.push_str("!");
+  checkpoint();
+  return text.move();
+}
+fn main() {
+  let result = worker(String::from("returned"));
+  print(result);
+}

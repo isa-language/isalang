@@ -1,0 +1,31 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+fn bump(value: &mut i32) -> bool {
+  value = value + 1;
+  print(99);
+  return true;
+}
+fn forward(input: Views) -> Views {
+  let edit = &mut input.first;
+  if false && bump(edit) {
+    print(98);
+  }
+  if true || bump(edit) {
+    print(7);
+  }
+  edit = edit + 1;
+  return input.move();
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = forward(Views {
+      first: &mut a,
+      second: &mut b
+  });
+  result.drop();
+  print(a);
+  print(b);
+}

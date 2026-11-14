@@ -1,0 +1,11 @@
+struct View {
+  value: &mut i32,
+}
+impl View {
+  pub fn bad(unique self) {
+    let child = &mut self.value;
+    self.value.drop();
+    print(child);
+  }
+}
+fn main() {}

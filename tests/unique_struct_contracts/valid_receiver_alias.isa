@@ -1,0 +1,25 @@
+struct View {
+  value: &mut i32,
+}
+impl View {
+  pub fn set(unique self) {
+    let edit = &mut self.value;
+    edit = 42;
+  }
+  pub fn show(shared self) {
+    let read = &self.value;
+    print(read);
+  }
+}
+fn main() {
+  let data = 1;
+  let view = View {
+    value: &mut data
+  };
+  borrow unique view as edit {
+    edit.set();
+    edit.show();
+  }
+  view.drop();
+  print(data);
+}

@@ -1,0 +1,54 @@
+@import "std.box"
+@import "std.vec"
+struct Pair<T> {
+  count: i32,
+  left: T,
+  right: T,
+}
+struct Middle {
+  before: String,
+  pair: Pair<String>,
+  after: Box<String>,
+}
+struct Outer {
+  before: String,
+  middle: Middle,
+  after: Vec<String>,
+}
+fn marker() {}
+fn first() {
+  print(101);
+}
+fn second() {
+  print(202);
+}
+fn main() {
+  let data = Outer {
+    before: String::from("outer"),
+    middle: Middle {
+      before: String::from("middle"),
+      pair: Pair<String> {
+        count: 7,
+        left: String::from("left"),
+        right: String::from("right")
+      },
+      after: Box<String>::new(String::from("boxed"))
+    },
+    after: Vec<String>::new()
+  };
+  data.after.push(String::from("vector"));
+  let later = String::from("later");
+  marker();
+  let left = data.middle.pair.left.move();
+  first();
+  print(left);
+  print(data.middle.pair.right.as_str());
+  print(data.middle.pair.count);
+  data.middle.pair.count = 9;
+  data.middle.pair.left = String::from("again");
+  data.middle.pair.right.drop();
+  second();
+  print(data.middle.pair.left.as_str());
+  print(data.middle.pair.count);
+  print(later);
+}

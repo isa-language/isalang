@@ -1,0 +1,12 @@
+@import "std.box"
+fn marker() {}
+fn first() {}
+fn second() {}
+fn main() {
+  let text = String::from("late");
+  marker();
+  first();
+  let view = &text;
+  second();
+  print(view);
+}

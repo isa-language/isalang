@@ -1,0 +1,11 @@
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+fn wrap(a: &i32, b: &mut i32) -> View {
+  return View {
+    read: a,
+    edit: b
+  };
+}
+fn main() {}

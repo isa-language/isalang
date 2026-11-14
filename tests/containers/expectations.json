@@ -629,10 +629,10 @@
     "stdin": "",
     "stdout": ""
   },
-  "invalid_nested_owned_partial_store": {
-    "code": "E0430",
+  "valid_nested_owned_partial_store": {
+    "code": "",
     "stdin": "",
-    "stdout": ""
+    "stdout": "second\n"
   },
   "invalid_nested_owned_double_take": {
     "code": "E0301",
@@ -694,10 +694,10 @@
     "stdin": "",
     "stdout": ""
   },
-  "invalid_ordinary_owned_partial_store": {
-    "code": "E0430",
+  "valid_ordinary_owned_partial_store": {
+    "code": "",
     "stdin": "",
-    "stdout": ""
+    "stdout": "initialized\nagain\n"
   },
   "valid_protocol_field_transfer": {
     "code": "",

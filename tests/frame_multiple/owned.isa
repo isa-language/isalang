@@ -1,0 +1,47 @@
+@import "std.box"
+@import "std.vec"
+@import "std.env"
+fn marker() {}
+fn first() {
+  print(101);
+}
+fn second() {
+  print(202);
+}
+fn third() {
+  print(303);
+}
+fn choose() -> i32 {
+  let args = env::args();
+  return args.len() as i32;
+}
+fn main() -> i32 {
+  let text = String::from("start");
+  let stop = choose();
+  marker();
+  text.push_str("-one");
+  if stop == 1 {
+    print(text);
+    return 11;
+  }
+  first();
+  let values = Vec<String> {
+    text.move(),
+    "second"
+  };
+  if stop == 2 {
+    print(values.len());
+    return 12;
+  }
+  second();
+  let boxed = Box<String>::new(String::from("third"));
+  values.clear();
+  if stop == 3 {
+    print(boxed.get());
+    return 13;
+  }
+  third();
+  print(boxed.get());
+  print(values.len());
+  return 17;
+}

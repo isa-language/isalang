@@ -1,0 +1,41 @@
+struct Inner {
+  prefix: i32,
+  text: String,
+}
+struct Outer {
+  prefix: i32,
+  inner: Inner,
+  spare: String,
+}
+fn exercise(stop: bool) {
+  let inner = Inner::new();
+  inner.text = String::from("old");
+  let owner = Outer::new();
+  owner.inner = inner.move();
+  let view = &owner.inner.text;
+  print(view.len());
+  let edit = &mut owner.inner;
+  let old = edit.text.move();
+  print(old);
+  edit.text = String::from("restored");
+  let next = &edit.text;
+  print(next.len());
+  if stop {
+    return;
+  }
+  for i in 0..2 {
+    let removed = edit.text.move();
+    edit.text = String::from("loop");
+    removed.drop();
+    let current = &edit.text;
+    print(current.len());
+    if i == 0 {
+      continue;
+    }
+    break;
+  }
+}
+fn main() {
+  exercise(false);
+  exercise(true);
+}

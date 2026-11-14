@@ -1,0 +1,20 @@
+@import "std.buffer"
+struct View {
+  value: &mut i32,
+  owner: Buffer,
+}
+fn consume(view: View) {
+  let edit = &mut view.value;
+  edit = 42;
+  let owner = view.owner.move();
+  print(owner.len());
+  owner.release();
+}
+fn main() {
+  let a = 1;
+    consume(View {
+      value: &mut a,
+      owner: Buffer::new(3)
+  });
+  print(a);
+}

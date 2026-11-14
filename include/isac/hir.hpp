@@ -65,14 +65,16 @@ enum class Representation {
   StringRecord,
   InputRecord,
   GenericBox,
-  GenericVec
+  GenericVec,
+  FutureFrame
 };
 enum class DropGlue {
   Trivial,
   FreeAllocation,
   StringAllocation,
   InputAllocation,
-  ContainerElements
+  ContainerElements,
+  FutureFrame
 };
 struct Variant {
   VariantId id;
@@ -111,6 +113,7 @@ struct Type {
   bool foreignUnion = false;
   std::vector<TypeId> parameters = {};
   Access referenceAccess = Access::Shared;
+  FunctionId futureFunction = None;
 };
 struct Operation {
   OperationId id;
@@ -173,7 +176,11 @@ struct Expr {
     ArrayRepeat,
     FunctionAddress,
     IndirectCall,
-    StructInit
+    StructInit,
+    FutureCreate,
+    Await,
+    BlockOn,
+    ThreadCall
   } kind;
   Loc loc;
   bool inferredLiteral = false;
@@ -253,10 +260,13 @@ struct PayloadResultSource {
   ReferencePath path;
 };
 
+enum class ReferenceSourceKind { Parameter, Carrier };
 struct ReferenceSource {
   SymbolId parameter;
   ReferencePath path;
   SymbolId origin;
+
+  ReferenceSourceKind kind = ReferenceSourceKind::Parameter;
   auto operator<=>(const ReferenceSource &) const = default;
 };
 using ReferenceTransfers = std::map<ReferencePath, std::set<ReferenceSource>>;
@@ -270,6 +280,7 @@ struct Function {
   FunctionId id;
   std::string name;
   TypeId owner = None, result = Unit;
+  TypeId futureType = None;
   Access access = Access::Own;
   std::vector<SymbolId> params;
   std::vector<ParameterRegion> parameterRegions;
@@ -281,6 +292,9 @@ struct Function {
 
   std::vector<SymbolId> additionalResultOrigins;
   std::vector<PayloadResultSource> additionalPayloadSources;
+
+  std::optional<ReferenceTransfers> inferredTransfers;
+  bool transferInferencePending = false;
   std::vector<PayloadResultSource> payloadResultSources() const {
     auto sources = additionalPayloadSources;
     if (resultPayloadSource)
@@ -377,9 +391,14 @@ struct Program {
   std::optional<ReferenceInfo> functionReferenceResult(FunctionId) const;
   std::vector<BorrowedReference> borrowedReferences(TypeId) const;
   bool borrowedInputSupported(TypeId) const;
+  bool borrowedReceiverSupported(TypeId, Access) const;
   bool borrowedPayloadLayoutSupported(TypeId, Access) const;
+  bool borrowedResultLayoutSupported(TypeId) const;
+  Access referenceResultAccess(const Function &, const ReferencePath &) const;
+  bool referenceResultPresenceSupported(const Function &, const ReferenceTransfers &) const;
   bool referenceFreeValuePossible(TypeId) const;
   bool conditionalReferencePosition(TypeId, const ReferencePath &) const;
+  ReferenceTransfers referenceTransferCandidates(const Function &) const;
   ReferenceTransfers referenceTransfers(const Function &) const;
   bool rawPointer(TypeId t) const {
     return types.at(t).kind == Type::RawPointer;
@@ -441,36 +460,8 @@ struct Program {
           return true;
     return false;
   }
-  bool borrowedPayloadResultCompatible(TypeId input, TypeId result) const {
-    if (types.at(result).kind != Type::Enum || needsDrop(result))
-      return false;
-    const auto references = borrowedReferences(result);
-    for (const auto &stored : references)
-      if (stored.path.size() != 1 ||
-          stored.path[0].kind != ReferenceProjectionKind::VariantPayload ||
-          !borrowResultCompatible(input, stored.reference.referent))
-        return false;
-    return !references.empty();
-  }
 
-  bool exclusivePayloadResult(const Function &function) const {
-    if (function.external || function.foreignC || !function.intrinsic.empty() ||
-        function.intrinsicId != IntrinsicId::None || function.resultAccess != Access::Unique ||
-        !function.resultBorrowedContainer || function.resultOrigin >= symbols.size() ||
-        function.resultRegion == None || !function.additionalResultOrigins.empty() ||
-        !function.payloadResultSources().empty() || !function.payloadParameterRegions.empty() ||
-        !function.payloadInspectionParameters.empty() ||
-        types.at(function.result).kind != Type::Enum ||
-        !referenceCapability(function.result, Access::Unique) ||
-        borrowedPayloadPaths(function.result).size() != 1 ||
-        std::find(function.params.begin(), function.params.end(), function.resultOrigin) ==
-            function.params.end())
-      return false;
-    const auto &input = symbols[function.resultOrigin];
-    const auto reference = symbolReference(function.resultOrigin);
-    return input.reference && reference && reference->capability == Access::Unique &&
-           borrowedPayloadResultCompatible(reference->referent, function.result);
-  }
+  bool exclusivePayloadResult(const Function &function) const;
 
   std::set<VariantId> unborrowedVariants(TypeId container) const {
     std::set<VariantId> result;
@@ -513,6 +504,16 @@ struct Program {
         if (!child)
           return {};
         type = *child;
+      } else if (part.kind == ReferenceProjectionKind::Element &&
+                 (dynamicContainer(type) || shape.kind == Type::Array ||
+                  shape.kind == Type::Slice)) {
+
+        if (shape.representation == Representation::GenericBox) {
+          if (part.index != 0)
+            return {};
+        } else if (part.index != None && (shape.kind != Type::Array || part.index >= shape.count))
+          return {};
+        type = shape.element;
       } else
         return {};
     }
@@ -568,9 +569,8 @@ struct Program {
   bool ownedFieldType(TypeId t) const {
     if (heap(t))
       return true;
-    if (types[t].protocol != None)
-      return false;
-    return types[t].kind == Type::Structure && needsDrop(t);
+
+    return types[t].kind == Type::Structure && (needsDrop(t) || containsProtocolFields(t));
   }
 
   bool localCarrierType(TypeId t) const {
@@ -652,9 +652,16 @@ struct Program {
            types[t].kind == Type::Enum || reference(t) || types[t].kind == Type::Slice;
   }
 };
+void inferReferenceTransfers(Program &);
 void printReferenceContracts(const Program &, const Function &, std::ostream &);
 }
 hir::Program resolve(const ast::Program &, TargetInfo target = {});
+namespace hir {
+
+TypeId instantiateHeapContainer(Program &, GenericDeclId, const std::vector<TypeId> &, Loc);
+
+FunctionId owningBoxIntrinsic(Program &, TypeId, IntrinsicId, Loc);
+}
 void printHIR(const hir::Program &, std::ostream &);
 hir::Expr evaluateConstant(const hir::Expr &, unsigned pointerWidth);
 }

@@ -1,0 +1,13 @@
+struct View {
+  value: &mut String,
+}
+fn consume(view: View) {
+  view.value.push_str("!");
+}
+fn main() {
+  let a = String::from("hello");
+    consume(View {
+      value: &mut a
+  });
+  print(a);
+}

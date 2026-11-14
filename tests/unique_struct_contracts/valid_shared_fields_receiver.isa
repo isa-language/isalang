@@ -1,0 +1,28 @@
+struct View {
+  value: &i32,
+  owner: String,
+}
+impl View {
+  pub fn update(unique self) {
+    self.owner.push_str("!");
+  }
+  pub fn again(unique self) -> Option<&i32> {
+    return Option::Some(self.value);
+  }
+}
+fn main() {
+  let data = 42;
+  let view = View {
+    value: &data,
+    owner: String::from("owned")
+  };
+  view.update();
+  let result = view.again();
+  view.drop();
+  match result {
+    Some(value) => print(value),
+    None => {}
+  }
+  data = 43;
+  print(data);
+}

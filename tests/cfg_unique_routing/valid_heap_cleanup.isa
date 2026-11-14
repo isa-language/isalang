@@ -1,0 +1,37 @@
+struct Views {
+  first: &mut String,
+  second: &mut String,
+  owner: String,
+}
+fn forward(input: Views) -> Views {
+  let i = 0;
+  while i < 2 {
+    i = i + 1;
+    let local = String::from("iteration");
+    if i == 1 {
+      continue;
+    }
+    break;
+  }
+  return Views {
+    first: input.second.move(),
+    second: input.first.move(),
+    owner: input.owner.move()
+  };
+}
+fn main() {
+  let a = String::from("a");
+  let b = String::from("b");
+    let result = forward(Views {
+      first: &mut a,
+      second: &mut b,
+      owner: String::from("owner")
+  });
+  let x = &mut result.first;
+  x.push_str("!");
+  let y = &mut result.second;
+  y.push_str("?");
+  result.drop();
+  print(a);
+  print(b);
+}

@@ -1,0 +1,13 @@
+@import "std.box"
+@import "std.buffer"
+fn marker() {}
+fn checkpoint() {}
+fn main() {
+  let text = String::from("protocol");
+  marker();
+  let buffer = Buffer::new(2);
+  checkpoint();
+  buffer.write(0, 12);
+  print(text);
+  buffer.release();
+}

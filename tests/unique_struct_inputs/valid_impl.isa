@@ -1,0 +1,19 @@
+struct View<T> {
+  value: &mut T,
+}
+struct Sink<T> {
+  value: T,
+}
+impl<T> Sink<T> {
+  pub fn discard(input: View<T>) {
+    input.drop();
+  }
+}
+fn main() {
+  let a = 1;
+    Sink<i32>::discard(View<i32> {
+      value: &mut a
+  });
+  a = 42;
+  print(a);
+}

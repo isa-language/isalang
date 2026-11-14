@@ -1,0 +1,26 @@
+fn inspect(value: &i32) {
+  print(value);
+}
+fn run(flag: bool) -> i32 {
+  let data = 1;
+  let i = 0;
+  while i<3 {
+    i = i + 1;
+    let read = &data;
+    inspect(read);
+    if i == 1 {
+      continue;
+    }
+    if flag {
+      return i;
+    }
+    break;
+  }
+  let edit = &mut data;
+  edit = 20;
+  return data;
+}
+fn main() {
+  print(run(false));
+  print(run(true));
+}

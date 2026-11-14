@@ -1,0 +1,24 @@
+@import "std.box"
+@import "std.env"
+fn choose() -> bool {
+  let args = env::args();
+  return args.len() == 1;
+}
+fn marker() {}
+fn checkpoint() {
+  print(200);
+}
+fn main() -> i32 {
+  let text = String::from("root");
+  let flag = choose();
+  marker();
+  if flag {
+    print(text);
+    return 7;
+  }
+  else {
+    checkpoint();
+    print(text);
+    return 9;
+  }
+}

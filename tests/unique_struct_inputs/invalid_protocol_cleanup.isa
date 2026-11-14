@@ -1,0 +1,10 @@
+@import "std.buffer"
+struct View {
+  value: &mut i32,
+  owner: Buffer,
+}
+fn consume(view: View) {
+  let edit = &mut view.value;
+  edit = 42;
+}
+fn main() {}

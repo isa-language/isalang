@@ -1,0 +1,11 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+fn first(input: Views) -> Views {
+  return second(input.move());
+}
+fn second(input: Views) -> Views {
+  return first(input.move());
+}
+fn main() {}

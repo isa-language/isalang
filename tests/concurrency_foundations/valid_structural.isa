@@ -1,0 +1,33 @@
+struct Point {
+  x: i32,
+  y: i32,
+}
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+enum Choice<T> {
+  Value(T),
+  Empty,
+}
+fn main() {
+  let pair = Pair<i32> {
+    first: 10,
+    second: 20
+  };
+  let point = Point {
+    x: pair.first,
+    y: pair.second
+  };
+  let values = [[1, 2], [3, 4]];
+  let choice = Choice<i32>::Value(point.x + point.y);
+  match choice {
+    Value(value) => {
+      print(value);
+    },
+    Empty => {
+      print(0);
+    }
+  }
+  print(values[1][1]);
+}

@@ -1,0 +1,25 @@
+@import "std.buffer"
+struct Inner {
+  buffer: Buffer,
+}
+struct Outer {
+  inner: Inner,
+}
+fn marker() {}
+fn main() {
+  let inner = Inner::new();
+  inner.buffer = Buffer::new(2);
+  let outer = Outer::new();
+  outer.inner = inner.move();
+  marker();
+  outer.inner.buffer.write(0, 42);
+  print(outer.inner.buffer.read(0));
+  let moved_inner = outer.inner.move();
+  let extracted = moved_inner.buffer.move();
+  marker();
+  extracted.release();
+  marker();
+  moved_inner.buffer = extracted.move();
+  outer.inner = moved_inner.move();
+  marker();
+}

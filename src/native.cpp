@@ -125,11 +125,23 @@ void compileNative(const std::string &ir, const std::string &output, NativeOptio
   arguments.push_back(levels[static_cast<unsigned>(options.optimization)]);
   if (!options.target.triple.empty())
     arguments.push_back("--target=" + options.target.triple);
-  if (options.sanitize || options.counters)
-    arguments.insert(arguments.end(), {"-x", "c", ISAC_RUNTIME_SOURCE, ISAC_ALLOCATOR_SOURCE, "-I",
-                                       ISAC_RUNTIME_INCLUDE});
-  else
+  if (options.sanitize || options.counters) {
+    arguments.insert(arguments.end(), {"-x", "c", ISAC_RUNTIME_SOURCE});
+    if (std::string_view(ISAC_ALLOCATOR_SOURCE).size())
+      arguments.push_back(ISAC_ALLOCATOR_SOURCE);
+    if (options.threads) {
+      if (!std::filesystem::exists(ISAC_THREAD_SOURCE))
+        throw std::runtime_error("selected runtime lacks the scoped thread source ABI");
+      arguments.push_back(ISAC_THREAD_SOURCE);
+    }
+    arguments.insert(arguments.end(), {"-I", ISAC_RUNTIME_INCLUDE});
+    if (std::string_view(ISAC_ALLOCATOR_SOURCE).empty())
+
+      arguments.insert(arguments.end(), {"-x", "none", ISAC_RUNTIME_LIBRARY});
+  } else
     arguments.insert(arguments.end(), {"-x", "none", ISAC_RUNTIME_LIBRARY});
+  if (options.threads)
+    arguments.push_back("-pthread");
   if (!options.linkInputs.empty()) {
     arguments.push_back("-x");
     arguments.push_back("none");

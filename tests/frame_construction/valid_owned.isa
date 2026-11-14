@@ -1,0 +1,19 @@
+fn marker(value: i32) -> i32 {
+  return value;
+}
+fn run(flag: bool) -> i32 {
+  let one = String::from("one");
+  let two = String::from("two");
+  let number = 10;
+  let copy = marker(number);
+  print(one);
+  print(two);
+  if flag {
+    return copy;
+  }
+  return copy + 1;
+}
+fn main() {
+  print(run(false));
+  print(run(true));
+}

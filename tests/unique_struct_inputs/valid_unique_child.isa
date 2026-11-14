@@ -1,0 +1,20 @@
+struct View {
+  value: &mut i32,
+}
+struct Child {
+  value: &mut i32,
+}
+fn consume(view: View) {
+  let child = Child {
+    value: &mut view.value
+  };
+  let edit = &mut child.value;
+  edit = 42;
+}
+fn main() {
+  let a = 1;
+    consume(View {
+      value: &mut a
+  });
+  print(a);
+}

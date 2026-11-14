@@ -1,0 +1,19 @@
+@import "std.buffer"
+struct Input {
+  first: &mut i32,
+  second: &mut i32,
+  owner: Buffer,
+}
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+fn forward(input: Input) -> Views {
+  loop {
+    return Views {
+      first: input.second.move(),
+      second: input.first.move()
+    };
+  }
+}
+fn main() {}

@@ -1,0 +1,12 @@
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+fn forward(input: View) -> View {
+  let local = 3;
+  return View {
+    read: &local,
+    edit: input.edit.move()
+  };
+}
+fn main() {}

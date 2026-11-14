@@ -1,0 +1,28 @@
+@import "std.box"
+@import "std.vec"
+@import "std.env"
+struct Payload<T> {
+  item: T,
+}
+fn select_exit() -> bool {
+  print(101);
+  let arguments = env::args();
+  return arguments.len() > 1;
+}
+fn marker() {}
+fn main() {
+  let stop = select_exit();
+  let values = Vec<String>::new();
+  values.push(String::from("vec"));
+  let boxed = Box<String>::new(String::from("box"));
+  let payload = Payload<String> {
+    item: String::from("nested")
+  };
+  marker();
+  print(values.len());
+  print(boxed.get());
+  print(payload.item.as_str());
+  if stop {
+    print(17);
+  }
+}

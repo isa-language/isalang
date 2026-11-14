@@ -1,0 +1,16 @@
+struct Input {
+  number: &mut i32,
+  flag: &bool,
+}
+struct Output {
+  number: &mut i32,
+  flag: &bool,
+}
+fn forward(input: Input) -> Output {
+  let local = false;
+  return Output {
+    number: input.number.move(),
+    flag: &local
+  };
+}
+fn main() {}

@@ -1,0 +1,46 @@
+@import "std.box"
+@import "std.env"
+struct Pair {
+  left: String,
+  right: String,
+}
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn choose() -> bool {
+  let arguments = env::args();
+  return arguments.len() == 1;
+}
+fn fallback() -> String {
+  return String::from("canceled");
+}
+fn worker(text: String) -> String {
+  let pair = Pair {
+    left: String::from("left"),
+    right: String::from("right")
+  };
+  let stop = choose();
+  marker();
+  let first = pair.left.move();
+  print(first);
+  first.drop();
+  if stop {
+    borrow shared text as view {
+      print(view);
+    }
+    text.push_str("-early");
+    print(303);
+    return text.move();
+  }
+  let tail = pair.right.move();
+  pair.drop();
+  tail.drop();
+  checkpoint();
+  text.push_str("-late");
+  return text.move();
+}
+fn main() {
+  let result = worker(String::from("returned"));
+  print(result);
+}

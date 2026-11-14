@@ -1,0 +1,17 @@
+@import "std.buffer"
+struct Input {
+  read: &i32,
+  edit: &mut i32,
+  owner: Buffer,
+}
+struct Output {
+  read: &i32,
+  edit: &mut i32,
+}
+fn forward(input: Input) -> Output {
+  return Output {
+    read: input.read,
+    edit: input.edit.move()
+  };
+}
+fn main() {}

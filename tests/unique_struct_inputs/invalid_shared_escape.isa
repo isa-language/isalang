@@ -1,0 +1,12 @@
+struct View {
+  value: &mut i32,
+}
+struct Read {
+  value: &i32,
+}
+fn escape(view: View) -> Read {
+  return Read {
+    value: &view.value
+  };
+}
+fn main() {}

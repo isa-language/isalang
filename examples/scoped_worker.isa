@@ -1,0 +1,15 @@
+fn adjust(value: i32) -> i32 {
+  return value * 3 + 1;
+}
+fn calculate(value: i32) -> i32 {
+  let total = 0;
+  for let i = 0;
+  i < value;
+  i++ {
+    total = total + adjust(i);
+  }
+  return total;
+}
+fn main() {
+  @println("{}", calculate(10));
+}

@@ -134,7 +134,7 @@ public:
       graph.symbolRegions[loan.carrier][{}] = {loan.region};
 
     for (auto *i : instructions)
-      if (i && (i->kind == I::Call || i->kind == I::ContainerCall) && i->slot != None &&
+      if (i && (core::functionCall(*i) || i->kind == I::ContainerCall) && i->slot != None &&
           graph.blocks[i->semanticPoint].reachable &&
           !program.semantics.symbols.at(i->slot).reference) {
         const auto &function = program.semantics.functions[i->function];
@@ -186,7 +186,7 @@ public:
               position.insert(position.end(), path.begin(), path.end());
               value[position].insert(regions.begin(), regions.end());
             }
-        } else if (i->kind == I::Call || i->kind == I::ContainerCall) {
+        } else if (core::functionCall(*i) || i->kind == I::ContainerCall) {
           const auto &contract = signatures.at(i->function);
           if (!contract.result.empty())
             value = hir::substituteRegions(contract.result, instantiate(*i));
@@ -252,7 +252,7 @@ public:
                                          {},
                                          ConstraintReason::FunctionResult,
                                          i->loc});
-      if (i->kind != I::Call && i->kind != I::ContainerCall)
+      if (!core::functionCall(*i) && i->kind != I::ContainerCall)
         continue;
       const auto &contract = signatures.at(i->function);
       if (!contract.inputs.empty() || !contract.result.empty())
@@ -267,7 +267,10 @@ public:
     for (const auto &loan : graph.loans) {
       const auto &symbol = program.semantics.symbols.at(loan.place.root);
 
-      if (symbol.reference || program.semantics.containsReferences(symbol.type))
+      const auto *creation = instructions.at(loan.created.block);
+      if (symbol.reference ||
+          (program.semantics.containsReferences(symbol.type) &&
+           (!creation || !core::storedFieldReborrow(program.semantics, *creation))))
         continue;
       owners.insert(symbol.id);
       graph.ownerBounds[loan.region].insert(symbol.id);
@@ -584,10 +587,10 @@ void validateArguments(const core::Program &program) {
     std::function<void(const std::vector<I> &)> values;
     values = [&](const auto &body) {
       for (const auto &i : body) {
-        if (i.kind == I::Call || i.kind == I::ContainerCall)
+        if (core::functionCall(i) || i.kind == I::ContainerCall)
           calls[i.semanticPoint] = &i;
         bool reference = i.kind == I::ReferenceArgument ||
-                         ((i.kind == I::Call || i.kind == I::ContainerCall) &&
+                         ((core::functionCall(i) || i.kind == I::ContainerCall) &&
                           program.semantics.functions[i.function].returnsReference());
         if (i.result != None) {
           auto definition = graph.valueDefinitions.find(i.result);

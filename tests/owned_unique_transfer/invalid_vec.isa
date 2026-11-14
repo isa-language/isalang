@@ -1,0 +1,6 @@
+@import "std.vec"
+fn main() {
+  let data = 1;
+  let values = Vec<&mut i32>::new();
+  values.push(&mut data);
+}

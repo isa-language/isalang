@@ -1,0 +1,26 @@
+struct View<T> {
+  value: &mut T,
+}
+struct Outer {
+  inner: View<i32>,
+  owner: String,
+}
+fn wrap(input: &mut i32) -> Outer {
+  return Outer {
+    inner: View<i32> {
+      value: input
+    },
+    owner: String::from("owned")
+  };
+}
+fn forward(input: &mut i32) -> Outer {
+  return wrap(input);
+}
+fn main() {
+  let data = 1;
+  let view = forward(&mut data);
+  let edit = &mut view.inner.value;
+  edit = 42;
+  view.drop();
+  print(data);
+}

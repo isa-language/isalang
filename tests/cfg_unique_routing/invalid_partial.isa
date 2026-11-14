@@ -1,0 +1,15 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+struct View {
+  value: &mut i32,
+}
+fn forward(input: Views) -> Views {
+  loop {
+    input.first.drop();
+    break;
+  }
+  return input.move();
+}
+fn main() {}

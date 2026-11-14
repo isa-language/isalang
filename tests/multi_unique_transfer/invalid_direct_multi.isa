@@ -1,0 +1,11 @@
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn forward(a: &mut i32, b: &mut bool) -> Views {
+  return Views {
+    number: a,
+    flag: b
+  };
+}
+fn main() {}

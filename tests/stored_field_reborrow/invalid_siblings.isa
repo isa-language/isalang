@@ -1,0 +1,16 @@
+struct View {
+  left: &mut i32,
+  right: &mut i32,
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+  let view = View {
+    left: &mut a,
+    right: &mut b
+  };
+  let first = &mut view.left;
+  let second = &mut view.right;
+  print(first);
+  print(second);
+}

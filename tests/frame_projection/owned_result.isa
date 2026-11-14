@@ -1,0 +1,55 @@
+@import "std.box"
+@import "std.vec"
+@import "std.env"
+struct Pair<T> {
+  first: T,
+  second: T,
+}
+fn marker() {}
+fn first() {
+  print(101);
+}
+fn second() {
+  print(202);
+}
+fn choose() -> bool {
+  let args = env::args();
+  return args.len() == 1;
+}
+fn choose_condition() -> bool {
+  return !choose();
+}
+fn fallback() -> Result<String, i32> {
+  return Result::Err(9);
+}
+fn worker(text: String) -> Result<String, i32> {
+  let pair = Pair<String> {
+    first: String::from("first"),
+    second: String::from("second")
+  };
+  let values = Vec<String> {
+    "vector"
+  };
+  let stop = choose();
+  marker();
+  let prefix = pair.first.move();
+  first();
+  print(prefix);
+  prefix.drop();
+  if stop {
+    return Result::Ok(text.move());
+  }
+  pair.first = String::from("again");
+  pair.second.drop();
+  second();
+  print(values.len());
+  print(pair.first.as_str());
+  return Result::Err(7);
+}
+fn main() {
+  let result = worker(String::from("returned"));
+  match result.move() {
+    Result::Ok(text) => print(text),
+    Result::Err(code) => print(code),
+  }
+}

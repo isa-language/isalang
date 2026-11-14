@@ -1,0 +1,23 @@
+struct View<T> {
+  value: &mut T,
+}
+struct Outer {
+  inner: View<i32>,
+  owner: String,
+}
+fn consume(view: Outer) {
+  let edit = &mut view.inner.value;
+  edit = 42;
+  let owner = view.owner.move();
+  print(owner);
+}
+fn main() {
+  let data = 1;
+    consume(Outer {
+      inner: View<i32> {
+        value: &mut data
+      },
+      owner: String::from("owned")
+  });
+  print(data);
+}

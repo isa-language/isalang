@@ -1,0 +1,13 @@
+struct Input {
+  value: &mut String,
+  owner: String,
+}
+struct View {
+  value: &mut String,
+}
+fn forward(input: Input) -> View {
+  return View {
+    value: &mut input.owner
+  };
+}
+fn main() {}

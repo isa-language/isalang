@@ -1,0 +1,10 @@
+struct View {
+  value: &mut i32,
+}
+fn bad(input: &mut i32) -> View {
+  let data = 1;
+  return View {
+    value: &mut data
+  };
+}
+fn main() {}

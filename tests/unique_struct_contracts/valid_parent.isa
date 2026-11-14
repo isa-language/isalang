@@ -1,0 +1,19 @@
+struct View {
+  value: &mut i32,
+}
+fn wrap(input: &mut i32) -> View {
+  return View {
+    value: input
+  };
+}
+fn main() {
+  let data = 1;
+  let parent = &mut data;
+  let view = wrap(parent);
+  let moved = view.move();
+  let edit = moved.value.move();
+  edit = 42;
+  moved.drop();
+  parent = 43;
+  print(parent);
+}

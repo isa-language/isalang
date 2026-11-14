@@ -1,0 +1,13 @@
+@import "std.box"
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn main() -> i32 {
+  let text = String::from("scalar");
+  marker();
+  print(text);
+  checkpoint();
+  print(text.len());
+  return 23;
+}

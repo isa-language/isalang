@@ -1,0 +1,30 @@
+struct View<T> {
+  value: &mut T,
+}
+struct Outer<T> {
+  inner: View<T>,
+  owner: String,
+}
+impl<T> Outer<T> {
+  pub fn set(unique self, value: T) {
+    let edit = &mut self.inner.value;
+    edit = value;
+  }
+  pub fn show(shared self) {
+    let read = &self.inner.value;
+    print(read);
+  }
+}
+fn main() {
+  let data = 1;
+  let view = Outer<i32> {
+    inner: View<i32> {
+      value: &mut data
+    },
+    owner: String::from("outer")
+  };
+  view.set(42);
+  view.show();
+  view.drop();
+  print(data);
+}

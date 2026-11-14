@@ -1,0 +1,13 @@
+@import "std.box"
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn main() {
+  let data = 1;
+  let flag = false;
+    let value = Box<Views>::new(Views {
+      number: &mut data,
+      flag: &mut flag
+  });
+}

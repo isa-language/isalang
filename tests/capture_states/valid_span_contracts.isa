@@ -1,0 +1,21 @@
+@import "std.vec"
+fn inspect(values: &i32[]) -> i32 {
+  return values[0];
+}
+fn edit(values: &mut i32[]) {
+  values[0] = 42;
+}
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(1);
+  values.push(2);
+  let view = values.as_slice();
+  print(inspect(view));
+  let change = values.as_mut_slice();
+  edit(change);
+  print(values.at_copy(0));
+  let array = [10, 20];
+  print(inspect(&array));
+  edit(&mut array);
+  print(array[0]);
+}

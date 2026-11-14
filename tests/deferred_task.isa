@@ -1,0 +1,38 @@
+@import "std.box"
+fn checkpoint_one() {
+  @println("checkpoint one");
+}
+fn checkpoint_two() {
+  @println("checkpoint two");
+}
+fn input_one() -> String {
+  return String::from("x");
+}
+fn input_two() -> String {
+  return String::from("y");
+}
+fn output(text: String) {
+  print(text);
+}
+fn work(seed: i32, text: String) -> String {
+  @println("begin {}", seed);
+  text.push_str("A");
+  if seed == 0 {
+    return text.move();
+  }
+  checkpoint_one();
+  text.push_str("B");
+  checkpoint_two();
+  text.push_str("C");
+  return text.move();
+}
+fn empty() -> i32 {
+  @println("empty body");
+  return 7;
+}
+fn unit() {
+  @println("unit body");
+}
+fn main() {
+  print(work(1, input_one()));
+}

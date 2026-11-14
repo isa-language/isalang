@@ -1,0 +1,34 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+fn forward(input: Views) -> Views {
+  for let i = 0;
+  i < 5;
+  i++ {
+    if i == 1 {
+      continue;
+    }
+    if i == 3 {
+      break;
+    }
+    let edit = &mut input.first;
+    edit = edit + 1;
+  }
+  return input.move();
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = forward(Views {
+      first: &mut a,
+      second: &mut b
+  });
+  let x = &mut result.first;
+  x = x + 10;
+  let y = &mut result.second;
+  y = y + 20;
+  result.drop();
+  print(a);
+  print(b);
+}

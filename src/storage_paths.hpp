@@ -5,6 +5,8 @@ namespace isac::storage::detail {
 using Path = hir::ReferencePath;
 Location append(Location, const Path &);
 Location field(Location, uint32_t);
+
+Location fieldOperation(Location, const core::Inst &);
 Location element(Location, uint32_t = None);
 bool within(const Location &, const Location &);
 bool overlaps(const Location &, const Location &);

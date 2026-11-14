@@ -1,0 +1,57 @@
+struct Views {
+  first: Option<&mut i32>,
+  second: Option<&mut i32>,
+}
+fn select(input: Views) -> Option<&mut i32> {
+  let selected = input.second.move();
+  match selected {
+    Some(edit) => {
+      return Option::Some(edit);
+    },
+    None => {
+      return Option::None;
+    },
+  }
+}
+fn exercise(empty: bool) {
+  let a = 1;
+  let b = 2;
+  let x = &mut a;
+  let y = &mut b;
+  if empty {
+      let output = select(Views {
+        first: Option::Some(x),
+        second: Option::None
+    });
+    x = 10;
+    match output {
+      Some(edit) => {
+        edit = 20;
+      },
+      None => {
+        print(7);
+      }
+    }
+  } else {
+      let output = select(Views {
+        first: Option::Some(x),
+        second: Option::Some(y)
+    });
+    x = 10;
+    match output {
+      Some(edit) => {
+        edit = 20;
+      },
+      None => {
+        print(7);
+      }
+    }
+  }
+  y = 21;
+  print(x);
+  print(y);
+}
+fn main() {
+  exercise(false);
+  exercise(true);
+}

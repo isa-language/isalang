@@ -1,0 +1,22 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+struct View {
+  value: &mut i32,
+}
+fn select(input: Views, flag: bool) -> View {
+  match flag {
+    true => {
+      return View {
+        value: input.first.move()
+      };
+    },
+    false => {
+      return View {
+        value: input.second.move()
+      };
+    },
+  }
+}
+fn main() {}

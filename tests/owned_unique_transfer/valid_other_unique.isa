@@ -1,0 +1,27 @@
+struct Input {
+  number: &mut i32,
+  flag: &mut bool,
+}
+struct View {
+  value: &mut i32,
+}
+fn forward(input: Input) -> View {
+  let edit = &mut input.flag;
+  edit = true;
+  return View {
+    value: input.number.move()
+  };
+}
+fn main() {
+  let data = 1;
+  let flag = false;
+    let result = forward(Input {
+      number: &mut data,
+      flag: &mut flag
+  });
+  print(flag);
+  let edit = &mut result.value;
+  edit = 42;
+  result.drop();
+  print(data);
+}

@@ -1,0 +1,13 @@
+@import "std.box"
+fn marker() {}
+fn main() {
+  let text = String::from("regions");
+  let before = &text;
+  print(before);
+  marker();
+  borrow shared text as view {
+    print(view);
+  }
+  text.push_str("!");
+  print(text);
+}

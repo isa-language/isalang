@@ -1,0 +1,10 @@
+struct View {
+  value: &mut i32,
+}
+fn consume(view: View, other: &i32) {}
+fn main() {
+  let data = 1;
+    consume(View {
+      value: &mut data
+  }, &data);
+}

@@ -1,6 +1,10 @@
 #include "isac/erasure.hpp"
+#include "isac/execution.hpp"
+#include "isac/async.hpp"
 #include "isac/ffi.hpp"
 #include <algorithm>
+#include <functional>
+#include <map>
 #include <unordered_map>
 namespace isac {
 namespace {
@@ -10,6 +14,8 @@ class Eraser {
   std::unordered_map<ValueId, runtime::Value> values;
   std::unordered_map<ValueId, TypeId> coreTypes;
   std::unordered_map<SymbolId, runtime::Value> slots;
+
+  std::unordered_map<SymbolId, runtime::Value> bindingCells;
   std::unordered_map<runtime::Value, runtime::Type> runtimeTypes;
   runtime::Value returnStorage = runtime::NoValue;
   TypeId returnType = Unit;
@@ -34,6 +40,57 @@ class Eraser {
     if (result.kind == T::Buffer)
       result.dynamicOffset = true;
     return result;
+  }
+  T bindingType(SymbolId id) {
+    const auto &symbol = core.semantics.symbols.at(id);
+    const auto tid = symbol.type;
+    const bool borrowed =
+        symbol.reference || (symbol.receiver && (scalar(tid) || symbol.access != Access::Own));
+    if (!core.semantics.linear(tid) && tid != RawPtr && tid != Str) {
+      T storage{T::Buffer, 1, 64};
+      storage.dynamicOffset = borrowed;
+      return storage;
+    }
+    return borrowed ? referenceType(tid) : type(tid);
+  }
+  void bindSlot(std::vector<I> &out, SymbolId id, runtime::Value value) {
+    auto found = bindingCells.find(id);
+    if (found == bindingCells.end()) {
+      slots[id] = value;
+      return;
+    }
+    auto address = value;
+    if (runtimeTypes.at(value).kind == T::Buffer) {
+      I pointer{};
+      pointer.kind = I::Address;
+      pointer.type = {T::Pointer, 1};
+      pointer.args = {value};
+      address = emit(out, pointer);
+      if (bindingType(id).width == 0) {
+        I length{};
+        length.kind = I::Length;
+        length.type = type(USize);
+        length.args = {value};
+        store(out, found->second, emit(out, length), 1);
+      }
+    }
+    store(out, found->second, address);
+  }
+  runtime::Value slot(std::vector<I> &out, SymbolId id) {
+    auto found = bindingCells.find(id);
+    if (found == bindingCells.end())
+      return slots.at(id);
+    auto pointer = load(out, found->second, 0, {T::Pointer, 1});
+    auto target = bindingType(id);
+    if (target.kind != T::Buffer)
+      return pointer;
+    I view{};
+    view.kind = I::AddressView;
+    view.type = target;
+    view.args = {pointer};
+    if (target.width == 0)
+      view.args.push_back(load(out, found->second, 1, type(USize)));
+    return emit(out, view);
   }
   runtime::Value referenceView(std::vector<I> &out, runtime::Value value, TypeId t) {
     auto target = referenceType(t);
@@ -234,15 +291,22 @@ class Eraser {
     }
   }
   void storeFieldValue(std::vector<I> &out, runtime::Value destination, uint32_t offset, TypeId tid,
-                       runtime::Value source) {
+                       runtime::Value source, const core::FieldDropPlan &plan = {}) {
     if (auto words = recordWords(tid)) {
       auto record = load(out, destination, offset, {T::Pointer, 1});
       copyRecord(out, source, words, record);
     } else if (type(tid).kind == T::Buffer &&
                core.semantics.types[tid].kind == hir::Type::Structure) {
-      for (const auto &field : core.semantics.types[tid].fields)
+      const auto &fields = core.semantics.types[tid].fields;
+      for (uint32_t index = 0; index < fields.size(); ++index) {
+        const auto &field = fields[index];
+        const auto child =
+            plan.fields.contains(index) ? plan.fields.at(index) : core::FieldDropPlan{};
+        if (child.skip)
+          continue;
         storeFieldValue(out, destination, offset + field.offset, field.type,
-                        project(out, source, field.offset, field.type));
+                        project(out, source, field.offset, field.type), child);
+      }
     } else
       writeElement(out, destination, source, tid, offset);
   }
@@ -267,6 +331,16 @@ class Eraser {
     }
     return value;
   }
+  uint32_t fieldOffset(const core::Inst &i) {
+    auto type = core.semantics.symbols[i.slot].type;
+    uint32_t offset = 0;
+    for (auto index : i.fieldPath) {
+      const auto &field = core.semantics.types[type].fields.at(index);
+      offset += field.offset;
+      type = field.type;
+    }
+    return offset + core.semantics.types[type].fields.at(i.fieldIndex).offset;
+  }
   runtime::Value abi(std::vector<I> &out, const std::string &callee, T result,
                      std::vector<runtime::Value> args) {
     I call{};
@@ -275,6 +349,114 @@ class Eraser {
     call.type = result;
     call.args = std::move(args);
     return emit(out, call, result.kind != T::Void);
+  }
+  runtime::Value address(std::vector<I> &out, runtime::Value value) {
+    if (runtimeTypes.at(value).kind == T::Pointer)
+      return value;
+    I pointer{};
+    pointer.kind = I::Address;
+    pointer.type = {T::Pointer, 1};
+    pointer.args = {value};
+    return emit(out, pointer);
+  }
+  runtime::Value callOutput(std::vector<I> &out, TypeId result) {
+    I alloc{};
+    alloc.kind = recordWords(result) ? I::RecordAlloc : I::Alloc;
+    alloc.literal = recordWords(result);
+    alloc.type = resultStorageType(result);
+    return emit(out, alloc);
+  }
+  runtime::Value logicalOutput(std::vector<I> &out, runtime::Value storage, TypeId result) {
+    if (runtimeTypes.at(storage).kind != T::Buffer || runtimeTypes.at(storage) == type(result))
+      return storage;
+    I view{};
+    view.kind = I::AddressView;
+    view.type = type(result);
+    view.args = {address(out, storage)};
+    return emit(out, view);
+  }
+  std::string threadEntry(FunctionId id) {
+    return "__isac_thread_entry_" + std::to_string(id);
+  }
+  std::string threadGetter(FunctionId id) {
+    return "__isac_thread_get_" + std::to_string(id);
+  }
+  void threadCall(std::vector<I> &out, const core::Inst &call,
+                  const std::vector<runtime::Value> &args) {
+    I alloc{};
+    alloc.kind = I::Alloc;
+    alloc.type = {T::Buffer, static_cast<uint32_t>(1 + 2 * args.size()), 64};
+    auto context = emit(out, alloc);
+    for (uint32_t n = 0; n < args.size(); ++n) {
+      const auto shape = runtimeTypes.at(args[n]);
+      store(out, context, shape.kind == T::Buffer ? address(out, args[n]) : args[n], 1 + 2 * n);
+      if (shape.kind == T::Buffer && shape.width == 0) {
+        I length{};
+        length.kind = I::Length;
+        length.type = type(USize);
+        length.args = {args[n]};
+        store(out, context, emit(out, length), 2 + 2 * n);
+      }
+    }
+    const bool output = type(call.type).kind == T::Buffer || recordWords(call.type);
+    if (output) {
+      const auto destination = callOutput(out, call.type);
+      store(out, context, address(out, destination), 0);
+      values[call.result] = logicalOutput(out, destination, call.type);
+    }
+    alloc.type = {T::Buffer, 1, 64};
+    auto callback = emit(out, alloc), unused = emit(out, alloc);
+    abi(out, threadGetter(call.function), {T::Void, 0},
+        {address(out, callback), address(out, unused)});
+    abi(out, execution::threadCallAbi, {T::Void, 0},
+        {load(out, callback, 0, {T::Pointer, 1}), address(out, context)});
+    if (!output && call.type != Unit)
+      values[call.result] = load(out, context, 0, type(call.type));
+  }
+  void threadAdapter(FunctionId id) {
+    const auto &source = core.semantics.functions.at(id);
+    runtime::Function adapter;
+    adapter.name = threadEntry(id);
+    adapter.result = {T::Void, 0};
+    adapter.params = {{p.values++, {T::Pointer, 1}}};
+    runtimeTypes[adapter.params[0].value] = {T::Pointer, 1};
+    I view{};
+    view.kind = I::AddressView;
+    view.type = {T::Buffer, static_cast<uint32_t>(1 + 2 * source.params.size()), 64};
+    view.args = {adapter.params[0].value};
+    const auto context = emit(adapter.body, view);
+    std::vector<runtime::Value> args;
+    const bool output = type(source.result).kind == T::Buffer || recordWords(source.result);
+    if (output) {
+      auto pointer = load(adapter.body, context, 0, {T::Pointer, 1});
+      if (resultStorageType(source.result).kind == T::Buffer) {
+        view.type = resultStorageType(source.result);
+        view.args = {pointer};
+        pointer = emit(adapter.body, view);
+      }
+      args.push_back(pointer);
+    }
+    for (uint32_t n = 0; n < source.params.size(); ++n) {
+      const auto &parameter = core.semantics.symbols.at(source.params[n]);
+      const auto target =
+          parameter.reference ? referenceType(parameter.type) : type(parameter.type);
+      if (target.kind == T::Buffer) {
+        view.type = target;
+        view.args = {load(adapter.body, context, 1 + 2 * n, {T::Pointer, 1})};
+        if (target.width == 0)
+          view.args.push_back(load(adapter.body, context, 2 + 2 * n, type(USize)));
+        args.push_back(emit(adapter.body, view));
+      } else
+        args.push_back(load(adapter.body, context, 1 + 2 * n, target));
+    }
+    auto value =
+        abi(adapter.body, name(id), output ? T{T::Void, 0} : type(source.result), std::move(args));
+    if (!output && source.result != Unit)
+      store(adapter.body, context, value, 0);
+    I ret{};
+    ret.kind = I::Return;
+    emit(adapter.body, ret, false);
+    p.functions.push_back(std::move(adapter));
   }
   runtime::Value storageView(std::vector<I> &out, runtime::Value pointer, TypeId element) {
     I view{};
@@ -403,7 +585,7 @@ class Eraser {
     const auto &function = core.semantics.functions[c.function];
     auto element = core.semantics.types[function.owner].element;
     T pointer{T::Pointer, 1}, size{T::Size, 1, core.semantics.target.pointerWidth};
-    auto owner = c.slot == None ? runtime::NoValue : slots.at(c.slot);
+    auto owner = c.slot == None ? runtime::NoValue : slot(out, c.slot);
     switch (c.intrinsicId) {
     case IntrinsicId::Box_new_generic: {
       I alloc{};
@@ -670,7 +852,7 @@ class Eraser {
       for (auto sid : c.cleanup) {
         auto found = c.movedPayloads.find(sid);
         auto absent = c.absentFields.find(sid);
-        destroy(out, core.semantics.symbols[sid].type, slots.at(sid),
+        destroy(out, core.semantics.symbols[sid].type, slot(out, sid),
                 found == c.movedPayloads.end() ? std::vector<hir::ReferencePath>{} : found->second,
                 absent == c.absentFields.end() ? std::vector<uint32_t>{} : absent->second,
                 c.fieldCleanup.contains(sid) ? c.fieldCleanup.at(sid) : core::FieldDropPlan{});
@@ -678,6 +860,10 @@ class Eraser {
       if (c.freeTemporary)
         destroy(out, c.type, i.args.at(0), {}, c.temporaryAbsentFields, c.temporaryFieldPlan);
       switch (c.kind) {
+      case C::FutureCreate:
+      case C::Await:
+      case C::BlockOn:
+        fail(c.loc, DiagnosticCode::InvalidCore, "untransformed Future operation reached erasure");
       case C::UnsafeScope: {
         auto body = block(c.body);
         out.insert(out.end(), body.begin(), body.end());
@@ -742,10 +928,13 @@ class Eraser {
         break;
       }
       case C::FunctionAddress:
+      case C::ThreadRun:
       case C::IndirectForeignCall:
       case C::ForeignCall: {
         bool indirect = c.kind == C::IndirectForeignCall;
-        bool functionAddress = c.kind == C::FunctionAddress;
+        bool functionAddress = c.kind == C::FunctionAddress || c.kind == C::ThreadRun;
+        if (c.kind == C::ThreadRun)
+          i.args.clear();
         I alloc{};
         alloc.kind = I::Alloc;
         alloc.type = {T::Buffer,
@@ -795,7 +984,11 @@ class Eraser {
             : functionAddress ? ffi::addressName(c.function)
                               : ffi::importName(c.function),
             {T::Void, 0}, {outPtr, inPtr});
-        if (c.type != Unit)
+        if (c.kind == C::ThreadRun) {
+          auto callback = load(out, output, 0, {T::Pointer, 1});
+          values[c.result] =
+              abi(out, execution::threadRunAbi, type(U64), {callback, values.at(c.args[0])});
+        } else if (c.type != Unit)
           values[c.result] = load(out, output, 0, type(c.type));
         break;
       }
@@ -803,14 +996,14 @@ class Eraser {
         if (!core.semantics.heap(core.semantics.types[c.type].element)) {
           i.kind = I::Address;
           i.type = {T::Pointer, 1};
-          i.args = {slots.at(c.slot)};
+          i.args = {slot(out, c.slot)};
           values[c.result] = emit(out, i);
         } else {
-          values[c.result] = slots.at(c.slot);
+          values[c.result] = slot(out, c.slot);
         }
         break;
       case C::ReferenceArgument:
-        values[c.result] = referenceView(out, slots.at(c.slot), c.type);
+        values[c.result] = referenceView(out, slot(out, c.slot), c.type);
         break;
       case C::StaticStr:
         i.kind = I::StaticStr;
@@ -824,13 +1017,13 @@ class Eraser {
           break;
         }
         i.kind = I::Length;
-        i.args = {slots.at(c.slot)};
+        i.args = {slot(out, c.slot)};
         values[c.result] = emit(out, i);
         break;
       case C::TextPrint:
         i.kind = I::Call;
         i.callee = "isac_rt_string_print";
-        i.args = {slots.at(c.slot)};
+        i.args = {slot(out, c.slot)};
         emit(out, i, false);
         break;
       case C::ContainerCall: {
@@ -844,7 +1037,7 @@ class Eraser {
         i.kind = I::Call;
         i.callee = intrinsicRuntimeSymbol(c.intrinsicId);
         if (c.slot != None)
-          i.args.insert(i.args.begin(), slots.at(c.slot));
+          i.args.insert(i.args.begin(), slot(out, c.slot));
         bool descriptor = c.text == "string.new" || c.text == "string.from" ||
                           c.text == "string.as_str" || c.text.starts_with("io.read_") ||
                           c.text.starts_with("io.parse_") ||
@@ -1008,73 +1201,73 @@ class Eraser {
       }
       case C::Bind:
         if (core.semantics.linear(c.type) || c.type == RawPtr || c.type == Str)
-          slots[c.slot] = i.args[0];
+          bindSlot(out, c.slot, i.args[0]);
         else {
           I alloc{};
           alloc.kind = I::Alloc;
           alloc.type = {T::Buffer, 1, 64};
           auto v = emit(out, alloc);
-          slots[c.slot] = v;
+          bindSlot(out, c.slot, v);
           store(out, v, i.args[0]);
         }
         break;
       case C::Copy:
       case C::Read:
         if (c.type == RawPtr || c.type == Str) {
-          values[c.result] = slots.at(c.slot);
+          values[c.result] = slot(out, c.slot);
           break;
         }
         i.kind = I::Load;
-        i.args.insert(i.args.begin(), slots.at(c.slot));
+        i.args.insert(i.args.begin(), slot(out, c.slot));
         if (c.kind == C::Read && !c.args.empty()) {
           I check{};
           check.kind = I::IndexCheck;
           check.args = i.args;
           emit(out, check, false);
         }
-        i.offset = c.offset;
+        i.offset = c.placeProjection == C::PlaceProjection::Field ? fieldOffset(c) : c.offset;
         values[c.result] = emit(out, i);
         break;
       case C::FieldStore:
       case C::FieldTake:
       case C::FieldDrop: {
-        const auto &field =
-            core.semantics.types[core.semantics.symbols[c.slot].type].fields.at(c.fieldIndex);
+        const auto offset = fieldOffset(c);
         if (c.replaceField)
-          destroy(out, field.type, project(out, slots.at(c.slot), field.offset, field.type), {}, {},
+          destroy(out, c.type, project(out, slot(out, c.slot), offset, c.type), {}, {},
                   c.replacedFieldPlan);
         if (c.kind == C::FieldStore) {
-          storeFieldValue(out, slots.at(c.slot), field.offset, field.type, i.args.at(0));
+          storeFieldValue(out, slot(out, c.slot), offset, c.type, i.args.at(0), c.storedFieldPlan);
         } else if (c.kind == C::FieldTake)
-          values[c.result] = takeFieldValue(out, slots.at(c.slot), field.offset, field.type);
+          values[c.result] = takeFieldValue(out, slot(out, c.slot), offset, c.type);
         break;
       }
       case C::PayloadTake:
         values[c.result] =
-            project(out, slots.at(c.slot),
+            project(out, slot(out, c.slot),
                     core.semantics.payloadOffset(core.semantics.symbols.at(c.slot).type,
                                                  c.payloadPath[0].variant, c.payloadPath[0].index),
                     c.type);
         break;
       case C::Move:
-        values[c.result] = slots.at(c.slot);
+        values[c.result] = slot(out, c.slot);
         break;
       case C::Write:
         if (c.args.size() == 2) {
           I check{};
           check.kind = I::IndexCheck;
-          check.args = {slots.at(c.slot), i.args[1]};
+          check.args = {slot(out, c.slot), i.args[1]};
           emit(out, check, false);
           i.kind = I::Store;
-          i.args.insert(i.args.begin(), slots.at(c.slot));
+          i.args.insert(i.args.begin(), slot(out, c.slot));
           emit(out, i, false);
         } else
-          store(out, slots.at(c.slot), i.args[0], c.offset);
+          store(out, slot(out, c.slot), i.args[0],
+                c.placeProjection == C::PlaceProjection::Field ? fieldOffset(c) : c.offset);
         break;
       case C::BorrowShared:
       case C::BorrowUnique:
         if (c.placeProjection != C::PlaceProjection::None) {
-          auto source = slots.at(c.slot);
+          auto source = slot(out, c.slot);
           runtime::Value index;
           TypeId projectedType = c.type;
           if (c.placeProjection == C::PlaceProjection::Field) {
@@ -1086,7 +1279,7 @@ class Eraser {
               sourceType = member.type;
             }
             if (core.semantics.heap(c.type)) {
-              slots[c.offset] = load(out, source, offset, type(c.type));
+              bindSlot(out, c.offset, load(out, source, offset, type(c.type)));
               break;
             }
             projectedType = sourceType;
@@ -1122,10 +1315,10 @@ class Eraser {
           i.type = referenceType(projectedType);
           i.args = {source, index};
           auto projection = emit(out, i);
-          slots[c.offset] =
-              projectedType == c.type ? projection : referenceView(out, projection, c.type);
+          bindSlot(out, c.offset,
+                   projectedType == c.type ? projection : referenceView(out, projection, c.type));
         } else if (!c.args.empty())
-          slots[c.offset] = values.at(c.args[0]);
+          bindSlot(out, c.offset, values.at(c.args[0]));
         else if (!c.payloadPath.empty() || c.storedPayloadReference) {
           uint32_t offset = 0;
           auto positionType = core.semantics.symbols.at(c.slot).type;
@@ -1142,17 +1335,17 @@ class Eraser {
 
           if (c.storedPayloadReference && !core.semantics.heap(c.type)) {
             auto address = c.payloadPath.empty()
-                               ? slots.at(c.slot)
-                               : load(out, slots.at(c.slot), offset, {T::Pointer, 1});
+                               ? slot(out, c.slot)
+                               : load(out, slot(out, c.slot), offset, {T::Pointer, 1});
             i.kind = I::AddressView;
             i.type = referenceType(c.type);
             i.args = {address};
-            slots[c.offset] = emit(out, i);
+            bindSlot(out, c.offset, emit(out, i));
             break;
           }
           auto value = c.payloadPath.empty() && c.storedPayloadReference
-                           ? slots.at(c.slot)
-                           : project(out, slots.at(c.slot), offset, c.type);
+                           ? slot(out, c.slot)
+                           : project(out, slot(out, c.slot), offset, c.type);
           if (scalar(c.type)) {
             I alloc{};
             alloc.kind = I::Alloc;
@@ -1161,15 +1354,15 @@ class Eraser {
             store(out, buffer, value);
             value = buffer;
           }
-          slots[c.offset] = value;
+          bindSlot(out, c.offset, value);
         } else if (core.semantics.types[c.type].kind == hir::Type::Slice &&
                    core.semantics.types[core.semantics.symbols[c.slot].type].kind ==
                        hir::Type::Array) {
           i.kind = I::View;
-          i.args = {slots.at(c.slot)};
-          slots[c.offset] = emit(out, i);
+          i.args = {slot(out, c.slot)};
+          bindSlot(out, c.offset, emit(out, i));
         } else
-          slots[c.offset] = slots.at(c.slot);
+          bindSlot(out, c.offset, slot(out, c.slot));
         break;
       case C::Cast:
       case C::Binary:
@@ -1213,7 +1406,7 @@ class Eraser {
                        ? name(c.function)
                        : intrinsicRuntimeSymbol(core.semantics.functions[c.function].intrinsicId);
         if (c.slot != None) {
-          auto source = slots.at(c.slot);
+          auto source = slot(out, c.slot);
           auto tid = core.semantics.symbols[c.slot].type;
           if (scalar(tid) || c.access != Access::Own)
             source = referenceView(out, source, tid);
@@ -1247,6 +1440,9 @@ class Eraser {
           emit(out, i, false);
         else
           values[c.result] = emit(out, i);
+        break;
+      case C::ThreadCall:
+        threadCall(out, c, i.args);
         break;
       case C::Loop:
         i.kind = I::Loop;
@@ -1305,8 +1501,16 @@ class Eraser {
 public:
   explicit Eraser(const core::Verified &v) : core(v.get()) {}
   runtime::Erased run() {
+    if (asyncs::present(core))
+      fail({}, DiagnosticCode::InvalidCore,
+           "async Core must be transformed and reverified before erasure");
+    bool threads = false;
+    std::set<FunctionId> scopedThreads;
     auto collect = [&](auto &&self, const std::vector<core::Inst> &ops) -> void {
       for (const auto &op : ops) {
+        threads |= op.kind == core::Inst::ThreadRun;
+        if (op.kind == core::Inst::ThreadCall)
+          scopedThreads.insert(op.function);
         if (op.result != None)
           coreTypes.emplace(op.result, op.type);
         for (const auto *child : {&op.body, &op.otherwise, &op.condition, &op.latch})
@@ -1321,6 +1525,27 @@ public:
     }
     p.target = core.semantics.target;
     p.cBridge = ffi::bridge(core.semantics);
+    if (!scopedThreads.empty()) {
+      runtime::Function helper;
+      helper.external = true;
+      helper.name = execution::threadCallAbi;
+      helper.result = {T::Void, 0};
+      helper.params = {{p.values++, {T::Pointer, 1}}, {p.values++, {T::Pointer, 1}}};
+      p.functions.push_back(std::move(helper));
+      for (auto worker : scopedThreads)
+        p.cBridge +=
+            "\nextern void " + threadEntry(worker) + "(void*);\nvoid " + threadGetter(worker) +
+            "(__UINT64_TYPE__ *out,const __UINT64_TYPE__ *in){(void)in;out[0]=(__UINT64_TYPE__)(__UINTPTR_TYPE__)&" +
+            threadEntry(worker) + ";}\n";
+    }
+    if (threads) {
+      runtime::Function helper;
+      helper.external = true;
+      helper.name = execution::threadRunAbi;
+      helper.result = type(U64);
+      helper.params = {{p.values++, {T::Pointer, 1}}, {p.values++, type(U64)}};
+      p.functions.push_back(std::move(helper));
+    }
     for (const auto &hf : core.semantics.functions)
       if (hf.external) {
         runtime::Function f;
@@ -1342,6 +1567,8 @@ public:
       function.params = {{p.values++, {T::Pointer, 1}}, {p.values++, {T::Pointer, 1}}};
       p.functions.push_back(std::move(function));
     };
+    for (auto worker : scopedThreads)
+      declareAdapter(threadGetter(worker));
     for (TypeId id = 0; id < core.semantics.types.size(); ++id)
       if (core.semantics.functionPointer(id))
         declareAdapter(ffi::indirectName(id));
@@ -1354,6 +1581,7 @@ public:
     for (auto &cf : core.functions) {
       values.clear();
       slots.clear();
+      bindingCells.clear();
       auto &hf = core.semantics.functions[cf.id];
       runtime::Function f;
       f.name = name(cf.id);
@@ -1370,6 +1598,29 @@ public:
         f.result = {T::Void, 0};
       }
       std::vector<I> prefix;
+      std::map<SymbolId, unsigned> writes;
+      for (auto sid : hf.params)
+        ++writes[sid];
+      std::function<void(const std::vector<core::Inst> &)> bindings = [&](const auto &ops) {
+        for (const auto &i : ops) {
+          if (i.kind == core::Inst::Bind)
+            ++writes[i.slot];
+          if (i.kind == core::Inst::BorrowShared || i.kind == core::Inst::BorrowUnique)
+            ++writes[i.offset];
+          bindings(i.condition);
+          bindings(i.body);
+          bindings(i.otherwise);
+          bindings(i.latch);
+        }
+      };
+      bindings(cf.body);
+      for (const auto &[id, count] : writes)
+        if (count > 1) {
+          I cell{};
+          cell.kind = I::Alloc;
+          cell.type = {T::Buffer, bindingType(id).width == 0 ? 2u : 1u, 64};
+          bindingCells[id] = emit(prefix, cell);
+        }
       for (auto sid : hf.params) {
         auto t = type(core.semantics.symbols[sid].type);
         if (core.semantics.symbols[sid].reference ||
@@ -1383,13 +1634,14 @@ public:
         if (t.kind == T::Buffer ||
             (t.kind == T::Pointer && !core.semantics.rawPointer(core.semantics.symbols[sid].type) &&
              !core.semantics.functionPointer(core.semantics.symbols[sid].type)))
-          slots[sid] = v;
+          bindSlot(prefix, sid, v);
         else {
           I alloc{};
           alloc.kind = I::Alloc;
           alloc.type = {T::Buffer, 1, 64};
-          slots[sid] = emit(prefix, alloc);
-          store(prefix, slots[sid], v);
+          auto buffer = emit(prefix, alloc);
+          bindSlot(prefix, sid, buffer);
+          store(prefix, buffer, v);
         }
       }
       f.body = std::move(prefix);
@@ -1402,6 +1654,8 @@ public:
       }
       p.functions.push_back(std::move(f));
     }
+    for (auto worker : scopedThreads)
+      threadAdapter(worker);
     for (const auto &hf : core.semantics.functions) {
       if (!hf.foreignC || hf.external)
         continue;

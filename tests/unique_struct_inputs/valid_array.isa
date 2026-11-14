@@ -1,0 +1,19 @@
+struct View {
+  value: &mut i32[2],
+}
+fn consume(view: View) {
+  let element = view.value.first_mut();
+  match element {
+    Some(edit) => {
+      edit = 42;
+    },
+    None => {}
+  }
+}
+fn main() {
+  let a = [1, 2];
+    consume(View {
+      value: &mut a
+  });
+  print(a[0]);
+}

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    name: Linux / LLVM 21
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+
+      - name: Install LLVM and MLIR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg
+          curl --fail --silent --show-error --location https://apt.llvm.org/llvm-snapshot.gpg.key |
+            gpg --dearmor |
+            sudo tee /usr/share/keyrings/llvm.gpg > /dev/null
+          echo 'deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main' |
+            sudo tee /etc/apt/sources.list.d/llvm21.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build python3 clang-21 llvm-21-dev \
+            libmlir-21-dev mlir-21-tools libclang-rt-21-dev \
+            libzstd-dev zlib1g-dev libxml2-dev libedit-dev libffi-dev
+
+      - name: Prepare existing regression fixture
+        run: |
+          regression_fixture=docs/audit/2026-10-11-stack-overflow/tests/emulator/repro_stack_loop.isa
+          mkdir -p "$(dirname "$regression_fixture")"
+          cat > "$regression_fixture" <<'ISA'
+          fn checksum(values: &u8[], repetitions: usize) -> u64 {
+            let total: u64 = 0;
+            for i in 0usize..repetitions {
+              total = total + values[0usize] as u64;
+            }
+            return total;
+          }
+          fn main() {
+            let values: u8[1] = [1u8];
+            @assert(checksum(&values, 2000000usize) == 2000000u64);
+          }
+          ISA
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS_DEBUG=-g1 \
+            -DCMAKE_C_COMPILER=clang-21 \
+            -DCMAKE_CXX_COMPILER=clang++-21 \
+            -DLLVM_DIR=/usr/lib/llvm-21/lib/cmake/llvm \
+            -DMLIR_DIR=/usr/lib/llvm-21/lib/cmake/mlir \
+            -DISAC_CLANG=/usr/bin/clang-21 \
+            -DISAC_LIBRARY_ROOT="$PWD/lib" \
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --parallel 2
+
+      - name: Tests
+        run: |
+          ctest --test-dir build --output-on-failure --no-tests=error \
+            --timeout 300 --parallel 2 -LE '^sanitizers$' \
+            --output-junit "$PWD/build/ctest-regular.xml"
+
+      - name: Sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ctest --test-dir build --output-on-failure --no-tests=error \
+            --timeout 300 --parallel 2 -L '^sanitizers$' \
+            --output-junit "$PWD/build/ctest-sanitizers.xml"
+
+      - name: Test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: test-reports
+          path: |
+            build/ctest-*.xml
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
+            build/CMakeFiles/CMakeConfigureLog.yaml
+          retention-days: 14
+          if-no-files-found: ignore

@@ -1,0 +1,17 @@
+struct View {
+  value: &mut i32,
+}
+fn main() {
+  let data = 1;
+  let view = View {
+    value: &mut data
+  };
+  borrow shared view.value as read {
+    print(read);
+  }
+  borrow unique view.value as edit {
+    edit = 42;
+  }
+  view.drop();
+  print(data);
+}

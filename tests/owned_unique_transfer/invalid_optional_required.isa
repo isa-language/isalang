@@ -1,0 +1,21 @@
+struct Input {
+  value: Option<&mut i32>,
+}
+struct View {
+  value: &mut i32,
+}
+fn forward(input: Input) -> View {
+  let value = input.value.move();
+  return match value {
+    Some(edit) => View {
+      value: edit
+    },
+    None => {
+      let data = 1;
+      View {
+        value: &mut data
+      }
+    }
+  };
+}
+fn main() {}

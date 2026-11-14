@@ -1,0 +1,22 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+struct View {
+  value: &mut i32,
+}
+fn forward(input: Views, flag: bool) -> Views {
+  match flag {
+    true => {
+      let local = 3;
+      return Views {
+        first: input.first.move(),
+        second: &mut local
+      };
+    },
+    false => {
+      return input.move();
+    },
+  }
+}
+fn main() {}

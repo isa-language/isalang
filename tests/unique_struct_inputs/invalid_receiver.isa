@@ -1,0 +1,7 @@
+struct View {
+  value: &mut i32,
+}
+impl View {
+  pub fn consume(self) {}
+}
+fn main() {}

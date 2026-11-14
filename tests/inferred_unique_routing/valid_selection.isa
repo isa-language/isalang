@@ -1,0 +1,29 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+struct View {
+  value: &mut i32,
+}
+fn select(input: Views) -> View {
+  return View {
+    value: input.second.move()
+  };
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+  let x = &mut a;
+  let y = &mut b;
+    let result = select(Views {
+      first: x,
+      second: y
+  });
+  x = 10;
+  let edit = &mut result.value;
+  edit = 20;
+  result.drop();
+  y = 21;
+  print(x);
+  print(y);
+}

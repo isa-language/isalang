@@ -1,0 +1,22 @@
+struct Input {
+  a: &i32,
+  b: &i32,
+  edit: &mut i32,
+}
+struct Output {
+  read: &i32,
+  edit: &mut i32,
+}
+fn forward(input: Input, choice: bool) -> Output {
+  if choice {
+    return Output {
+      read: input.a,
+      edit: input.edit.move()
+    };
+  }
+  return Output {
+    read: input.b,
+    edit: input.edit.move()
+  };
+}
+fn main() {}

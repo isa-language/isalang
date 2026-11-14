@@ -1,0 +1,4 @@
+@import "std.box"
+fn main() {
+  print(7);
+}

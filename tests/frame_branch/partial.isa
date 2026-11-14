@@ -1,0 +1,32 @@
+@import "std.box"
+@import "std.env"
+struct Pair {
+  first: String,
+  second: String,
+}
+fn choose() -> bool {
+  let args = env::args();
+  return args.len() == 1;
+}
+fn marker() {}
+fn checkpoint() {
+  print(200);
+}
+fn main() {
+  let pair = Pair {
+    first: String::from("first"),
+    second: String::from("second")
+  };
+  let flag = choose();
+  marker();
+  if flag {
+    pair.first.drop();
+    checkpoint();
+    pair.first = String::from("again");
+  }
+  else {
+    print(300);
+  }
+  print(pair.first.as_str());
+  print(pair.second.as_str());
+}

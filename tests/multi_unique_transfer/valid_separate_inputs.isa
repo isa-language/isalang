@@ -1,0 +1,29 @@
+struct Leaf<T> {
+  value: &mut T,
+}
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn merge(a: Leaf<i32>, b: Leaf<bool>) -> Views {
+  return Views {
+    number: a.value.move(),
+    flag: b.value.move()
+  };
+}
+fn main() {
+  let data = 1;
+  let flag = false;
+    let result = merge(Leaf<i32> {
+      value: &mut data
+    }, Leaf<bool> {
+      value: &mut flag
+  });
+  let edit = &mut result.number;
+  edit = 42;
+  let mark = &mut result.flag;
+  mark = true;
+  result.drop();
+  print(data);
+  print(flag);
+}

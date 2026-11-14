@@ -1,0 +1,10 @@
+@import "std.box"
+fn marker() {}
+fn checkpoint() {}
+fn main() {
+  let text = String::from("borrow");
+  marker();
+  let view = &text;
+  checkpoint();
+  print(view);
+}

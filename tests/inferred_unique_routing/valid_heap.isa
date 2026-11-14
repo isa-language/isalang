@@ -1,0 +1,29 @@
+struct Views<T> {
+  first: &mut T,
+  second: &mut T,
+}
+impl<T> Views<T> {
+  fn swap(input: Views<T>) -> Views<T> {
+    return Views<T> {
+      first: input.second.move(),
+      second: input.first.move()
+    };
+  }
+}
+fn main() {
+  let a = String::from("a");
+  let b = String::from("b");
+    let result = Views<String>::swap(Views<String> {
+      first: &mut a,
+      second: &mut b
+  });
+  borrow unique result.first as edit {
+    edit.push_str("!");
+  }
+  borrow unique result.second as edit {
+    edit.push_str("?");
+  }
+  result.drop();
+  print(a);
+  print(b);
+}

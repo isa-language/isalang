@@ -1,0 +1,30 @@
+@import "std.vec"
+@import "std.box"
+struct Pair {
+  left: String,
+  right: String,
+}
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn main() {
+  let pair = Pair {
+    left: String::from("left"),
+    right: String::from("right")
+  };
+  let values = Vec<String> {
+    "first"
+  };
+  marker();
+  let left = pair.left.move();
+  print(left);
+  left.drop();
+  let tail = pair.right.move();
+  pair.drop();
+  values.push(String::from("second"));
+  let boxed = Box<String>::new(tail.move());
+  checkpoint();
+  print(values.len());
+  print(boxed.get());
+}

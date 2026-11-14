@@ -1,0 +1,17 @@
+@import "std.box"
+fn marker() {}
+fn main() {
+  let count: usize = 3;
+  let signed: i8 = -7i8;
+  let unsigned: u16 = 65000u16;
+  let real: f32 = 2.5f32;
+  let active = true;
+  let letter = 'á';
+  marker();
+  print(count);
+  print(signed);
+  print(unsigned);
+  print(real);
+  print(active);
+  print(letter);
+}

@@ -6,5 +6,7 @@ fn main() {
   let view = View {
     value: &mut data
   };
-  print(view.value);
+  let edit = &mut view.value;
+  view.drop();
+  print(edit);
 }

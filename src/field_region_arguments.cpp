@@ -53,7 +53,7 @@ std::map<uint32_t, Op> fieldRegionOperations(const core::Program &p, const Funct
       op.kind = i->kind == I::FieldTake    ? Op::Take
                 : i->kind == I::FieldStore ? Op::Store
                                            : Op::Drop;
-      op.place = storage::detail::field(*base, i->fieldIndex);
+      op.place = storage::detail::fieldOperation(*base, *i);
       if (i->kind == I::FieldStore)
         op.source = i->args.at(0);
     } else if (i->kind == I::Drop && managed(p.semantics.symbols.at(i->slot).type)) {

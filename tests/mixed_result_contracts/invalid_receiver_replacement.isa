@@ -1,0 +1,10 @@
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+impl View {
+  fn replace(unique self, other: &i32) {
+    self.read = other;
+  }
+}
+fn main() {}

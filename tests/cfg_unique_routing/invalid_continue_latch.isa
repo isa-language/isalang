@@ -1,0 +1,14 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+fn forward(input: Views) -> Views {
+  for let i = 0;
+  i < 2;
+  input.first = input.second.move() {
+    i = i + 1;
+    continue;
+  }
+  return input.move();
+}
+fn main() {}

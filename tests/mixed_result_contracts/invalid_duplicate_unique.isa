@@ -1,0 +1,17 @@
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+struct Output {
+  read: &i32,
+  first: &mut i32,
+  second: &mut i32,
+}
+fn forward(input: View) -> Output {
+  return Output {
+    read: input.read,
+    first: input.edit.move(),
+    second: input.edit.move()
+  };
+}
+fn main() {}

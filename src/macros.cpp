@@ -115,9 +115,9 @@ bool fragment(const std::string &kind, const Trees &value) {
 }
 using Builtin = BuiltinId;
 const std::map<std::string, Builtin> builtinRegistry = {
-    {"__format", Builtin::Format}, {"__print", Builtin::Print}, {"__println", Builtin::Println},
-    {"__input", Builtin::Input},   {"import", Builtin::Import}, {"size_of", Builtin::SizeOf},
-    {"align_of", Builtin::AlignOf}};
+    {"__format", Builtin::Format},  {"__print", Builtin::Print},    {"__println", Builtin::Println},
+    {"__input", Builtin::Input},    {"import", Builtin::Import},    {"size_of", Builtin::SizeOf},
+    {"align_of", Builtin::AlignOf}, {"block_on", Builtin::BlockOn}, {"thread", Builtin::Thread}};
 struct FormatSegment {
   enum Kind { Literal, Display, Debug } kind;
   std::string text;
@@ -483,6 +483,8 @@ class Expander {
       if (is(t, "@") && i + 2 < trees.size() && builtinRegistry.contains(trees[i + 1].token.text) &&
           builtinRegistry.at(trees[i + 1].token.text) != Builtin::SizeOf &&
           builtinRegistry.at(trees[i + 1].token.text) != Builtin::AlignOf &&
+          builtinRegistry.at(trees[i + 1].token.text) != Builtin::BlockOn &&
+          builtinRegistry.at(trees[i + 1].token.text) != Builtin::Thread &&
           builtinRegistry.at(trees[i + 1].token.text) != Builtin::Import) {
         if (trees[i + 2].delimiter != '(')
           fail(t.token.loc, DiagnosticCode::MacroSyntax, "builtin requires parentheses");

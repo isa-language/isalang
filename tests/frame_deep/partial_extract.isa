@@ -1,0 +1,25 @@
+@import "std.box"
+struct Inner {
+  left: String,
+  right: String,
+}
+struct Outer {
+  inner: Inner,
+}
+fn consume(value: Inner) {
+  print(value.left.as_str());
+  print(value.right.as_str());
+}
+fn main() {
+  let data = Outer {
+    inner: Inner {
+      left: String::from("left"),
+      right: String::from("right")
+    }
+  };
+  data.inner.left.drop();
+  data.inner.left = String::from("new");
+  let child = data.inner.move();
+  print(child.right.as_str());
+  consume(child.move());
+}

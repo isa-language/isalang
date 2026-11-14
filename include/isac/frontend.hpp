@@ -60,7 +60,8 @@ struct Expr {
     Dereference,
     ArrayRepeat,
     Invoke,
-    BraceInit
+    BraceInit,
+    Await
   } kind;
   Loc loc;
   std::string text;

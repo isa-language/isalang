@@ -1,0 +1,29 @@
+protocol SwitchState {
+  initial Closed;
+  final Closed;
+  state Closed {
+    open(self) -> Open;
+    inspect(shared self);
+  }
+  state Open {
+    close(self) -> Closed;
+    inspect(shared self);
+  }
+}
+struct Switch: SwitchState {
+  value: i32,
+}
+impl Switch {
+  fn open(self) {}
+  fn close(self) {}
+  fn inspect(shared self) {
+    print(self.value);
+  }
+}
+fn main() {
+  let s = Switch::new();
+  s.inspect();
+  s.open();
+  s.inspect();
+  s.close();
+}

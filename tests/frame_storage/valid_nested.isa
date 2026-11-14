@@ -1,0 +1,23 @@
+@import "std.buffer"
+struct Inner {
+  text: String,
+  buffer: Buffer,
+}
+struct Outer {
+  inner: Inner,
+}
+fn marker() {}
+fn main() {
+  let buffer = Buffer::new(2);
+  buffer.release();
+  let outer = Outer {
+    inner: Inner {
+      text: String::from("nested"),
+      buffer: buffer.move()
+    }
+  };
+  marker();
+  print(outer.inner.text.as_str());
+  outer.inner.text.push_str("!");
+  print(outer.inner.text.as_str());
+}

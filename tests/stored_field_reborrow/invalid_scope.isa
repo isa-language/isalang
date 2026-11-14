@@ -1,0 +1,16 @@
+struct View {
+  value: &mut i32,
+}
+fn main() {
+  let data = 1;
+  let carrier = {
+    let view = View {
+      value: &mut data
+    };
+    Option::Some(&mut view.value)
+  };
+  match carrier {
+    Some(edit) => print(edit),
+    None => {}
+  }
+}

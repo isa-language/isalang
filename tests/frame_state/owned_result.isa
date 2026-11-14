@@ -1,0 +1,15 @@
+@import "std.box"
+fn marker() {}
+fn fallback() -> String {
+  return String::from("canceled");
+}
+fn worker(text: String) -> String {
+  marker();
+  print(404);
+  text.push_str("!");
+  return text.move();
+}
+fn main() {
+  let result = worker(String::from("returned"));
+  print(result);
+}

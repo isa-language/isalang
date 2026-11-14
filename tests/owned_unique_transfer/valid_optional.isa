@@ -1,0 +1,23 @@
+struct View {
+  value: Option<&mut i32>,
+}
+fn forward(input: View) -> View {
+  return input.move();
+}
+fn main() {
+  let data = [1, 2];
+  let parent = &mut data;
+  let view = View {
+    value: parent.first_mut()
+  };
+  let result = forward(view.move());
+  let item = result.value.move();
+  match item {
+    Some(edit) => {
+      edit = 42;
+    },
+    None => {}
+  }
+  result.drop();
+  print(parent[0]);
+}

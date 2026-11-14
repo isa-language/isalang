@@ -1,0 +1,38 @@
+struct Input {
+  number: &mut i32,
+  flag: &mut bool,
+  text: &mut String,
+}
+struct Output {
+  text: &mut String,
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn forward(input: Input) -> Output {
+  return Output {
+    text: input.text.move(),
+    number: input.number.move(),
+    flag: input.flag.move()
+  };
+}
+fn main() {
+  let data = 1;
+  let flag = false;
+  let text = String::from("hello");
+    let result = forward(Input {
+      number: &mut data,
+      flag: &mut flag,
+      text: &mut text
+  });
+  let edit = &mut result.number;
+  edit = 42;
+  let mark = &mut result.flag;
+  mark = true;
+  borrow unique result.text as out {
+    out.push_str("!");
+  }
+  result.drop();
+  print(data);
+  print(flag);
+  print(text);
+}

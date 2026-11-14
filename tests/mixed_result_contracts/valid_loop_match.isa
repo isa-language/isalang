@@ -1,0 +1,50 @@
+struct Input {
+  a: &mut i32,
+  b: &mut i32,
+  read: &i32,
+}
+struct Output {
+  read: &i32,
+  edit: &mut i32,
+}
+fn forward(input: Input, flag: bool) -> Output {
+  while flag {
+    return Output {
+      read: input.read,
+      edit: input.b.move()
+    };
+  }
+  match flag {
+    true => {
+      return Output {
+        read: input.read,
+        edit: input.b.move()
+      };
+    },
+    false => {
+      return Output {
+        read: input.read,
+        edit: input.b.move()
+      };
+    },
+  }
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+  let c = 3;
+    let result = forward(Input {
+      a: &mut a,
+      b: &mut b,
+      read: &c
+  }, false);
+  a = 10;
+  print(result.read);
+  let edit = &mut result.edit;
+  edit = 20;
+  result.drop();
+  c = 30;
+  print(a);
+  print(b);
+  print(c);
+}

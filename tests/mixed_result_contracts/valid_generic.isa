@@ -1,0 +1,24 @@
+struct View<T> {
+  read: &T,
+  edit: &mut T,
+}
+impl<T> View<T> {
+  fn forward(input: View<T>) -> View<T> {
+    return input.move();
+  }
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = View<i32>::forward(View<i32> {
+      read: &a,
+      edit: &mut b
+  });
+  print(result.read);
+  let edit = &mut result.edit;
+  edit = 20;
+  result.drop();
+  a = 10;
+  print(a);
+  print(b);
+}

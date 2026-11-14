@@ -1,0 +1,22 @@
+@import "std.vec"
+@import "std.box"
+@import "std.buffer"
+struct Owners {
+  values: Vec<i32>,
+  text: String,
+}
+fn main() {
+  let values = Vec<i32>::new();
+  values.push(10);
+  let box = Box<i32>::new(20);
+  let owners = Owners {
+    values: values.move(),
+    text: String::from("owned")
+  };
+  print(owners.values.len());
+  box.drop();
+  owners.drop();
+  let buffer = Buffer::new(3);
+  print(buffer.len());
+  buffer.release();
+}

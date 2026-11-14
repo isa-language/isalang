@@ -1,0 +1,79 @@
+struct Mixed {
+  shared: &i32,
+  edit: Option<&mut i32>,
+  owner: String,
+}
+struct Holder<T> {
+  value: T,
+}
+struct Outer<T> {
+  inner: T,
+  owner: String,
+}
+enum Choice<T> {
+  Left(T),
+  Right(T),
+  Empty,
+}
+
+fn mixed() {
+  let number = 7;
+  let data = [1];
+  let edit = &mut data;
+  let mixed = Mixed {
+    shared: &number,
+    edit: edit.first_mut(),
+    owner: String::from("owned")
+  };
+  print(mixed.shared);
+  let value = mixed.edit.move();
+  mixed.drop();
+  number = 8;
+  print(number);
+  match value {
+    Some(item) => {
+      item = 42;
+    },
+    None => {}
+  }
+  print(data[0]);
+}
+fn nested() {
+  let data = [1];
+  let edit = &mut data;
+  let outer = Outer<Holder<Option<&mut i32 >> > {
+    inner: Holder<Option<&mut i32 >> {
+      value: edit.first_mut()
+    },
+    owner: String::from("outer")
+  };
+  let inner = outer.inner.move();
+  outer.drop();
+  let value = inner.value.move();
+  inner.drop();
+  match value {
+    Some(item) => {
+      item = 42;
+    },
+    None => {}
+  }
+  print(data[0]);
+}
+fn alternatives() {
+  let number = 9;
+  let left = Choice::Left(&number);
+  let right = Choice::Right(&number);
+  left.drop();
+  right.drop();
+  let empty = Holder<Option<&i32 >> {
+    value: Option<&i32>::None
+  };
+  empty.drop();
+  number = 10;
+  print(number);
+}
+fn main() {
+  mixed();
+  nested();
+  alternatives();
+}

@@ -1,0 +1,21 @@
+@import "std.async"
+
+async fn increment() -> i32 {
+  return 1;
+}
+
+async fn main() {
+  let title = String::from("continued");
+  let count = 0;
+  let name = &title;
+  let edit = &mut count;
+
+  let first = await increment();
+  print(name);
+  edit = edit + first;
+
+  let second = await increment();
+  print(name);
+  edit = edit + second;
+  print(count);
+}

@@ -1,0 +1,14 @@
+@import "std.box"
+
+fn marker() {}
+fn checkpoint() {}
+fn main() -> i32 {
+  let text = String::from("return");
+  marker();
+  if false {
+    return 1;
+  }
+  checkpoint();
+  print(text);
+  return 0;
+}

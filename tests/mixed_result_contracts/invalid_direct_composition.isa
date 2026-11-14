@@ -1,0 +1,11 @@
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+fn forward(read: &i32, edit: &mut i32) -> View {
+  return View {
+    read: read,
+    edit: edit
+  };
+}
+fn main() {}

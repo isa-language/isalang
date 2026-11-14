@@ -1,0 +1,17 @@
+@import "std.box"
+fn marker() {}
+fn main() {
+  let text = String::from("locals");
+  let number = 5;
+  marker();
+  if true {
+    let number = 6;
+    print(number);
+  }
+  print(number);
+  let view = &text;
+  print(view);
+  let edit = &mut text;
+  edit.push_str("!");
+  print(edit);
+}

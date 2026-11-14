@@ -1,0 +1,23 @@
+@import "std.box"
+@import "std.env"
+fn marker() {}
+fn checkpoint() {
+  print(202);
+}
+fn choose() -> bool {
+  let arguments = env::args();
+  return arguments.len() == 1;
+}
+fn main() {
+  let text = String::from("unit");
+  let stop = choose();
+  marker();
+  if stop {
+    borrow shared text as view {
+      print(view);
+      return;
+    }
+  }
+  checkpoint();
+  print(text);
+}

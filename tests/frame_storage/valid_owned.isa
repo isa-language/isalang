@@ -1,0 +1,10 @@
+fn marker() {}
+fn main() {
+  let one = String::from("one");
+  let two = String::from("two");
+  marker();
+  print(one);
+  print(two);
+  one.push_str("!");
+  print(one);
+}

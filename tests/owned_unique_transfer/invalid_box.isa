@@ -1,0 +1,5 @@
+@import "std.box"
+fn main() {
+  let data = 1;
+  let value = Box<&mut i32>::new(&mut data);
+}

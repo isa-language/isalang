@@ -1,4 +1,5 @@
 #include "isac/core.hpp"
+#include <algorithm>
 #include <iostream>
 
 int main() {
@@ -81,9 +82,17 @@ int main() {
   refs = program.borrowedReferences(vectorId);
   if (refs.size() != 4 || refs[0].path.size() != 4 ||
       refs[0].path[0].kind != ReferenceProjectionKind::Element ||
-      refs[0].path[1].kind != ReferenceProjectionKind::Element ||
-      program.containerElement(vectorId) || program.supportsStoredReferenceReferent(vectorId))
+      refs[0].path[1].kind != ReferenceProjectionKind::Element || refs[0].path[0].index != None ||
+      refs[0].path[1].index != 0 || program.containerElement(vectorId) ||
+      program.supportsStoredReferenceReferent(vectorId))
     return 8;
+  if (program.referencePositionType(vectorId, refs[0].path) != sharedId ||
+      program.referencePositionType(boxId, {{ReferenceProjectionKind::Element}}) ||
+      program.referencePositionType(boxId, {{ReferenceProjectionKind::Element, 1}}) ||
+      program.referencePositionType(boxId, {{ReferenceProjectionKind::Element, 0}}) != enumId)
+    return 19;
+  if (!program.conditionalReferencePosition(vectorId, refs[0].path))
+    return 20;
   Type array{Type::Array, "ReferenceArraySchema"};
   array.element = sharedId;
   array.count = 50000;
@@ -93,6 +102,11 @@ int main() {
       refs[0].path != std::vector<ReferenceProjection>{{ReferenceProjectionKind::Element}} ||
       !program.referenceCapability(arrayId, Access::Shared))
     return 9;
+  if (program.conditionalReferencePosition(arrayId, refs[0].path) ||
+      program.referencePositionType(arrayId, {{ReferenceProjectionKind::Element, 49999}}) !=
+          sharedId ||
+      program.referencePositionType(arrayId, {{ReferenceProjectionKind::Element, 50000}}))
+    return 21;
   Type slice{Type::Slice, "ReferenceSliceSchema"};
   slice.element = uniqueId;
   auto sliceId = add(slice);
@@ -149,5 +163,30 @@ int main() {
   program.types[deep].fields.push_back({"borrow", uniqueId, 2});
   if (!program.containsReferences(deep) || program.referenceCapability(deep, Access::Shared))
     return 18;
+
+  const ReferenceSource direct{1, {}, 1, ReferenceSourceKind::Parameter};
+  const ReferenceSource carrier{1, {}, 1, ReferenceSourceKind::Carrier};
+  if (direct == carrier || std::set<ReferenceSource>{direct, carrier}.size() != 2)
+    return 22;
+  auto identity = *std::find_if(program.functions.begin(), program.functions.end(),
+                                [](const auto &f) { return f.name == "identity"; });
+  auto parameter = identity.params.at(0);
+  identity.resultBorrowedContainer = true;
+  identity.result = sharedId;
+  identity.parameterRegions.clear();
+  identity.payloadParameterRegions = {{parameter, parameter, 42, {}}};
+  const auto sources = program.referenceTransferCandidates(identity);
+  if (sources.at({}) !=
+      std::set<ReferenceSource>{{parameter, {}, parameter, ReferenceSourceKind::Carrier}})
+    return 23;
+  Type fixed = box;
+  fixed.element = sharedId;
+  const auto fixedId = add(fixed);
+  const ReferencePath fixedPath{{ReferenceProjectionKind::Element, 0}};
+  if (program.borrowedReferences(fixedId).at(0).path != fixedPath ||
+      program.conditionalReferencePosition(fixedId, fixedPath) ||
+      program.referencePositionType(fixedId, fixedPath) != sharedId ||
+      program.containerElement(fixedId))
+    return 24;
   std::cout << "Reference shapes, regions and recursive semantic carrier paths are consistent\n";
 }

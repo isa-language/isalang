@@ -1,0 +1,9 @@
+struct View {
+  value: &i32,
+}
+impl View {
+  pub fn renew(unique self) {
+    self.value = self.value;
+  }
+}
+fn main() {}

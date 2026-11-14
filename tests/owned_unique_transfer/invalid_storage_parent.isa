@@ -1,0 +1,18 @@
+struct View {
+  value: &mut i32,
+}
+fn forward(input: View) -> View {
+  return input.move();
+}
+fn main() {
+  let data = 1;
+  let holder = View {
+    value: &mut data
+  };
+  let edit = &mut holder.value;
+    let result = forward(View {
+      value: edit
+  });
+  holder.drop();
+  print(result.value);
+}

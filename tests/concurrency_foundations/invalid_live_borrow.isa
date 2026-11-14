@@ -1,0 +1,7 @@
+fn main() {
+  let data = 1;
+  let read = &data;
+  let edit = &mut data;
+  print(read);
+  edit = 2;
+}

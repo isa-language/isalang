@@ -1,0 +1,16 @@
+struct Outer {
+  value: Inner,
+}
+struct Inner {
+  value: String,
+}
+fn main() {
+  let o = Outer::new();
+  o.value = Inner::new();
+  o.value.value = String::from("initialized");
+  print(o.value.value.as_str());
+  o.value.value.drop();
+  o.value = Inner::new();
+  o.value.value = String::from("again");
+  print(o.value.value.as_str());
+}

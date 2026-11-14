@@ -1,0 +1,17 @@
+@import "std.buffer"
+struct Input {
+  number: &mut i32,
+  flag: &mut bool,
+  owner: Buffer,
+}
+struct Views {
+  number: &mut i32,
+  flag: &mut bool,
+}
+fn forward(input: Input) -> Views {
+  return Views {
+    number: input.number.move(),
+    flag: input.flag.move()
+  };
+}
+fn main() {}

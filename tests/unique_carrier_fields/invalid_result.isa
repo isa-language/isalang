@@ -1,7 +1,7 @@
 struct Holder {
   value: Option<&mut i32>,
 }
-fn wrap(input: &mut i32[1]) -> Holder {
+fn wrap(input: &mut i32[1], other: &mut i32[1]) -> Holder {
   return Holder {
     value: input.first_mut()
   };

@@ -1,0 +1,28 @@
+struct Views {
+  first: &mut i32,
+  second: &mut i32,
+}
+fn relay(input: Views) -> Views {
+  return swap(input.move());
+}
+fn swap(input: Views) -> Views {
+  return Views {
+    first: input.second.move(),
+    second: input.first.move()
+  };
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = relay(Views {
+      first: &mut a,
+      second: &mut b
+  });
+  let edit = &mut result.first;
+  edit = 10;
+  let other = &mut result.second;
+  other = 20;
+  result.drop();
+  print(a);
+  print(b);
+}

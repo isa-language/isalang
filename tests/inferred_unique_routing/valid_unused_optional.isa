@@ -1,0 +1,25 @@
+struct Input {
+  required: &mut i32,
+  maybe: Option<&mut i32>,
+}
+struct View {
+  value: &mut i32,
+}
+fn select(input: Input) -> View {
+  return View {
+    value: input.required.move()
+  };
+}
+fn main() {
+  let a = 1;
+  let other = [2, 3];
+    let result = select(Input {
+      required: &mut a,
+      maybe: other.first_mut()
+  });
+  print(other[0]);
+  let edit = &mut result.value;
+  edit = 10;
+  result.drop();
+  print(a);
+}

@@ -1,0 +1,10 @@
+fn idle() {}
+fn double(value: i32) -> i32 {
+  return value * 2;
+}
+fn main() {
+  let x = 10;
+  let y = 20;
+  idle();
+  print(double(x) + y);
+}

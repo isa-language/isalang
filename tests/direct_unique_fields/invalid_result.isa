@@ -1,9 +1,11 @@
 struct View {
-  value: &mut i32,
+  first: &mut i32,
+  second: &mut i32,
 }
 fn wrap(value: &mut i32) -> View {
   return View {
-    value: value
+    first: value,
+    second: value
   };
 }
 fn main() {}

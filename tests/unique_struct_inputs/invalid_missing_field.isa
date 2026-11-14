@@ -1,0 +1,8 @@
+struct View {
+  value: &mut i32,
+}
+fn consume(view: View) {}
+fn main() {
+  let view = View::new();
+  consume(view.move());
+}

@@ -1,0 +1,17 @@
+@import "std.box"
+fn make_text() -> String {
+  print(11);
+  return String::from("ssa");
+}
+fn make_number() -> i32 {
+  print(22);
+  return 7;
+}
+fn consume(text: String, number: i32) -> i32 {
+  print(text);
+  return number;
+}
+fn main() -> i32 {
+  let answer = consume(make_text(), make_number());
+  return answer - 7;
+}

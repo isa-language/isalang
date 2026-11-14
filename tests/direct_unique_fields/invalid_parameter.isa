@@ -1,7 +1,5 @@
 struct View {
   value: &mut i32,
 }
-fn consume(value: View) {
-  value.drop();
-}
+fn consume(value: &mut View) {}
 fn main() {}

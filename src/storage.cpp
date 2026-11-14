@@ -117,14 +117,14 @@ class Analysis {
   bool ownedResult(const I &i) const {
     if (i.result == None || schema(i.type).empty())
       return false;
-    if (i.kind == I::Call || i.kind == I::ContainerCall)
+    if (core::functionCall(i) || i.kind == I::ContainerCall)
       return !p.semantics.functions.at(i.function).returnsReference();
     return i.kind != I::ReferenceArgument && i.kind != I::Read && i.kind != I::Copy;
   }
   IntrinsicContract contract(const I &i) const {
     if (i.kind == I::ContainerCall || i.kind == I::StringCall || i.kind == I::InputCall)
       return intrinsicContract(i.intrinsicId);
-    if (i.kind == I::Call || i.kind == I::ProtocolTransition) {
+    if (core::functionCall(i) || i.kind == I::ProtocolTransition) {
       const auto &target = p.semantics.functions.at(i.function);
       if (target.releases)
         return {false, Mutation::Release, false};
@@ -143,7 +143,8 @@ class Analysis {
     return found == referenceArguments.end() ? std::nullopt : std::optional(found->second);
   }
   void postState(State &state, const I &i) const {
-    if ((i.kind != I::Call && i.kind != I::ProtocolTransition) || !definitions.contains(i.function))
+    if ((!core::functionCall(i) && i.kind != I::ProtocolTransition) ||
+        !definitions.contains(i.function))
       return;
     const auto &target = p.semantics.functions.at(i.function);
     for (const auto &post : definitions.at(i.function)->fieldPostStates) {
@@ -184,7 +185,7 @@ class Analysis {
     };
     if (i.slot != None && i.access == Access::Unique)
       add(i.slot);
-    if (i.kind == I::Call || i.kind == I::ProtocolTransition || i.kind == I::ContainerCall) {
+    if (core::functionCall(i) || i.kind == I::ProtocolTransition || i.kind == I::ContainerCall) {
       const auto &target = p.semantics.functions.at(i.function);
       for (size_t n = 0; n < target.params.size(); ++n) {
         const auto &param = p.semantics.symbols.at(target.params[n]);
@@ -235,7 +236,7 @@ class Analysis {
         result = detail::subtree(state, symbol(i.slot));
       else if (i.kind == I::FieldTake) {
         if (auto base = places.get(i.slot))
-          result = detail::subtree(state, detail::field(*base, i.fieldIndex));
+          result = detail::subtree(state, detail::fieldOperation(*base, i));
       } else if (i.kind == I::PayloadTake) {
         if (auto base = places.get(i.slot))
           result = detail::subtree(state, detail::append(*base, i.payloadPath));
@@ -292,7 +293,7 @@ class Analysis {
     }
     if (i.kind == I::FieldStore || i.kind == I::FieldTake || i.kind == I::FieldDrop) {
       if (auto base = places.get(i.slot)) {
-        auto field = detail::field(*base, i.fieldIndex);
+        auto field = detail::fieldOperation(*base, i);
         if (i.kind == I::FieldStore)
           detail::install(state, field, detail::subtree(state, value(i.args.at(0))));
         else

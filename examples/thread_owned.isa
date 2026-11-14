@@ -1,0 +1,32 @@
+@import "std.vec"
+@import "std.box"
+
+fn grow(values: Vec<i32>) -> Vec<i32> {
+  values.push(20);
+  return values.move();
+}
+fn edit(text: &mut String) -> usize {
+  text.push_str(" from worker");
+  return text.len();
+}
+fn total(values: &i32[]) -> i32 {
+  let sum = 0;
+  let i: usize = 0;
+  while i < values.len() {
+    sum = sum + values[i];
+    i = i + 1;
+  }
+  return sum;
+}
+fn main() {
+  let values = Vec<i32> {
+    10
+  };
+  let result = @thread(grow(values.move()));
+  @println("length = {}", result.len());
+  let text = String::from("hello");
+  let length = @thread(edit(&mut text));
+  @println("{} ({})", text, length);
+  let data: i32[3] = [1, 2, 3];
+  @println("sum = {}", @thread(total(&data)));
+}

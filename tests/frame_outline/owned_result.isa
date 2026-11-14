@@ -1,0 +1,11 @@
+@import "std.box"
+fn marker() {}
+fn worker(text: String) -> String {
+  marker();
+  text.push_str("!");
+  return text.move();
+}
+fn main() {
+  let result = worker(String::from("returned"));
+  print(result);
+}

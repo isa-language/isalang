@@ -1,0 +1,16 @@
+@import "std.box"
+struct Pair {
+  first: String,
+  second: String,
+}
+fn marker() {}
+fn main() {
+  let pair = Pair {
+    first: String::from("first"),
+    second: String::from("second")
+  };
+  let first = pair.first.move();
+  marker();
+  print(first);
+  print(pair.second.as_str());
+}

@@ -1,0 +1,54 @@
+struct Views {
+  first: Result<&mut i32, i32>,
+  second: &mut i32,
+}
+fn select(input: Views) -> Result<&mut i32, i32> {
+  let selected = input.first.move();
+  match selected {
+    Ok(edit) => {
+      return Result::Ok(edit);
+    },
+    Err(code) => {
+      return Result::Err(code);
+    },
+  }
+}
+fn exercise(fail: bool) {
+  let a = 1;
+  let b = 2;
+  if fail {
+      let output = select(Views {
+        first: Result::Err(7),
+        second: &mut b
+    });
+    b = 22;
+    match output {
+      Ok(edit) => {
+        edit = 10;
+      },
+      Err(code) => {
+        print(code);
+      }
+    }
+  } else {
+      let output = select(Views {
+        first: Result::Ok(&mut a),
+        second: &mut b
+    });
+    b = 22;
+    match output {
+      Ok(edit) => {
+        edit = 10;
+      },
+      Err(code) => {
+        print(code);
+      }
+    }
+  }
+  print(a);
+  print(b);
+}
+fn main() {
+  exercise(false);
+  exercise(true);
+}

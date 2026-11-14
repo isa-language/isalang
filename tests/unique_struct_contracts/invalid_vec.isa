@@ -1,0 +1,7 @@
+@import "std.vec"
+struct View {
+  value: &mut i32,
+}
+fn main() {
+  let values = Vec<View>::new();
+}

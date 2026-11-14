@@ -1,0 +1,31 @@
+struct View {
+  read: &i32,
+  edit: &mut i32,
+}
+impl View {
+  fn inspect(shared self) {
+    print(self.read);
+  }
+  fn update(unique self) {
+    let edit = &mut self.edit;
+    edit = 20;
+  }
+}
+fn forward(input: View) -> View {
+  return input.move();
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let output = forward(View {
+      read: &a,
+      edit: &mut b
+  });
+  output.inspect();
+  output.update();
+  output.inspect();
+  output.drop();
+  a = 10;
+  print(a);
+  print(b);
+}

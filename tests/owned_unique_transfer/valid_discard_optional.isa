@@ -1,0 +1,17 @@
+struct View {
+  value: Option<&mut i32>,
+}
+fn forward(input: View) -> View {
+  return View {
+    value: Option::None
+  };
+}
+fn main() {
+  let data = [1, 2];
+  let parent = &mut data;
+    let result = forward(View {
+      value: parent.first_mut()
+  });
+  result.drop();
+  print(parent[0]);
+}

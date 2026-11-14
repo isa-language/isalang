@@ -1,0 +1,43 @@
+enum Choice<A, B> {
+  One(A),
+  Other(B),
+}
+struct Input {
+  a: Option<&i32>,
+  b: Option<&bool>,
+  edit: &mut i32,
+}
+struct Output {
+  choice: Choice<&i32, &bool>,
+  edit: &mut i32,
+}
+fn forward(input: Input) -> Output {
+  let a = input.a.move();
+  match a {
+    Some(value) => {
+      return Output {
+        choice: Choice::One(value),
+        edit: input.edit.move()
+      };
+    },
+    None => {
+      let b = input.b.move();
+      match b {
+        Some(flag) => {
+          return Output {
+            choice: Choice::Other(flag),
+            edit: input.edit.move()
+          };
+        },
+        None => {
+          let local = 1;
+          return Output {
+            choice: Choice::One(&local),
+            edit: input.edit.move()
+          };
+        },
+      }
+    },
+  }
+}
+fn main() {}

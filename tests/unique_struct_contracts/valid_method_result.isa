@@ -1,0 +1,23 @@
+struct Data {
+  value: i32,
+}
+struct View<T> {
+  value: &mut T,
+}
+impl Data {
+  pub fn view(unique self) -> View<Data> {
+    return View<Data> {
+      value: self
+    };
+  }
+}
+fn main() {
+  let data = Data {
+    value: 1
+  };
+  let view = data.view();
+  let edit = &mut view.value;
+  edit.value = 42;
+  view.drop();
+  print(data.value);
+}

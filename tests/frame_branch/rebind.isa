@@ -1,0 +1,23 @@
+@import "std.box"
+@import "std.env"
+fn choose() -> bool {
+  let args = env::args();
+  return args.len() == 1;
+}
+fn marker() {}
+fn checkpoint() {
+  print(200);
+}
+fn main() {
+  let early = String::from("early");
+  let flag = choose();
+  marker();
+  if flag {
+    checkpoint();
+  } else {
+    print(300);
+  }
+  early.drop();
+  let late = String::from("late");
+  print(late);
+}

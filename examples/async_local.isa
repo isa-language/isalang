@@ -1,0 +1,22 @@
+@import "std.async"
+
+async fn increment(value: i32) -> i32 {
+  @println("increment {}", value);
+  return value + 1;
+}
+
+async fn message() -> String {
+  let text = String::from("value");
+  let first = await increment(10);
+  let second = await increment(first);
+  text.push_str(" ready");
+  @println("{}: {}", text, second);
+  return text.move();
+}
+
+async fn main() {
+  let future = message();
+  @println("created");
+  let text = await future;
+  print(text);
+}

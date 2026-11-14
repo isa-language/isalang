@@ -1,0 +1,44 @@
+struct Leaf<T> {
+  value: &mut T,
+}
+struct Input {
+  a: Leaf<i32>,
+  b: Leaf<i32>,
+  owner: String,
+}
+struct Output {
+  b: Leaf<i32>,
+  a: Leaf<i32>,
+  owner: String,
+}
+fn forward(input: Input) -> Output {
+  let a = input.a.move();
+  let b = input.b.move();
+  return Output {
+    b: b.move(),
+    a: a.move(),
+    owner: input.owner.move()
+  };
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+    let result = forward(Input {
+      a: Leaf<i32> {
+        value: &mut a
+      },
+      b: Leaf<i32> {
+        value: &mut b
+      },
+      owner: String::from("owned")
+  });
+  let edit = &mut result.b.value;
+  edit = 10;
+  let other = &mut result.a.value;
+  other = 20;
+  let owner = result.owner.move();
+  print(owner);
+  result.drop();
+  print(a);
+  print(b);
+}

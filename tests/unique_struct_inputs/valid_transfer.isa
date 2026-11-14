@@ -1,0 +1,19 @@
+struct View {
+  value: &mut i32,
+}
+fn downstream(view: View) {
+  let edit = view.value.move();
+  edit = 42;
+}
+fn consume(view: View) {
+  downstream(view.move());
+}
+fn main() {
+  let data = 1;
+  let parent = &mut data;
+    consume(View {
+      value: parent
+  });
+  parent = 43;
+  print(parent);
+}

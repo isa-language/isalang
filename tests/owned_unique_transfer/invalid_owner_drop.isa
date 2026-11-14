@@ -1,0 +1,14 @@
+struct View {
+  value: &mut String,
+}
+fn forward(input: View) -> View {
+  return input.move();
+}
+fn main() {
+  let data = String::from("hello");
+    let result = forward(View {
+      value: &mut data
+  });
+  data.drop();
+  print(result.value);
+}

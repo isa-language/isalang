@@ -1,0 +1,21 @@
+struct Holder {
+  value: Option<&mut i32>,
+}
+fn wrap(input: &mut i32[2]) -> Holder {
+  return Holder {
+    value: input.first_mut()
+  };
+}
+fn main() {
+  let data = [1, 2];
+  let view = wrap(&mut data);
+  let item = view.value.move();
+  match item {
+    Some(edit) => {
+      edit = 42;
+    },
+    None => {}
+  }
+  view.drop();
+  print(data[0]);
+}

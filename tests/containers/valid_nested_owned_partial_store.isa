@@ -8,4 +8,8 @@ struct Holder<T> {
 fn main() {
   let h = Holder<Pair<String >>::new();
   h.value = Pair<String>::new();
+  h.value.first = String::from("discarded");
+  h.value = Pair<String>::new();
+  h.value.second = String::from("second");
+  print(h.value.second.as_str());
 }

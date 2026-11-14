@@ -1,0 +1,11 @@
+struct View {
+  value: &mut i32,
+}
+impl View {
+  pub fn forward(unique self) -> View {
+    return View {
+      value: self.value.move()
+    };
+  }
+}
+fn main() {}

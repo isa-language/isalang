@@ -24,24 +24,26 @@ uint64_t isac_rt_monotonic_ns(void) {
   return (uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec;
 }
 #ifdef ISAC_RT_TESTING
-static size_t allocations, frees;
-static int reporting;
+#include <stdatomic.h>
+static _Atomic size_t allocations, frees;
+static atomic_flag reporting = ATOMIC_FLAG_INIT;
 static void report(void) {
-  fprintf(stderr, "ISAC_RT allocations=%zu frees=%zu\n", allocations, frees);
+  fprintf(stderr, "ISAC_RT allocations=%zu frees=%zu\n",
+          atomic_load_explicit(&allocations, memory_order_relaxed),
+          atomic_load_explicit(&frees, memory_order_relaxed));
 }
 static void track_alloc(void) {
-  if (!reporting) {
+  if (!atomic_flag_test_and_set_explicit(&reporting, memory_order_relaxed)) {
     if (atexit(report))
       abort();
-    reporting = 1;
   }
-  ++allocations;
+  atomic_fetch_add_explicit(&allocations, 1, memory_order_relaxed);
 }
 size_t isac_rt_test_allocations(void) {
-  return allocations;
+  return atomic_load_explicit(&allocations, memory_order_relaxed);
 }
 size_t isac_rt_test_frees(void) {
-  return frees;
+  return atomic_load_explicit(&frees, memory_order_relaxed);
 }
 #endif
 _Noreturn void isac_rt_panic(const char *message) {
@@ -71,7 +73,7 @@ void isac_rt_free(void *ptr) {
     return;
 #ifdef ISAC_RT_TESTING
   if (ptr)
-    ++frees;
+    atomic_fetch_add_explicit(&frees, 1, memory_order_relaxed);
 #endif
   isac_allocator_deallocate(ptr);
 }

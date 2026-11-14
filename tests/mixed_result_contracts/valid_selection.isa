@@ -1,0 +1,42 @@
+struct Input {
+  a: &mut i32,
+  b: &mut i32,
+  x: &i32,
+  y: &i32,
+}
+struct Output {
+  read: &i32,
+  edit: &mut i32,
+}
+fn select(input: Input) -> Output {
+  return Output {
+    read: input.y,
+    edit: input.b.move()
+  };
+}
+fn main() {
+  let a = 1;
+  let b = 2;
+  let x = 3;
+  let y = 4;
+  let wa = &mut a;
+  let wb = &mut b;
+    let result = select(Input {
+      a: wa,
+      b: wb,
+      x: &x,
+      y: &y
+  });
+  wa = 10;
+  x = 30;
+  print(result.read);
+  let edit = &mut result.edit;
+  edit = 20;
+  result.drop();
+  wb = 21;
+  y = 40;
+  print(wa);
+  print(wb);
+  print(x);
+  print(y);
+}

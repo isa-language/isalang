@@ -1,0 +1,22 @@
+struct View {
+  value: Option<&mut i32>,
+}
+fn consume(view: View) {
+  let value = view.value.move();
+  match value {
+    Some(edit) => {
+      edit = 42;
+    },
+    None => {}
+  }
+}
+fn main() {
+  let data = 1;
+    consume(View {
+      value: Option::Some(&mut data)
+  });
+  print(data);
+    consume(View {
+      value: Option::None
+  });
+}

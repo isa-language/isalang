@@ -1,0 +1,20 @@
+struct View<T> {
+  value: &mut T,
+}
+struct Outer {
+  inner: View<i32>,
+  owner: String,
+}
+fn main() {
+  let data = 1;
+  let outer = Outer {
+    inner: View<i32> {
+      value: &mut data
+    },
+    owner: String::from("outer")
+  };
+  let edit = &mut outer.inner.value;
+  edit = 42;
+  outer.drop();
+  print(data);
+}

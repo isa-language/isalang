@@ -1,0 +1,14 @@
+struct View {
+  value: &mut i32,
+}
+struct Output {
+  a: &mut i32,
+  b: &mut i32,
+}
+fn forward(input: View) -> Output {
+  return Output {
+    a: input.value.move(),
+    b: input.value.move()
+  };
+}
+fn main() {}
