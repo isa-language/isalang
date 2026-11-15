@@ -4,7 +4,14 @@
 #include <map>
 #include <set>
 #include <sstream>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 namespace isac {
 FileId SourceManager::add(std::string path, std::string text) {
   SourceFile f{std::move(path), std::move(text), {0}};
@@ -134,7 +141,14 @@ void TerminalRenderer::render(const Diagnostic &d, std::ostream &o) const {
                          : d.severity == DiagnosticSeverity::Warning ? "warning"
                          : d.severity == DiagnosticSeverity::Note    ? "note"
                                                                      : "help";
-  bool colored = color == ColorMode::Always || (color == ColorMode::Auto && isatty(STDERR_FILENO));
+#ifdef _WIN32
+  DWORD mode = 0;
+  bool terminal = GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode) &&
+                  (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#else
+  bool terminal = isatty(STDERR_FILENO);
+#endif
+  bool colored = color == ColorMode::Always || (color == ColorMode::Auto && terminal);
   if (colored)
     o << "\033[1;31m";
   o << severity << "[" << diagnosticCode(d.code) << "]";

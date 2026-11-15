@@ -1,4 +1,5 @@
 #include "isac/modules.hpp"
+#include "isac/platform.hpp"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -272,23 +273,26 @@ class Loader {
                        [](unsigned char c) { return std::isalnum(c) || c == '_' || c == '.'; }))
         fail(origin, DiagnosticCode::InvalidImport, "invalid bundled module name `" + spec + "`");
       std::string relative = spec;
-      std::replace(relative.begin(), relative.end(), '.', fs::path::preferred_separator);
-      auto library = fs::weakly_canonical(ISAC_LIBRARY_ROOT);
+      std::replace(relative.begin(), relative.end(), '.', '/');
+      auto library =
+          fs::weakly_canonical(platform::filePath(platform::libraryRoot(ISAC_LIBRARY_ROOT)));
       path = fs::weakly_canonical(library / (relative + ".isa"));
       auto inLibrary = path.lexically_relative(library);
       if (inLibrary.empty() || *inLibrary.begin() == "..")
         fail(origin, DiagnosticCode::InvalidImport,
              "bundled import escapes its trusted library root");
     } else {
-      fs::path local(spec);
+      auto local = platform::filePath(spec);
       if (local.extension() != ".isa")
         fail(origin, DiagnosticCode::InvalidImport,
              "local imports require an .isa file; bundled modules use std.* or core.*");
       path = fs::weakly_canonical(
-          local.is_absolute() ? local : fs::path(modules[source].path).parent_path() / local);
+          local.is_absolute() ? local
+                              : platform::filePath(modules[source].path).parent_path() / local);
     }
     uint32_t target;
-    if (auto found = files.find(path.string()); found != files.end()) {
+    const auto textPath = platform::pathText(path);
+    if (auto found = files.find(textPath); found != files.end()) {
       target = found->second;
       if (modules[target].trusted != trusted)
         fail(origin, DiagnosticCode::InvalidImport,
@@ -300,7 +304,7 @@ class Loader {
         DiagnosticEngine()
             .error(DiagnosticCode::ImportNotFound, origin,
                    "cannot find imported module `" + spec + "`")
-            .note("resolved path: " + path.string())
+            .note("resolved path: " + textPath)
             .emit();
       if (fs::file_size(path) > 4 * 1024 * 1024)
         fail(origin, DiagnosticCode::InvalidImport, "imported module exceeds 4 MiB source limit");
@@ -308,16 +312,17 @@ class Loader {
       if (!file)
         fail(origin, DiagnosticCode::ImportNotFound, "cannot read imported module");
       std::string text{std::istreambuf_iterator<char>(file), {}};
-      auto tokens = lex(text, sources ? sources->add(path.string(), text) : NoFile);
+      auto tokens = lex(text, sources ? sources->add(textPath, text) : NoFile);
       for (auto &token : tokens)
-        token.loc.file = path.string();
+        token.loc.file = textPath;
       target = modules.size();
-      files[path.string()] = target;
-      modules.push_back({target, path.string(), trusted, std::move(tokens), {}});
+      files[textPath] = target;
+      modules.push_back({target, textPath, trusted, std::move(tokens), {}});
     }
     bool qualifiedOnly = !alias.empty();
     if (alias.empty())
-      alias = trusted ? spec.substr(spec.find_last_of('.') + 1) : fs::path(spec).stem().string();
+      alias = trusted ? spec.substr(spec.find_last_of('.') + 1)
+                      : platform::pathText(platform::filePath(spec).stem());
     auto &edges = modules[source].dependencies;
     for (const auto &edge : edges)
       if (edge.alias == alias && edge.target != target)
@@ -425,8 +430,8 @@ public:
     namespace fs = std::filesystem;
     std::string path = tokens.front().loc.file;
     if (path.empty())
-      path = (fs::current_path() / "<input>").string();
-    path = fs::weakly_canonical(path).string();
+      path = platform::pathText(fs::current_path() / "<input>");
+    path = platform::pathText(fs::weakly_canonical(platform::filePath(path)));
     modules.push_back({0, path, false, tokens, {}});
     files[path] = 0;
   }

@@ -6,11 +6,15 @@
 #include "isac/frames.hpp"
 #include "isac/liveness.hpp"
 #include "isac/modules.hpp"
+#include "isac/platform.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <set>
 #include <sstream>
+#ifndef ISAC_VERSION_LABEL
+#define ISAC_VERSION_LABEL "0.2"
+#endif
 namespace {
 class PassTimer {
   bool enabled;
@@ -38,12 +42,16 @@ int main(int argc, char **argv) {
       "--emit-llvm-dialect | --emit-llvm | --emit-asm | --emit-obj | -o executable "
       "[--sanitize] [--runtime-test-counters]]\nOptions: --target=TRIPLE --cpu=CPU "
       "--library --link-object PATH -lNAME -LPATH --emit-c-bridge\n"
-      "--features=+FEATURE -O0/-O1/-O2/-O3/-Os/-Oz --print-target --time-passes "
+      "--features=+FEATURE -O0/-O1/-O2/-O3/-Os/-Oz --version --print-target --time-passes "
       "--frame-roundtrip [--frame-heap] [--frame-outline] [--frame-state] [--frame-step-before=FIRST,NEXT,...] [--frame-project-fields] [--frame-state-exit=ready/checkpoint[:N]/completed] [--frame-construction-exit=N | --frame-destroy-if=BOOL] "
       "--thread-call=FUNCTION (experimental scoped integer worker) "
       "--defer-call=FUNCTION [--defer-before=FIRST,NEXT,...] (experimental local segments) --color=auto/always/never\n";
   if (argc == 2 && std::string(argv[1]) == "--help") {
     std::cout << usage;
+    return 0;
+  }
+  if (argc == 2 && std::string(argv[1]) == "--version") {
+    std::cout << "Isac " << ISAC_VERSION_LABEL << "\ntarget: " << isac::hostTriple() << "\n";
     return 0;
   }
   std::string input, mode = "--check", output;
@@ -60,6 +68,9 @@ int main(int argc, char **argv) {
   isac::SourceManager sources;
   isac::ColorMode color = isac::ColorMode::Auto;
   try {
+    isac::platform::DriverArguments commandLine(argc, argv);
+    argc = commandLine.count;
+    argv = commandLine.values;
     std::set<std::string> modes = {"--emit-c-bridge",
                                    "--emit-region-constraints",
                                    "--emit-async-core",
@@ -301,7 +312,7 @@ int main(int argc, char **argv) {
         (nativeOptions.counters && mode != "native"))
       throw std::runtime_error("--sanitize requires native/LLVM emission; --runtime-test-counters "
                                "requires native emission");
-    std::ifstream f(input);
+    std::ifstream f(isac::platform::filePath(input));
     if (!f)
       throw std::runtime_error("cannot open input: " + input);
     std::stringstream b;
@@ -456,7 +467,7 @@ int main(int argc, char **argv) {
     else if (mode == "native")
       isac::compileNative(text, output, nativeOptions);
     else if (!output.empty()) {
-      std::ofstream emitted(output);
+      std::ofstream emitted(isac::platform::filePath(output));
       emitted << text;
       if (!emitted)
         throw std::runtime_error("cannot write output");

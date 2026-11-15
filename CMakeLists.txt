@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(
   isac_frontend
   src/frontend.cpp
+  src/platform.cpp
   src/intrinsics.cpp
   src/macros.cpp
   src/diagnostics.cpp
@@ -62,6 +63,15 @@ target_compile_options(isac_frontend PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(isac src/main.cpp)
 target_link_libraries(isac PRIVATE isac_frontend)
+set(ISAC_VERSION_LABEL
+    "${PROJECT_VERSION}"
+    CACHE STRING "Compiler release identification")
+target_compile_definitions(isac PRIVATE ISAC_VERSION_LABEL="${ISAC_VERSION_LABEL}")
+if(WIN32)
+  target_compile_definitions(isac_frontend PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+  target_link_libraries(isac_frontend PRIVATE shell32)
+  target_link_options(isac PRIVATE -Wl,--stack,16777216)
+endif()
 
 find_package(MLIR REQUIRED CONFIG HINTS /usr/local/lib/cmake/mlir)
 find_program(ISAC_CLANG NAMES clang-${LLVM_VERSION_MAJOR} clang REQUIRED)
@@ -70,10 +80,17 @@ set(ISAC_ALLOCATOR_SOURCE
     CACHE FILEPATH "Single allocator provider linked into the Isac runtime")
 get_filename_component(ISAC_ALLOCATOR_SOURCE "${ISAC_ALLOCATOR_SOURCE}" ABSOLUTE BASE_DIR
                        "${CMAKE_CURRENT_SOURCE_DIR}")
-find_package(Threads REQUIRED)
+if(NOT WIN32)
+  find_package(Threads REQUIRED)
+endif()
 add_library(isac_runtime STATIC runtime/src/isac_runtime.c runtime/src/isac_threads.c
                                 "${ISAC_ALLOCATOR_SOURCE}")
-target_link_libraries(isac_runtime PUBLIC Threads::Threads)
+if(WIN32)
+  target_link_libraries(isac_runtime PUBLIC shell32)
+  target_compile_definitions(isac_runtime PRIVATE _WIN32_WINNT=0x0A00)
+else()
+  target_link_libraries(isac_runtime PUBLIC Threads::Threads)
+endif()
 target_include_directories(isac_runtime PUBLIC runtime/include)
 target_compile_options(isac_runtime PRIVATE -Wall -Wextra -Wpedantic)
 

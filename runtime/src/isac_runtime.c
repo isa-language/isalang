@@ -6,22 +6,39 @@
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
-#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <time.h>
+#ifdef _WIN32
+#include "isac_windows.h"
+#else
+#include <spawn.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 uint64_t isac_rt_monotonic_ns(void) {
+#ifdef _WIN32
+  LARGE_INTEGER counter, frequency;
+  if (!QueryPerformanceCounter(&counter) || !QueryPerformanceFrequency(&frequency) ||
+      counter.QuadPart < 0 || frequency.QuadPart <= 0)
+    isac_rt_panic("monotonic clock unavailable");
+  uint64_t ticks = (uint64_t)counter.QuadPart, rate = (uint64_t)frequency.QuadPart;
+  uint64_t seconds = ticks / rate;
+  if (seconds > (UINT64_MAX - 999999999) / UINT64_C(1000000000))
+    isac_rt_panic("monotonic clock exceeds nanosecond representation");
+  return seconds * UINT64_C(1000000000) +
+         (uint64_t)(((__uint128_t)(ticks % rate) * UINT64_C(1000000000)) / rate);
+#else
   struct timespec value;
   if (clock_gettime(CLOCK_MONOTONIC, &value) != 0)
     isac_rt_panic("monotonic clock unavailable");
   if (value.tv_sec < 0 || (uint64_t)value.tv_sec > (UINT64_MAX - 999999999) / 1000000000)
     isac_rt_panic("monotonic clock exceeds nanosecond representation");
   return (uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec;
+#endif
 }
 #ifdef ISAC_RT_TESTING
 #include <stdatomic.h>
@@ -48,7 +65,13 @@ size_t isac_rt_test_frees(void) {
 #endif
 _Noreturn void isac_rt_panic(const char *message) {
   fprintf(stderr, "isac runtime panic: %s\n", message);
+#ifdef _WIN32
+
+  fflush(stderr);
+  _Exit(3);
+#else
   abort();
+#endif
 }
 void *isac_rt_alloc(size_t size) {
   void *p = isac_allocator_allocate(size ? size : 1, 0);
@@ -754,6 +777,28 @@ static IsacStr *env_arguments;
 static size_t env_argument_count;
 static int env_initialized;
 void isac_rt_env_init(int32_t argc, char **argv) {
+#ifdef _WIN32
+  (void)argc;
+  (void)argv;
+  if (env_initialized)
+    isac_rt_panic("invalid environment initialization");
+  int count = 0;
+  wchar_t **wide = CommandLineToArgvW(GetCommandLineW(), &count);
+  if (!wide || count < 0 || (size_t)count > SIZE_MAX / sizeof(IsacStr))
+    isac_rt_panic("cannot decode Windows command-line arguments");
+  env_argument_count = (size_t)count;
+  if (count)
+    env_arguments = isac_rt_alloc_zeroed((size_t)count * sizeof(IsacStr));
+  for (int i = 0; i < count; ++i) {
+    size_t length = 0;
+    char *text = win_utf8(wide[i], &length);
+    if (!text)
+      isac_rt_panic("command-line argument is not valid Unicode");
+    env_arguments[i] = (IsacStr){(uint8_t *)text, length};
+  }
+  LocalFree(wide);
+  env_initialized = 1;
+#else
   if (env_initialized || argc < 0 || (argc && !argv))
     isac_rt_panic("invalid environment initialization");
   if ((size_t)argc > SIZE_MAX / sizeof(IsacStr))
@@ -773,6 +818,7 @@ void isac_rt_env_init(int32_t argc, char **argv) {
     env_arguments[i].len = len;
   }
   env_initialized = 1;
+#endif
 }
 void isac_rt_env_destroy(void) {
   for (size_t i = 0; i < env_argument_count; ++i)
@@ -898,7 +944,11 @@ int32_t isac_rt_string_read_file(IsacString *out, const IsacStr *path) {
   int error = os_cstr(path, &name);
   if (error)
     return error;
+#ifdef _WIN32
+  FILE *file = win_fopen(name, "rb");
+#else
   FILE *file = fopen(name, "rb");
+#endif
   error = file ? 0 : (errno ? errno : EIO);
   isac_rt_free(name);
   if (error)
@@ -952,6 +1002,46 @@ int32_t isac_rt_string_env_var(IsacString *out, const IsacStr *name) {
     isac_rt_free(key);
     return EINVAL;
   }
+#ifdef _WIN32
+  wchar_t *wide = win_wide(key);
+  isac_rt_free(key);
+  if (!wide)
+    return errno;
+  SetLastError(ERROR_SUCCESS);
+  DWORD required = GetEnvironmentVariableW(wide, NULL, 0);
+  wchar_t *value = NULL;
+  if (!required && GetLastError() == ERROR_SUCCESS)
+    required = 1;
+  while (required) {
+    if ((size_t)required > SIZE_MAX / sizeof(wchar_t)) {
+      error = EOVERFLOW;
+      break;
+    }
+    value = isac_rt_alloc((size_t)required * sizeof(wchar_t));
+    SetLastError(ERROR_SUCCESS);
+    DWORD actual = GetEnvironmentVariableW(wide, value, required);
+    if (actual < required && (actual || GetLastError() == ERROR_SUCCESS))
+      break;
+    isac_rt_free(value);
+    value = NULL;
+    if (!actual) {
+      error = win_error(GetLastError());
+      break;
+    }
+    required = actual;
+  }
+  isac_rt_free(wide);
+  if (!value)
+    return error ? error : ENOENT;
+  size_t length = 0;
+  char *encoded = win_utf8(value, &length);
+  isac_rt_free(value);
+  if (!encoded)
+    return errno;
+  isac_rt_string_drop(out);
+  *out = (IsacString){(uint8_t *)encoded, length, length + 1};
+  return 0;
+#else
   const char *value = getenv(key);
   isac_rt_free(key);
   if (!value)
@@ -965,13 +1055,18 @@ int32_t isac_rt_string_env_var(IsacString *out, const IsacStr *name) {
   isac_rt_string_drop(out);
   *out = temporary;
   return 0;
+#endif
 }
 int32_t isac_rt_fs_write_text(const IsacStr *path, const IsacStr *text) {
   char *name;
   int error = os_cstr(path, &name);
   if (error)
     return error;
+#ifdef _WIN32
+  FILE *file = win_fopen(name, "wb");
+#else
   FILE *file = fopen(name, "wb");
+#endif
   error = file ? 0 : (errno ? errno : EIO);
   isac_rt_free(name);
   if (error)
@@ -994,9 +1089,22 @@ int32_t isac_rt_fs_exists(const IsacStr *path) {
   int error = os_cstr(path, &name);
   if (error)
     return -error;
+#ifdef _WIN32
+  wchar_t *wide = win_wide(name);
+  if (!wide) {
+    error = errno;
+    isac_rt_free(name);
+    return -error;
+  }
+  DWORD attributes = GetFileAttributesW(wide);
+  error = attributes == INVALID_FILE_ATTRIBUTES ? win_error(GetLastError()) : 0;
+  int result = attributes == INVALID_FILE_ATTRIBUTES ? -1 : 0;
+  isac_rt_free(wide);
+#else
   struct stat info;
   int result = stat(name, &info);
   error = result == 0 ? 0 : errno;
+#endif
   isac_rt_free(name);
   return !result ? 1 : error == ENOENT || error == ENOTDIR ? 0 : -error;
 }
@@ -1005,8 +1113,19 @@ int32_t isac_rt_fs_remove_file(const IsacStr *path) {
   int error = os_cstr(path, &name);
   if (error)
     return error;
+#ifdef _WIN32
+  wchar_t *wide = win_wide(name);
+  if (!wide)
+    error = errno;
+  else {
+    if (_wunlink(wide))
+      error = errno;
+    isac_rt_free(wide);
+  }
+#else
   if (unlink(name))
     error = errno;
+#endif
   isac_rt_free(name);
   return error;
 }
@@ -1015,8 +1134,19 @@ int32_t isac_rt_fs_create_dir(const IsacStr *path) {
   int error = os_cstr(path, &name);
   if (error)
     return error;
+#ifdef _WIN32
+  wchar_t *wide = win_wide(name);
+  if (!wide)
+    error = errno;
+  else {
+    if (_wmkdir(wide))
+      error = errno;
+    isac_rt_free(wide);
+  }
+#else
   if (mkdir(name, 0777))
     error = errno;
+#endif
   isac_rt_free(name);
   return error;
 }
@@ -1037,6 +1167,12 @@ int64_t isac_rt_process_run(const IsacStr *program, const IsacStr *argument, int
     isac_rt_free(arg);
     return -error;
   }
+#ifdef _WIN32
+  int64_t result = win_run(name, arg, has_argument);
+  isac_rt_free(name);
+  isac_rt_free(arg);
+  return result;
+#else
   char *argv[3] = {name, arg, NULL};
   extern char **environ;
   pid_t child;
@@ -1055,8 +1191,25 @@ int64_t isac_rt_process_run(const IsacStr *program, const IsacStr *argument, int
   if (WIFSIGNALED(status))
     return 128 + WTERMSIG(status);
   return -EIO;
+#endif
 }
 int32_t isac_rt_sleep_ns(uint64_t nanos) {
+#ifdef _WIN32
+  if (!nanos)
+    return 0;
+  HANDLE timer = CreateWaitableTimerW(NULL, TRUE, NULL);
+  if (!timer)
+    return win_error(GetLastError());
+  uint64_t ticks = nanos / 100 + (nanos % 100 != 0);
+  LARGE_INTEGER due;
+  due.QuadPart = -(int64_t)ticks;
+  int error = 0;
+  if (!SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE) ||
+      WaitForSingleObject(timer, INFINITE) != WAIT_OBJECT_0)
+    error = win_error(GetLastError());
+  CloseHandle(timer);
+  return error;
+#else
   uint64_t seconds = nanos / UINT64_C(1000000000);
   time_t sec = (time_t)seconds;
   if (sec < 0 || (uint64_t)sec != seconds)
@@ -1067,12 +1220,23 @@ int32_t isac_rt_sleep_ns(uint64_t nanos) {
       return errno;
   }
   return 0;
+#endif
 }
 uint64_t isac_rt_unix_ns(void) {
+#ifdef _WIN32
+  FILETIME value;
+  GetSystemTimePreciseAsFileTime(&value);
+  uint64_t ticks = ((uint64_t)value.dwHighDateTime << 32) | value.dwLowDateTime;
+  const uint64_t epoch = UINT64_C(116444736000000000);
+  if (ticks < epoch || ticks - epoch > UINT64_MAX / 100)
+    isac_rt_panic("wall clock exceeds nanosecond representation");
+  return (ticks - epoch) * 100;
+#else
   struct timespec value;
   if (clock_gettime(CLOCK_REALTIME, &value))
     isac_rt_panic("wall clock unavailable");
   if (value.tv_sec < 0 || (uint64_t)value.tv_sec > (UINT64_MAX - 999999999) / 1000000000)
     isac_rt_panic("wall clock exceeds nanosecond representation");
   return (uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec;
+#endif
 }

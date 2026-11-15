@@ -1,49 +1,63 @@
 #include "isac/backend.hpp"
+#include "isac/platform.hpp"
 #include <llvm/Config/llvm-config.h>
+#include <llvm/ADT/SmallString.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Program.h>
 #include <cerrno>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string_view>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 #ifndef ISAC_CLANG
 #define ISAC_CLANG "clang"
 #endif
 namespace isac {
 namespace {
+std::string bundled(std::string_view relative, std::string_view configured) {
+#ifdef _WIN32
+  auto candidate = platform::executableDirectory().parent_path() / platform::filePath(relative);
+  std::error_code error;
+  if (std::filesystem::exists(candidate, error))
+    return platform::pathText(candidate);
+#else
+  (void)relative;
+#endif
+  return std::string(configured);
+}
+std::string clangPath() {
+#ifdef _WIN32
+  auto candidate = platform::executableDirectory() / "clang.exe";
+  if (std::filesystem::is_regular_file(candidate))
+    return platform::pathText(candidate);
+  if (auto found = llvm::sys::findProgramByName("clang.exe"))
+    return *found;
+#endif
+  return ISAC_CLANG;
+}
 void runClang(std::vector<std::string> arguments) {
-  std::vector<char *> args;
-  for (auto &argument : arguments)
-    args.push_back(argument.data());
-  args.push_back(nullptr);
-  pid_t pid = fork();
-  if (pid < 0)
-    throw std::runtime_error("cannot spawn clang");
-  if (pid == 0) {
-    execv(ISAC_CLANG, args.data());
-    _exit(127);
-  }
-  int status = 0;
-  while (waitpid(pid, &status, 0) < 0) {
-    if (errno != EINTR)
-      throw std::runtime_error("cannot wait for clang");
-  }
-  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-    throw std::runtime_error("C ABI/native compilation with clang failed");
+  arguments.at(0) = clangPath();
+  std::vector<llvm::StringRef> args;
+  for (const auto &argument : arguments)
+    args.push_back(argument);
+  std::string error;
+  bool failed = false;
+  int status =
+      llvm::sys::ExecuteAndWait(arguments[0], args, std::nullopt, {}, 0, 0, &error, &failed);
+  if (failed || status != 0)
+    throw std::runtime_error("C ABI/native compilation with clang failed" +
+                             (error.empty() ? std::string() : ": " + error));
 }
 struct TemporaryDirectory {
   std::filesystem::path path;
   TemporaryDirectory() {
-    auto pattern = (std::filesystem::temp_directory_path() / "isac-abi-XXXXXX").string();
-    std::vector<char> name(pattern.begin(), pattern.end());
-    name.push_back(0);
-    auto *dir = mkdtemp(name.data());
-    if (!dir)
-      throw std::runtime_error("cannot create C ABI temporary directory");
-    path = dir;
+    auto prefix = platform::pathText(std::filesystem::temp_directory_path() / "isac-abi");
+    llvm::SmallString<128> directory;
+    if (auto error = llvm::sys::fs::createUniqueDirectory(prefix, directory))
+      throw std::runtime_error("cannot create temporary directory: " + error.message());
+    path = platform::filePath(directory.str().str());
   }
   ~TemporaryDirectory() {
     std::error_code error;
@@ -53,9 +67,10 @@ struct TemporaryDirectory {
 }
 std::string compileCBridge(const std::string &source, const TargetInfo &target, bool sanitize) {
   TemporaryDirectory temp;
-  auto c = (temp.path / "bridge.c").string(), ll = (temp.path / "bridge.ll").string();
+  auto c = platform::pathText(temp.path / "bridge.c"),
+       ll = platform::pathText(temp.path / "bridge.ll");
   {
-    std::ofstream file(c);
+    std::ofstream file(platform::filePath(c));
     file << source;
     if (!file)
       throw std::runtime_error("cannot write C ABI bridge");
@@ -72,7 +87,7 @@ std::string compileCBridge(const std::string &source, const TargetInfo &target, 
   args.insert(args.end(), {"-Xclang", "-disable-lifetime-markers"});
 #endif
   runClang(std::move(args));
-  std::ifstream file(ll);
+  std::ifstream file(platform::filePath(ll));
   std::string result((std::istreambuf_iterator<char>(file)), {});
   if (!file)
     throw std::runtime_error("cannot read C ABI bridge");
@@ -99,49 +114,50 @@ void compileNative(const std::string &ir, const std::string &output, NativeOptio
   if (!options.target.triple.empty() && options.target.triple != hostTriple())
     throw std::runtime_error(
         "cross-linking requires a target runtime, linker and sysroot; use --emit-obj");
-  std::string pattern = (std::filesystem::temp_directory_path() / "isac-XXXXXX").string();
-  std::vector<char> tmp(pattern.begin(), pattern.end());
-  tmp.push_back(0);
-  char *dir = mkdtemp(tmp.data());
-  if (!dir)
-    throw std::runtime_error("cannot create temporary directory");
-  struct Cleanup {
-    std::filesystem::path path;
-    ~Cleanup() {
-      std::error_code ec;
-      std::filesystem::remove_all(path, ec);
-    }
-  } cleanup{dir};
-  auto ll = (cleanup.path / "program.ll").string();
+  TemporaryDirectory cleanup;
+  auto ll = platform::pathText(cleanup.path / "program.ll");
   {
-    std::ofstream f(ll);
+    std::ofstream f(platform::filePath(ll));
     f << ir;
     if (!f)
       throw std::runtime_error("cannot write temporary LLVM IR");
   }
-  std::string target = std::filesystem::absolute(output).string();
+  auto outputPath = std::filesystem::absolute(platform::filePath(output));
+#ifdef _WIN32
+  if (outputPath.extension().empty())
+    outputPath += ".exe";
+#endif
+  std::string target = platform::pathText(outputPath);
   std::vector<std::string> arguments = {ISAC_CLANG, "-Wno-override-module", "-x", "ir", ll};
   static const char *levels[] = {"-O0", "-O1", "-O2", "-O3", "-Os", "-Oz"};
   arguments.push_back(levels[static_cast<unsigned>(options.optimization)]);
   if (!options.target.triple.empty())
     arguments.push_back("--target=" + options.target.triple);
   if (options.sanitize || options.counters) {
-    arguments.insert(arguments.end(), {"-x", "c", ISAC_RUNTIME_SOURCE});
+    arguments.insert(arguments.end(),
+                     {"-x", "c", bundled("runtime/src/isac_runtime.c", ISAC_RUNTIME_SOURCE)});
     if (std::string_view(ISAC_ALLOCATOR_SOURCE).size())
-      arguments.push_back(ISAC_ALLOCATOR_SOURCE);
+      arguments.push_back(bundled("runtime/src/isac_allocator_libc.c", ISAC_ALLOCATOR_SOURCE));
     if (options.threads) {
-      if (!std::filesystem::exists(ISAC_THREAD_SOURCE))
+      auto threadSource = bundled("runtime/src/isac_threads.c", ISAC_THREAD_SOURCE);
+      if (!std::filesystem::exists(platform::filePath(threadSource)))
         throw std::runtime_error("selected runtime lacks the scoped thread source ABI");
-      arguments.push_back(ISAC_THREAD_SOURCE);
+      arguments.push_back(threadSource);
     }
-    arguments.insert(arguments.end(), {"-I", ISAC_RUNTIME_INCLUDE});
+    arguments.insert(arguments.end(), {"-I", bundled("runtime/include", ISAC_RUNTIME_INCLUDE)});
     if (std::string_view(ISAC_ALLOCATOR_SOURCE).empty())
 
-      arguments.insert(arguments.end(), {"-x", "none", ISAC_RUNTIME_LIBRARY});
+      arguments.insert(arguments.end(),
+                       {"-x", "none", bundled("runtime/libisac_runtime.a", ISAC_RUNTIME_LIBRARY)});
   } else
-    arguments.insert(arguments.end(), {"-x", "none", ISAC_RUNTIME_LIBRARY});
+    arguments.insert(arguments.end(),
+                     {"-x", "none", bundled("runtime/libisac_runtime.a", ISAC_RUNTIME_LIBRARY)});
+#ifdef _WIN32
+  arguments.insert(arguments.end(), {"-lshell32", "-Wl,--stack,16777216"});
+#else
   if (options.threads)
     arguments.push_back("-pthread");
+#endif
   if (!options.linkInputs.empty()) {
     arguments.push_back("-x");
     arguments.push_back("none");
